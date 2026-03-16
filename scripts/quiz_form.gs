@@ -1,46 +1,30 @@
 /**
- * Google Apps Script: Quiz Form Generator (Verbose Logging Edition)
+ * Google Apps Script: Quiz Form Generator
  */
 
-const HARDCODED_CALLBACK = "https://webhook.site/93d40a6e-65b0-4249-ae92-87a756c50df9";
-
 function doPost(e) {
-  console.log("--- START DOPOST ---");
   try {
-    console.log("Raw postData: " + e.postData.contents);
     var data = JSON.parse(e.postData.contents);
-    var action = data.action || "create";
-    console.log("Parsed action: " + action);
-
-    if (action === "close") {
+    if (data.action === "close") {
       return handleClose(data);
     }
     return handleCreate(data);
   } catch (err) {
-    console.error("CRITICAL: doPost failed: " + err.toString());
-    console.error("Stack: " + err.stack);
+    console.error("doPost failed: " + err.toString());
     return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
                          .setMimeType(ContentService.MimeType.JSON);
-  } finally {
-    console.log("--- END DOPOST ---");
   }
 }
 
 function handleCreate(data) {
-  console.log("ENTERING handleCreate");
-
   var formTitle = data.title || "Quiz";
-  console.log("Creating form with title: " + formTitle);
   var form = FormApp.create(formTitle);
   var formId = form.getId();
-  console.log("Form created. ID: " + formId);
 
   form.setIsQuiz(true);
   form.setCollectEmail(true);
 
   var questions = data.questions || [];
-  console.log("Processing " + questions.length + " questions");
-
   for (var i = 0; i < questions.length; i++) {
     var q = questions[i];
     var item = form.addMultipleChoiceItem();
@@ -50,100 +34,87 @@ function handleCreate(data) {
     var choices = [];
     var options = q.options || [];
     for (var j = 0; j < options.length; j++) {
-      var isCorrect = (options[j] === q.correct_answer);
-      choices.push(item.createChoice(options[j], isCorrect));
+      choices.push(item.createChoice(options[j], options[j] === q.correct_answer));
     }
     item.setChoices(choices);
-    console.log("Added question " + (i+1) + ": " + q.question);
   }
 
-  var finalCallback = data.callback_url || HARDCODED_CALLBACK;
-  console.log("Setting callback URL: " + finalCallback);
-
-  PropertiesService.getScriptProperties().setProperty("callback_" + formId, finalCallback);
-  console.log("Property saved for key: callback_" + formId);
-
-  console.log("Attempting to create installable trigger...");
-  try {
-    var trigger = ScriptApp.newTrigger("onFormSubmit")
-      .forForm(form)
-      .onFormSubmit()
-      .create();
-    console.log("Trigger created successfully. Trigger UID: " + trigger.getUniqueId());
-  } catch (tErr) {
-    console.error("TRIGGER CREATION FAILED: " + tErr.toString());
-    throw tErr;
+  if (!data.callback_url) {
+    throw new Error("callback_url is required");
   }
+  PropertiesService.getScriptProperties().setProperty("callback_" + formId, data.callback_url);
 
-  var response = {
-    formUrl: form.getPublishedUrl(),
-    formId: formId,
-    callbackSet: finalCallback
-  };
-  console.log("Returning handleCreate response: " + JSON.stringify(response));
+  ScriptApp.newTrigger("onFormSubmit")
+    .forForm(form)
+    .onFormSubmit()
+    .create();
+
+  console.log("Form created: " + formId + ", callback: " + data.callback_url);
 
   return ContentService
-    .createTextOutput(JSON.stringify(response))
+    .createTextOutput(JSON.stringify({ formUrl: form.getPublishedUrl(), formId: formId }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
 function handleClose(data) {
-  console.log("ENTERING handleClose for ID: " + data.id);
   var formId = data.id;
-  if (formId) {
-    var form = FormApp.openById(formId);
-    form.setAcceptingResponses(false);
-    console.log("Form set to not accepting responses.");
+  if (!formId) {
+    return ContentService.createTextOutput(JSON.stringify({ error: "id required" }))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
 
-    PropertiesService.getScriptProperties().deleteProperty("callback_" + formId);
-    console.log("Property deleted for key: callback_" + formId);
+  var form = FormApp.openById(formId);
+  form.setAcceptingResponses(false);
 
-    var triggers = ScriptApp.getProjectTriggers();
-    console.log("Total project triggers found: " + triggers.length);
-    for (var i = 0; i < triggers.length; i++) {
-      if (triggers[i].getTriggerSourceId() === formId) {
-        ScriptApp.deleteTrigger(triggers[i]);
-        console.log("Deleted trigger for formId: " + formId);
-      }
+  PropertiesService.getScriptProperties().deleteProperty("callback_" + formId);
+
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getTriggerSourceId() === formId) {
+      ScriptApp.deleteTrigger(triggers[i]);
     }
   }
+
   return ContentService.createTextOutput(JSON.stringify({ status: "closed", id: formId }))
                        .setMimeType(ContentService.MimeType.JSON);
 }
 
 function onFormSubmit(e) {
-  console.log("--- START ONFORMSUBMIT TRIGGER ---");
   try {
     var formResponse = e.response;
     var formId = e.source.getId();
-    console.log("Trigger fired from Form ID: " + formId);
 
-    var items = formResponse.getGradableItemResponses();
+    // Calculate score manually — getScore() may not be ready when trigger fires
     var totalScore = 0;
     var maxScore = 0;
+    var itemResponses = formResponse.getItemResponses();
+    for (var i = 0; i < itemResponses.length; i++) {
+      var itemResponse = itemResponses[i];
+      var item = itemResponse.getItem();
+      if (item.getType() !== FormApp.ItemType.MULTIPLE_CHOICE) continue;
 
-    for (var i = 0; i < items.length; i++) {
-      totalScore += items[i].getScore();
-      var item = items[i].getItem();
-      if (item.getType() === FormApp.ItemType.MULTIPLE_CHOICE) {
-        maxScore += item.asMultipleChoiceItem().getPoints();
+      var mcItem = item.asMultipleChoiceItem();
+      maxScore += mcItem.getPoints();
+
+      var correctChoices = mcItem.getChoices().filter(function(c) { return c.isCorrectAnswer(); });
+      var correctAnswer = correctChoices.length > 0 ? correctChoices[0].getValue() : null;
+      if (correctAnswer && itemResponse.getResponse() === correctAnswer) {
+        totalScore += mcItem.getPoints();
       }
     }
-    console.log("Calculated score: " + totalScore + "/" + maxScore);
 
-    var callbackUrl = PropertiesService.getScriptProperties().getProperty("callback_" + formId) || HARDCODED_CALLBACK;
-    console.log("Resolved callback URL: " + callbackUrl);
+    var callbackUrl = PropertiesService.getScriptProperties().getProperty("callback_" + formId);
+    if (!callbackUrl) {
+      throw new Error("No callback URL found for form " + formId);
+    }
 
     var payload = {
       student_email: formResponse.getRespondentEmail(),
       score: totalScore,
       max_score: maxScore,
       form_id: formId,
-      timestamp: formResponse.getTimestamp()
     };
-    console.log("Payload prepared: " + JSON.stringify(payload));
 
-    console.log("Executing UrlFetchApp...");
     var response = UrlFetchApp.fetch(callbackUrl, {
       method: "post",
       contentType: "application/json",
@@ -151,12 +122,15 @@ function onFormSubmit(e) {
       muteHttpExceptions: true
     });
 
-    console.log("HTTP Response Status: " + response.getResponseCode());
-    console.log("HTTP Response Body: " + response.getContentText());
+    console.log("Callback sent: " + response.getResponseCode() + " score=" + totalScore + "/" + maxScore);
+
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var t = 0; t < triggers.length; t++) {
+      if (triggers[t].getTriggerSourceId() === formId) {
+        ScriptApp.deleteTrigger(triggers[t]);
+      }
+    }
   } catch (err) {
-    console.error("onFormSubmit CRITICAL FAILURE: " + err.toString());
-    console.error("Stack: " + err.stack);
-  } finally {
-    console.log("--- END ONFORMSUBMIT TRIGGER ---");
+    console.error("onFormSubmit failed: " + err.toString());
   }
 }
