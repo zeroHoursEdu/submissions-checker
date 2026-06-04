@@ -1,4 +1,23 @@
 services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: submissions-checker-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - ./docker/localstack/init:/etc/localstack/init/ready.d
+    healthcheck:
+      test: ["CMD", "awslocal", "s3", "ls"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   postgres:
     image: postgres:16-alpine
     container_name: submissions-checker-postgres
@@ -25,6 +44,10 @@ services:
       - LOG_LEVEL=INFO
       - DEBUG=true
       - WATCHFILES_FORCE_POLLING=true
+      - S3_ENDPOINT_URL=http://localstack:4566
+      - S3_PUBLIC_BASE_URL=http://localhost:4566/submissions-checker
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
     env_file:
       - .env
     ports:
@@ -42,6 +65,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
+        condition: service_healthy
+      localstack:
         condition: service_healthy
     command: uvicorn submissions_checker.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src
     dns:

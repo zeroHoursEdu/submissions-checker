@@ -44,6 +44,8 @@ class Subject(Base, TimestampMixin):
     github_repo: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Plugin identifier — used exclusively to match/upsert Subject from config.yml; not displayed
     code: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    grid_picture_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    main_picture_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     assignments: Mapped[list[SubjectsAssignment]] = relationship(
         "SubjectsAssignment", back_populates="subject"

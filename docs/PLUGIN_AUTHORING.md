@@ -10,10 +10,13 @@ This guide explains how to create a subject plugin — a directory containing a 
 plugins/
   <subjectCode>/
     config.yml
+    grid.png                 ← optional: subject thumbnail on the subjects grid (400×250px)
+    main.png                 ← optional: subject banner on the subject page (1200×400px)
     assignments/
       <assignmentCode>/
         validate.py          ← optional: checks file structure before testing
         check.py             ← required: runs tests, writes /output/result.json
+        assignment.pdf       ← optional: downloadable content file for students
         variants/
           "1"/
             check.py         ← optional: override check script for variant 1
@@ -36,6 +39,13 @@ subjectCode: mathMethods
 name: "Mathematical Methods"
 description: "Linear algebra and numerical methods for software engineers."
 
+# Subject artwork (optional). Filenames are relative to this plugin's root directory.
+# gridPicture: recommended 400×250px, shown on the subjects grid card.
+# mainPicture: recommended 1200×400px, shown at the top of the subject page.
+# Accepted formats: JPEG, PNG, WebP.
+gridPicture: grid.png
+mainPicture: main.png
+
 assignments:
   homework1:                     # assignment code — must be unique within the subject
     title: "Homework 1 — Matrix Operations"
@@ -47,6 +57,12 @@ assignments:
     late_policy: block          # block | allow
     max_submissions: 3          # optional; omit for unlimited
     variants_required: false    # if true, student must have a variant assigned before submission
+    # Assignment content files (optional). Students see download links on the assignment page.
+    # Filenames are relative to assignments/<assignmentCode>/ inside the plugin directory.
+    # Any file type is accepted (PDF, DOCX, ZIP, …).
+    contentFiles:
+      - filename: assignment.pdf
+        displayName: "Lab Assignment (PDF)"
     sandbox:
       image: python:3.12-slim
       tool: python3

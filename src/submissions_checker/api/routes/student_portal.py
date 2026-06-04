@@ -17,6 +17,7 @@ from submissions_checker.api.dependencies import DBSession, StudentId, StudentUs
 from submissions_checker.api.schemas.student_portal import (
     AssignmentDetail,
     AssignmentRow,
+    ContentFile,
     SubjectCard,
 )
 from submissions_checker.db.models import (
@@ -91,6 +92,7 @@ async def subjects_grid(
             description=s.description,
             total_assignments=totals.get(s.id, 0),
             done_assignments=done.get(s.id, 0),
+            grid_picture_url=s.grid_picture_url,
         )
         for s in subjects
     ]
@@ -241,6 +243,9 @@ async def assignment_detail(
     if latest_sub and latest_sub.test_results:
         check_reason = latest_sub.test_results.get("check_reason")
 
+    raw_content_files: list[dict] = sa.subjects_assignment.content_files or []  # type: ignore[type-arg]
+    content_files = [ContentFile(**cf) for cf in raw_content_files]
+
     detail = AssignmentDetail(
         student_assignment_id=sa.id,
         title=sa.subjects_assignment.title,
@@ -257,6 +262,7 @@ async def assignment_detail(
         quiz_attempts_used=quiz_attempts_used,
         quiz_max_attempts=quiz_max_attempts,
         check_reason=check_reason,
+        content_files=content_files,
     )
 
     student = await db.get(Student, student_id)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from sqlalchemy import select
@@ -18,13 +18,18 @@ from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import SubjectsStudents
 
+if TYPE_CHECKING:
+    from submissions_checker.services.storage import StorageService
+
 logger = get_logger(__name__)
 
 
 class PluginLoader:
     """Scans plugins_dir for config.yml files and upserts subjects/assignments into DB."""
 
-    async def load_all(self, plugins_dir: Path, db: AsyncSession) -> None:
+    async def load_all(
+        self, plugins_dir: Path, db: AsyncSession, storage: StorageService | None = None
+    ) -> None:
         if not plugins_dir.exists():
             logger.info("plugins_dir_not_found", path=str(plugins_dir))
             return
@@ -34,11 +39,17 @@ class PluginLoader:
             if not plugin_dir.is_dir() or not config_file.exists():
                 continue
             try:
-                await self._load_plugin(plugin_dir, config_file, db)
+                await self._load_plugin(plugin_dir, config_file, db, storage)
             except Exception as exc:
                 logger.error("plugin_load_error", plugin=plugin_dir.name, error=str(exc))
 
-    async def _load_plugin(self, plugin_dir: Path, config_file: Path, db: AsyncSession) -> None:
+    async def _load_plugin(
+        self,
+        plugin_dir: Path,
+        config_file: Path,
+        db: AsyncSession,
+        storage: StorageService | None,
+    ) -> None:
         raw = config_file.read_bytes()
         content_hash = hashlib.sha256(raw).hexdigest()
         config: dict[str, Any] = yaml.safe_load(raw.decode("utf-8"))
@@ -47,6 +58,10 @@ class PluginLoader:
 
         # Find or create subject
         subject = await self._upsert_subject(db, subject_code, config)
+
+        # Upload subject images if storage is available
+        if storage is not None:
+            await self._upload_subject_images(plugin_dir, subject_code, config, subject, storage)
 
         # Skip if this exact config version already stored
         existing = await db.execute(
@@ -71,9 +86,82 @@ class PluginLoader:
         # Upsert assignments
         assignments_config: dict[str, Any] = config.get("assignments", {})
         for assignment_code, assignment_cfg in assignments_config.items():
-            await self._upsert_assignment(db, subject, assignment_code, assignment_cfg)
+            sa = await self._upsert_assignment(db, subject, assignment_code, assignment_cfg)
+            if storage is not None and sa is not None:
+                await self._upload_assignment_files(
+                    plugin_dir, subject_code, assignment_code, assignment_cfg, sa, storage, db
+                )
 
         await db.flush()
+
+    async def _upload_subject_images(
+        self,
+        plugin_dir: Path,
+        subject_code: str,
+        config: dict[str, Any],
+        subject: Subject,
+        storage: StorageService,
+    ) -> None:
+        for field, attr in (("gridPicture", "grid_picture_url"), ("mainPicture", "main_picture_url")):
+            filename: str | None = config.get(field)
+            if not filename:
+                continue
+            local_path = plugin_dir / filename
+            if not local_path.exists():
+                logger.warning("subject_image_missing", subject_code=subject_code, field=field, path=str(local_path))
+                continue
+            key = f"subjects/{subject_code}/images/{filename}"
+            try:
+                url = await storage.upload_file(local_path, key)
+                setattr(subject, attr, url)
+            except Exception as exc:
+                logger.error("subject_image_upload_failed", subject_code=subject_code, field=field, error=str(exc))
+
+    async def _upload_assignment_files(
+        self,
+        plugin_dir: Path,
+        subject_code: str,
+        assignment_code: str,
+        cfg: dict[str, Any],
+        sa: SubjectsAssignment,
+        storage: StorageService,
+        db: AsyncSession,
+    ) -> None:
+        raw_files: list[dict[str, Any]] = cfg.get("contentFiles", [])
+        if not raw_files:
+            return
+
+        uploaded: list[dict[str, str]] = []
+        for entry in raw_files:
+            filename: str | None = entry.get("filename")
+            display_name: str = entry.get("displayName", filename or "")
+            if not filename:
+                continue
+            local_path = plugin_dir / "assignments" / assignment_code / filename
+            if not local_path.exists():
+                logger.warning(
+                    "content_file_missing",
+                    subject_code=subject_code,
+                    assignment_code=assignment_code,
+                    filename=filename,
+                    path=str(local_path),
+                )
+                continue
+            key = f"subjects/{subject_code}/assignments/{assignment_code}/{filename}"
+            try:
+                url = await storage.upload_file(local_path, key)
+                uploaded.append({"url": url, "display_name": display_name, "filename": filename})
+            except Exception as exc:
+                logger.error(
+                    "content_file_upload_failed",
+                    subject_code=subject_code,
+                    assignment_code=assignment_code,
+                    filename=filename,
+                    error=str(exc),
+                )
+
+        if uploaded:
+            sa.content_files = uploaded
 
     async def _upsert_subject(
         self, db: AsyncSession, subject_code: str, config: dict[str, Any]
@@ -102,7 +190,7 @@ class PluginLoader:
         subject: Subject,
         assignment_code: str,
         cfg: dict[str, Any],
-    ) -> None:
+    ) -> SubjectsAssignment | None:
         result = await db.execute(
             select(SubjectsAssignment).where(
                 SubjectsAssignment.subject_id == subject.id,
@@ -157,6 +245,8 @@ class PluginLoader:
             sa.max_grade = cfg.get("max_grade", 100)
             sa.config = assignment_config
             logger.info("assignment_updated", subject_code=subject.code, assignment_code=assignment_code)
+
+        return sa
 
     async def _next_version(self, db: AsyncSession, subject_id: int) -> int:
         from sqlalchemy import func

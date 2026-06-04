@@ -18,12 +18,19 @@ class StudentListItem(BaseModel):
     group_name: str
 
 
+class ContentFile(BaseModel):
+    url: str
+    display_name: str
+    filename: str
+
+
 class SubjectCard(BaseModel):
     id: int
     name: str
     description: str | None
     total_assignments: int
     done_assignments: int
+    grid_picture_url: str | None = None
 
 
 class AssignmentRow(BaseModel):
@@ -52,3 +59,4 @@ class AssignmentDetail(BaseModel):
     quiz_attempts_used: int = 0
     quiz_max_attempts: int | None = None
     check_reason: str | None = None
+    content_files: list[ContentFile] = []

@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     # Subject plugins directory (gitignored; each subdirectory is a plugin with config.yml)
     plugins_dir: str = "plugins"
 
+    # S3-compatible object storage (images and assignment content files)
+    s3_bucket_name: str = "submissions-checker"
+    s3_endpoint_url: str | None = None           # set to http://localstack:4566 in dev
+    s3_public_base_url: str | None = None        # base URL for constructing public file URLs
+    aws_access_key_id: str = "test"
+    aws_secret_access_key: str = "test"
+    aws_region: str = "us-east-1"
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""

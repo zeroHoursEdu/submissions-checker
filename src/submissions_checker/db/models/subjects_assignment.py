@@ -45,6 +45,8 @@ class SubjectsAssignment(Base, TimestampMixin):
     min_grade: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_grade: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    # Uploaded content files (PDFs, docs) for this assignment — [{url, display_name, filename}]
+    content_files: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
 
     subject: Mapped[Subject] = relationship("Subject", back_populates="assignments")
     students_assignments: Mapped[list[StudentAssignment]] = relationship(
