@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}My Summary{% endblock %}
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">Portal</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Summary</span>
+{% endblock %}
+{% block content %}
+<div class="mb-7">
+  <h1 class="text-2xl font-bold text-slate-900 mb-1">My Progress Summary</h1>
+  <p class="text-slate-500 text-sm">{{ student.full_name }}</p>
+</div>
+
+<!-- Stats row -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-7">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+    <div class="text-3xl font-bold text-indigo-600">{{ graded_count }}</div>
+    <div class="text-xs text-slate-500 mt-0.5">Graded</div>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+    <div class="text-3xl font-bold text-slate-700">{{ total_assignments }}</div>
+    <div class="text-xs text-slate-500 mt-0.5">Total assignments</div>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+    {% if avg_grade is not none %}
+    <div class="text-3xl font-bold text-green-600">{{ avg_grade }}</div>
+    {% else %}
+    <div class="text-3xl font-bold text-slate-300">—</div>
+    {% endif %}
+    <div class="text-xs text-slate-500 mt-0.5">Avg grade</div>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
+    <div class="text-3xl font-bold {% if overdue %}text-red-500{% else %}text-slate-300{% endif %}">{{ overdue | length }}</div>
+    <div class="text-xs text-slate-500 mt-0.5">Overdue</div>
+  </div>
+</div>
+
+<!-- Upcoming deadlines -->
+{% if upcoming_deadlines %}
+<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+  <h2 class="font-semibold text-amber-800 text-sm mb-2 flex items-center gap-2">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+    </svg>
+    Due within 7 days
+  </h2>
+  <ul class="space-y-1">
+    {% for r in upcoming_deadlines %}
+    <li class="text-sm text-amber-700 flex items-center gap-2">
+      <span class="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+      <span class="font-medium">{{ r.SubjectsAssignment.title }}</span>
+      <span class="text-amber-500">— {{ r.SubjectsAssignment.deadline.strftime("%b %d") }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- All assignments table -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+  <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+    <h2 class="font-semibold text-slate-900">All Assignments</h2>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+          <th class="px-5 py-3 text-left font-medium">Subject</th>
+          <th class="px-5 py-3 text-left font-medium">Assignment</th>
+          <th class="px-5 py-3 text-left font-medium">Deadline</th>
+          <th class="px-5 py-3 text-left font-medium">Status</th>
+          <th class="px-5 py-3 text-left font-medium">Grade</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for row in summary_rows %}
+        <tr class="hover:bg-slate-50 transition-colors {% if row.is_overdue %}bg-red-50{% endif %}">
+          <td class="px-5 py-3 text-slate-600">
+            {% if row.subject %}
+              <a href="/portal/subjects/{{ row.subject.id }}" class="hover:text-indigo-600">{{ row.subject.name }}</a>
+            {% endif %}
+          </td>
+          <td class="px-5 py-3 font-medium text-slate-900">
+            {% if row.student_assignment_id %}
+              <a href="/portal/subjects/{{ row.subject.id if row.subject else 0 }}/assignments/{{ row.student_assignment_id }}"
+                 class="hover:text-indigo-600">{{ row.assignment.title }}</a>
+            {% else %}
+              {{ row.assignment.title }}
+            {% endif %}
+          </td>
+          <td class="px-5 py-3 text-slate-500">
+            {% if row.deadline %}
+              <span class="{% if row.is_overdue %}text-red-600 font-medium{% endif %}">
+                {{ row.deadline.strftime("%b %d, %Y") }}
+              </span>
+              {% if row.is_overdue %}<span class="ml-1 text-red-500 text-xs">Overdue</span>{% endif %}
+            {% else %}
+              <span class="text-slate-300">—</span>
+            {% endif %}
+          </td>
+          <td class="px-5 py-3">
+            {% if row.submission_status == "COMPLETED" %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Completed</span>
+            {% elif row.submission_status == "FAILED" %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Failed</span>
+            {% elif row.submission_status == "QUIZ_SENT" %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Quiz pending</span>
+            {% elif row.submission_status == "WAITING_FOR_TEACHER_REVIEW" %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">In review</span>
+            {% elif row.submission_status %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{{ row.submission_status }}</span>
+            {% else %}
+              <span class="text-slate-300 text-xs">Not submitted</span>
+            {% endif %}
+          </td>
+          <td class="px-5 py-3">
+            {% if row.grade is not none %}
+              <span class="font-semibold text-slate-900">{{ row.grade }}</span>
+              <span class="text-slate-400">/{{ row.assignment.max_grade }}</span>
+            {% else %}
+              <span class="text-slate-300">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

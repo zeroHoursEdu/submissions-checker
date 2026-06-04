@@ -1,0 +1,721 @@
+{% extends "base.html" %}
+
+{% block title %}Quiz Editor — {{ assignment.title }}{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">Dashboard</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/subjects/{{ subject_id }}" class="text-indigo-200 hover:text-white text-sm transition truncate max-w-[100px]">{{ assignment.subject.name }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}" class="text-indigo-200 hover:text-white text-sm transition truncate max-w-[120px]">{{ assignment.title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Quiz</span>
+{% endblock %}
+
+{% block content %}
+
+<!-- Header -->
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+  <div>
+    <h1 class="text-2xl font-bold text-slate-900">Quiz Editor</h1>
+    <p class="text-sm text-slate-500 mt-0.5">{{ assignment.title }}</p>
+  </div>
+  {% if template %}
+  <div class="flex gap-2">
+    <a href="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/export"
+       class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-300 hover:border-slate-400 px-3 py-1.5 rounded-lg transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      </svg>
+      Export JSON
+    </a>
+    <form id="import-form" method="POST" enctype="multipart/form-data"
+          action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/import">
+      <label class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 border border-slate-300 hover:border-slate-400 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+        </svg>
+        Import JSON
+        <input type="file" name="file" accept=".json" class="hidden" onchange="document.getElementById('import-form').submit()">
+      </label>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Quiz Config Card -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-5">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="font-semibold text-slate-900">Quiz Settings</h2>
+    {% if template %}
+    <span class="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">v{{ template.version }}</span>
+    {% endif %}
+  </div>
+
+  <form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/config">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Questions per quiz</label>
+        <input type="number" name="total_questions" min="1"
+               value="{{ template.config.get('total_questions', '') if template else '' }}"
+               placeholder="All"
+               class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <p class="text-xs text-slate-400 mt-1">Blank = all questions</p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Time limit (minutes)</label>
+        <input type="number" name="time_limit_minutes" min="1"
+               value="{{ template.config.get('time_limit_minutes', '') if template else '' }}"
+               placeholder="No limit"
+               class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <p class="text-xs text-slate-400 mt-1">Blank = no time limit</p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Pass threshold (0–1)</label>
+        <input type="number" name="pass_threshold_pct" min="0" max="1" step="0.05"
+               value="{{ template.config.get('pass_threshold_pct', 0.6) if template else 0.6 }}"
+               class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <p class="text-xs text-slate-400 mt-1">e.g. 0.6 = 60%</p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Max quiz attempts</label>
+        <input type="number" name="max_quiz_attempts" min="1"
+               value="{{ template.config.get('max_quiz_attempts', '') if template else '' }}"
+               placeholder="Unlimited"
+               class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <p class="text-xs text-slate-400 mt-1">Blank = unlimited. Once used up without passing, the assignment is marked as not passed.</p>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-5 mb-5">
+      <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+        <input type="checkbox" name="shuffle_questions" class="rounded"
+               {% if not template or template.config.get('shuffle_questions', True) %}checked{% endif %}>
+        Shuffle question order
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+        <input type="checkbox" name="shuffle_options" class="rounded"
+               {% if not template or template.config.get('shuffle_options', True) %}checked{% endif %}>
+        Shuffle answer options
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+        <input type="checkbox" name="show_correct_answers_after" class="rounded"
+               {% if template and template.config.get('show_correct_answers_after', False) %}checked{% endif %}>
+        Show correct answers after submission
+      </label>
+    </div>
+    <button type="submit"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+      {% if template %}Update Settings{% else %}Create Quiz{% endif %}
+    </button>
+  </form>
+</div>
+
+{% if template %}
+
+<!-- Anti-Cheat Settings Card -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-5">
+  <h2 class="font-semibold text-slate-900 mb-1 flex items-center gap-2">
+    <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+    </svg>
+    Anti-Cheat Settings
+  </h2>
+  <p class="text-xs text-slate-400 mb-4">Configure behavioral monitoring and automatic penalties for the quiz. Students are warned on each violation.</p>
+
+  <form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/config"
+        onsubmit="buildAntiCheatJson(this)">
+    <!-- Keep all existing config fields as hidden to not overwrite them when only anti-cheat is saved -->
+    <input type="hidden" name="total_questions" value="{{ template.config.get('total_questions', '') }}">
+    <input type="hidden" name="time_limit_minutes" value="{{ template.config.get('time_limit_minutes', '') }}">
+    <input type="hidden" name="max_quiz_attempts" value="{{ template.config.get('max_quiz_attempts', '') }}">
+    <input type="hidden" name="pass_threshold_pct" value="{{ template.config.get('pass_threshold_pct', 0.6) }}">
+    <input type="hidden" name="shuffle_questions" value="{{ 'on' if template.config.get('shuffle_questions', True) else '' }}">
+    <input type="hidden" name="shuffle_options" value="{{ 'on' if template.config.get('shuffle_options', True) else '' }}">
+    <input type="hidden" name="show_correct_answers_after" value="{{ 'on' if template.config.get('show_correct_answers_after', False) else '' }}">
+    <input type="hidden" name="anti_cheat" id="ac-json-output">
+
+    <!-- Protections -->
+    {% set ac = template.config.get('anti_cheat', {}) %}
+    <div class="flex flex-wrap gap-5 mb-5">
+      <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+        <input type="checkbox" id="ac-text-protection" class="rounded" {% if ac.get('text_protection') %}checked{% endif %}>
+        Disable text selection & copy
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+        <input type="checkbox" id="ac-disable-rc" class="rounded" {% if ac.get('disable_right_click') %}checked{% endif %}>
+        Disable right-click context menu
+      </label>
+      <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+        <input type="checkbox" id="ac-fullscreen" class="rounded" {% if ac.get('require_fullscreen') %}checked{% endif %}>
+        Require fullscreen
+        <span class="text-xs text-slate-400">(Fullscreen API — not supported on all browsers/mobile)</span>
+      </label>
+    </div>
+
+    <!-- Presets -->
+    <div class="flex gap-2 mb-4">
+      <span class="text-xs text-slate-500 self-center mr-1">Quick presets:</span>
+      <button type="button" onclick="applyPreset('none')"
+              class="text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 px-2.5 py-1 rounded-lg transition-colors">None</button>
+      <button type="button" onclick="applyPreset('soft')"
+              class="text-xs border border-amber-300 text-amber-700 hover:bg-amber-50 px-2.5 py-1 rounded-lg transition-colors">Soft monitoring</button>
+      <button type="button" onclick="applyPreset('strict')"
+              class="text-xs border border-red-300 text-red-700 hover:bg-red-50 px-2.5 py-1 rounded-lg transition-colors">Strict</button>
+    </div>
+
+    <!-- Rules table -->
+    <div class="border border-slate-200 rounded-xl overflow-hidden mb-4">
+      <div class="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between">
+        <span class="text-xs font-medium text-slate-600 uppercase tracking-wide">Rules</span>
+        <button type="button" onclick="addRuleRow()"
+                class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add rule</button>
+      </div>
+      <table class="w-full text-sm" id="rules-table">
+        <thead>
+          <tr class="border-b border-slate-100">
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">Event</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium w-20">Threshold</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">Action</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium w-28">Penalty (s)</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">Message shown to student</th>
+            <th class="px-2 py-2 w-8"></th>
+          </tr>
+        </thead>
+        <tbody id="rules-body">
+          {% for rule in ac.get('rules', []) %}
+          <tr class="border-b border-slate-50 rule-row">
+            <td class="px-3 py-2">
+              <select class="rule-event border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400">
+                <option value="tab_switch" {% if rule.event == 'tab_switch' %}selected{% endif %}>Tab switch</option>
+                <option value="window_blur" {% if rule.event == 'window_blur' %}selected{% endif %}>Window blur</option>
+                <option value="resize" {% if rule.event == 'resize' %}selected{% endif %}>Window resize</option>
+                <option value="copy_attempt" {% if rule.event == 'copy_attempt' %}selected{% endif %}>Copy attempt</option>
+                <option value="keyboard_shortcut" {% if rule.event == 'keyboard_shortcut' %}selected{% endif %}>Keyboard shortcut</option>
+                <option value="right_click" {% if rule.event == 'right_click' %}selected{% endif %}>Right-click</option>
+                <option value="fullscreen_exit" {% if rule.event == 'fullscreen_exit' %}selected{% endif %}>Fullscreen exit</option>
+              </select>
+            </td>
+            <td class="px-3 py-2">
+              <input type="number" class="rule-threshold border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                     min="1" value="{{ rule.threshold }}">
+            </td>
+            <td class="px-3 py-2">
+              <select class="rule-action border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                      onchange="togglePenalty(this)">
+                <option value="fail" {% if rule.action.type == 'fail' %}selected{% endif %}>Auto-fail</option>
+                <option value="warn" {% if rule.action.type == 'warn' %}selected{% endif %}>Warn student</option>
+                <option value="reduce_time" {% if rule.action.type == 'reduce_time' %}selected{% endif %}>Reduce time</option>
+                <option value="flag" {% if rule.action.type == 'flag' %}selected{% endif %}>Flag (silent)</option>
+              </select>
+            </td>
+            <td class="px-3 py-2">
+              <input type="number" class="rule-penalty border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                     min="0" value="{{ rule.action.get('penalty_seconds', 60) }}"
+                     {% if rule.action.type != 'reduce_time' %}disabled style="opacity:0.3"{% endif %}>
+            </td>
+            <td class="px-3 py-2">
+              <input type="text" class="rule-message border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                     placeholder="e.g. Tab switched {count} times."
+                     value="{{ rule.action.get('message', '') }}">
+            </td>
+            <td class="px-2 py-2 text-center">
+              <button type="button" onclick="this.closest('tr').remove()"
+                      class="text-red-400 hover:text-red-600 text-xs font-bold">✕</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if not ac.get('rules') %}
+      <p id="no-rules-msg" class="text-center py-4 text-xs text-slate-400">No rules yet. Click "+ Add rule" to add one.</p>
+      {% endif %}
+    </div>
+
+    <p class="text-xs text-slate-400 mb-4">
+      Message templates: use <code class="bg-slate-100 px-1 rounded">{count}</code>,
+      <code class="bg-slate-100 px-1 rounded">{threshold}</code>,
+      <code class="bg-slate-100 px-1 rounded">{penalty_seconds}</code>,
+      <code class="bg-slate-100 px-1 rounded">{fail_threshold}</code> for dynamic values.
+    </p>
+
+    <button type="submit"
+            class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+      Save Anti-Cheat Settings
+    </button>
+  </form>
+</div>
+
+<!-- Questions List -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-5">
+  <div class="px-5 py-4 border-b border-slate-100">
+    <h2 class="font-semibold text-slate-900">
+      Questions
+      <span class="ml-1.5 text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{{ questions|length }}</span>
+    </h2>
+  </div>
+
+  {% if questions %}
+  <div class="divide-y divide-slate-100">
+    {% for q in questions %}
+    <div class="p-4" id="q-row-{{ q.id }}">
+      <!-- Display row -->
+      <div class="flex items-start gap-3" id="q-display-{{ q.id }}">
+        <div class="mt-0.5 shrink-0">
+          {% if q.type.value == "SINGLE_CHOICE" %}
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Single</span>
+          {% elif q.type.value == "MULTIPLE_CHOICE" %}
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">Multi</span>
+          {% elif q.type.value == "ORDERING" %}
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Order</span>
+          {% elif q.type.value == "TRUE_FALSE" %}
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">T/F</span>
+          {% endif %}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm text-slate-800 font-medium">{{ q.text }}</p>
+          <div class="flex gap-3 mt-1 text-xs text-slate-400">
+            <span>{{ q.points }} pt{% if q.points != 1 %}s{% endif %}</span>
+            {% if q.is_required %}<span class="text-amber-600 font-medium">Required</span>{% endif %}
+          </div>
+          <!-- Config preview -->
+          {% if q.type.value in ["SINGLE_CHOICE", "MULTIPLE_CHOICE"] %}
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            {% for opt in q.config.get("options", []) %}
+            {% set loop_i = loop.index0 %}
+            <span class="text-xs px-2 py-0.5 rounded
+              {% if q.type.value == "SINGLE_CHOICE" and q.config.get('correct') == loop_i %}bg-green-100 text-green-700 font-medium
+              {% elif q.type.value == "MULTIPLE_CHOICE" and loop_i in q.config.get('correct', []) %}bg-green-100 text-green-700 font-medium
+              {% else %}bg-slate-100 text-slate-600{% endif %}">
+              {{ opt }}{% if (q.type.value == "SINGLE_CHOICE" and q.config.get('correct') == loop_i) or (q.type.value == "MULTIPLE_CHOICE" and loop_i in q.config.get('correct', [])) %} ✓{% endif %}
+            </span>
+            {% endfor %}
+          </div>
+          {% elif q.type.value == "ORDERING" %}
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            {% for item in q.config.get("items", []) %}
+            <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">{{ loop.index }}. {{ item }}</span>
+            {% endfor %}
+          </div>
+          {% elif q.type.value == "TRUE_FALSE" %}
+          <p class="mt-1 text-xs text-slate-500">Correct: <strong>{{ "True" if q.config.get("correct") else "False" }}</strong></p>
+          {% endif %}
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <button type="button" onclick="toggleEdit({{ q.id }})"
+                  class="text-xs text-indigo-600 hover:text-indigo-800 font-medium border border-indigo-200 hover:border-indigo-400 px-2.5 py-1 rounded-lg transition-colors">
+            Edit
+          </button>
+          <form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/questions/{{ q.id }}/delete"
+                onsubmit="return confirm('Delete this question?')">
+            <button type="submit" class="text-xs text-red-600 hover:text-red-800 font-medium border border-red-200 hover:border-red-400 px-2.5 py-1 rounded-lg transition-colors">
+              Delete
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Edit form (hidden by default) -->
+      <div id="q-edit-{{ q.id }}" class="hidden mt-4 pt-4 border-t border-slate-100">
+        <form method="POST"
+              action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/questions/{{ q.id }}/update"
+              onsubmit="return buildEditConfig(this, {{ q.id }})">
+          <input type="hidden" name="config" class="config-field">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-medium text-slate-600 mb-1">Type</label>
+              <select name="type" id="edit-type-{{ q.id }}" onchange="onEditTypeChange({{ q.id }})"
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="SINGLE_CHOICE" {% if q.type.value == "SINGLE_CHOICE" %}selected{% endif %}>Single Choice</option>
+                <option value="MULTIPLE_CHOICE" {% if q.type.value == "MULTIPLE_CHOICE" %}selected{% endif %}>Multiple Choice</option>
+                <option value="ORDERING" {% if q.type.value == "ORDERING" %}selected{% endif %}>Ordering</option>
+                <option value="TRUE_FALSE" {% if q.type.value == "TRUE_FALSE" %}selected{% endif %}>True / False</option>
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-xs font-medium text-slate-600 mb-1">Question text</label>
+              <textarea name="text" rows="2" required
+                        class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">{{ q.text }}</textarea>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Points</label>
+              <input type="number" name="points" value="{{ q.points }}" min="0"
+                     class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Sort order</label>
+              <input type="number" name="sort_order" value="{{ q.sort_order }}" min="0"
+                     class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div class="sm:col-span-2">
+              <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+                <input type="checkbox" name="is_required" class="rounded" {% if q.is_required %}checked{% endif %}>
+                Always include (required)
+              </label>
+            </div>
+          </div>
+
+          <!-- Config editor: JSON textarea for reliability -->
+          <div class="mb-4">
+            <label class="block text-xs font-medium text-slate-600 mb-1">
+              Answer config (JSON)
+              <span class="text-slate-400 font-normal ml-1" id="edit-hint-{{ q.id }}"></span>
+            </label>
+            <textarea id="edit-config-json-{{ q.id }}" rows="4"
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">{{ q.config | tojson(indent=2) }}</textarea>
+          </div>
+
+          <div class="flex gap-2">
+            <button type="submit"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors">
+              Save
+            </button>
+            <button type="button" onclick="toggleEdit({{ q.id }})"
+                    class="text-sm text-slate-600 hover:text-slate-900 border border-slate-300 px-3 py-1.5 rounded-lg transition-colors">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="py-12 text-center text-slate-400 text-sm">No questions yet. Add your first question below.</div>
+  {% endif %}
+</div>
+
+<!-- Add Question -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+  <details>
+    <summary class="px-5 py-4 cursor-pointer font-semibold text-slate-900 hover:bg-slate-50 transition-colors list-none flex items-center gap-2">
+      <svg class="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+      </svg>
+      Add Question
+    </summary>
+    <div class="p-5 border-t border-slate-100">
+      <form method="POST"
+            action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/questions"
+            onsubmit="return buildAddConfig(this)">
+        <input type="hidden" name="config" class="config-field">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-medium text-slate-600 mb-1">Type</label>
+            <select name="type" id="add-type-select" onchange="onAddTypeChange()"
+                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="SINGLE_CHOICE">Single Choice</option>
+              <option value="MULTIPLE_CHOICE">Multiple Choice</option>
+              <option value="ORDERING">Ordering</option>
+              <option value="TRUE_FALSE">True / False</option>
+              <option value="SHORT_ANSWER">Short Answer (manual grading)</option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-medium text-slate-600 mb-1">Question text</label>
+            <textarea name="text" rows="2" required
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Points</label>
+            <input type="number" name="points" value="1" min="0"
+                   class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Sort order</label>
+            <input type="number" name="sort_order" value="{{ questions|length }}" min="0"
+                   class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div class="sm:col-span-2">
+            <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+              <input type="checkbox" name="is_required" class="rounded">
+              Always include (required)
+            </label>
+          </div>
+        </div>
+
+        <!-- Single Choice -->
+        <div id="add-sc" class="mb-4">
+          <label class="block text-xs font-medium text-slate-600 mb-2">Options — select the correct one</label>
+          <div id="add-sc-list" class="space-y-2 mb-2">
+            <div class="flex gap-2 items-center">
+              <input type="radio" name="add_sc_correct" value="0" checked class="shrink-0">
+              <input type="text" placeholder="Option A" class="sc-opt flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" onclick="rmOpt('add-sc-list','add_sc_correct')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+            </div>
+            <div class="flex gap-2 items-center">
+              <input type="radio" name="add_sc_correct" value="1" class="shrink-0">
+              <input type="text" placeholder="Option B" class="sc-opt flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" onclick="rmOpt('add-sc-list','add_sc_correct')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+            </div>
+          </div>
+          <button type="button" onclick="addOpt('add-sc-list','add_sc_correct','sc-opt')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add option</button>
+        </div>
+
+        <!-- Multiple Choice -->
+        <div id="add-mc" class="mb-4 hidden">
+          <label class="block text-xs font-medium text-slate-600 mb-2">Options — check all correct answers</label>
+          <div id="add-mc-list" class="space-y-2 mb-2">
+            <div class="flex gap-2 items-center">
+              <input type="checkbox" name="add_mc_correct" value="0" class="shrink-0">
+              <input type="text" placeholder="Option A" class="mc-opt flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" onclick="rmOpt('add-mc-list','add_mc_correct')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+            </div>
+            <div class="flex gap-2 items-center">
+              <input type="checkbox" name="add_mc_correct" value="1" class="shrink-0">
+              <input type="text" placeholder="Option B" class="mc-opt flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" onclick="rmOpt('add-mc-list','add_mc_correct')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+            </div>
+          </div>
+          <button type="button" onclick="addOpt('add-mc-list','add_mc_correct','mc-opt')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add option</button>
+        </div>
+
+        <!-- Ordering -->
+        <div id="add-ord" class="mb-4 hidden">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Items in correct order</label>
+          <p class="text-xs text-slate-400 mb-2">Students see them shuffled and must reorder correctly.</p>
+          <div id="add-ord-list" class="space-y-2 mb-2">
+            <div class="flex gap-2 items-center">
+              <span class="text-xs text-slate-400 w-5 text-center shrink-0">1</span>
+              <input type="text" placeholder="First item" class="ord-item flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" onclick="rmOrd('add-ord-list')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+            </div>
+            <div class="flex gap-2 items-center">
+              <span class="text-xs text-slate-400 w-5 text-center shrink-0">2</span>
+              <input type="text" placeholder="Second item" class="ord-item flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" onclick="rmOrd('add-ord-list')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
+            </div>
+          </div>
+          <button type="button" onclick="addOrd('add-ord-list')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add item</button>
+        </div>
+
+        <!-- True/False -->
+        <div id="add-tf" class="mb-4 hidden">
+          <label class="block text-xs font-medium text-slate-600 mb-2">Correct answer</label>
+          <div class="flex gap-4">
+            <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+              <input type="radio" name="add_tf_correct" value="true" checked> True
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
+              <input type="radio" name="add_tf_correct" value="false"> False
+            </label>
+          </div>
+        </div>
+
+        <button type="submit"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+          Add Question
+        </button>
+      </form>
+    </div>
+  </details>
+</div>
+
+{% else %}
+<div class="text-center py-12 bg-white rounded-xl border border-slate-200 shadow-sm">
+  <div class="text-4xl mb-3">📝</div>
+  <p class="text-slate-600 font-medium">Configure quiz settings first to start adding questions.</p>
+</div>
+{% endif %}
+
+<script>
+// ─── Type switching (add form) ────────────────────────────────────
+function onAddTypeChange() {
+  const t = document.getElementById('add-type-select').value;
+  ['add-sc','add-mc','add-ord','add-tf'].forEach(id => {
+    document.getElementById(id).classList.add('hidden');
+  });
+  const map = {SINGLE_CHOICE:'add-sc',MULTIPLE_CHOICE:'add-mc',ORDERING:'add-ord',TRUE_FALSE:'add-tf'};
+  const el = document.getElementById(map[t]);
+  if (el) el.classList.remove('hidden');
+}
+
+function onEditTypeChange(qid) {
+  const t = document.getElementById('edit-type-'+qid).value;
+  const hints = {
+    SINGLE_CHOICE:'{"options":["A","B","C"],"correct":0}',
+    MULTIPLE_CHOICE:'{"options":["A","B","C"],"correct":[0,2]}',
+    ORDERING:'{"items":["step1","step2","step3"],"correct_order":[0,1,2]}',
+    TRUE_FALSE:'{"correct":true}',
+    SHORT_ANSWER:'{}'
+  };
+  document.getElementById('edit-hint-'+qid).textContent = '— example: ' + hints[t];
+}
+
+// ─── Generic option helpers ───────────────────────────────────────
+function addOpt(listId, radioName, cls) {
+  const list = document.getElementById(listId);
+  const idx = list.querySelectorAll('.' + cls).length;
+  const isRadio = radioName.includes('sc');
+  const div = document.createElement('div');
+  div.className = 'flex gap-2 items-center';
+  div.innerHTML = `<input type="${isRadio?'radio':'checkbox'}" name="${radioName}" value="${idx}" class="shrink-0">
+    <input type="text" placeholder="Option ${String.fromCharCode(65+idx)}" class="${cls} flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <button type="button" onclick="rmOpt('${listId}','${radioName}')" class="text-red-400 hover:text-red-600 text-xs">✕</button>`;
+  list.appendChild(div);
+  renumOpts(listId, radioName);
+}
+function rmOpt(listId, radioName) {
+  const list = document.getElementById(listId);
+  if (list.children.length <= 1) return;
+  event.target.closest('.flex').remove();
+  renumOpts(listId, radioName);
+}
+function renumOpts(listId, radioName) {
+  document.getElementById(listId).querySelectorAll('.flex').forEach((row, i) => {
+    const inp = row.querySelector('input[type=radio], input[type=checkbox]');
+    if (inp) inp.value = i;
+  });
+}
+
+// ─── Ordering helpers ─────────────────────────────────────────────
+function addOrd(listId) {
+  const list = document.getElementById(listId);
+  const n = list.children.length + 1;
+  const div = document.createElement('div');
+  div.className = 'flex gap-2 items-center';
+  div.innerHTML = `<span class="text-xs text-slate-400 w-5 text-center shrink-0">${n}</span>
+    <input type="text" placeholder="Item ${n}" class="ord-item flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <button type="button" onclick="rmOrd('${listId}')" class="text-red-400 hover:text-red-600 text-xs">✕</button>`;
+  list.appendChild(div);
+  renumOrd(listId);
+}
+function rmOrd(listId) {
+  const list = document.getElementById(listId);
+  if (list.children.length <= 1) return;
+  event.target.closest('.flex').remove();
+  renumOrd(listId);
+}
+function renumOrd(listId) {
+  document.getElementById(listId).querySelectorAll('.flex').forEach((row, i) => {
+    const span = row.querySelector('span');
+    if (span) span.textContent = i + 1;
+  });
+}
+
+// ─── Config builder — Add form ────────────────────────────────────
+function buildAddConfig(form) {
+  const t = document.getElementById('add-type-select').value;
+  let config = {};
+  if (t === 'SINGLE_CHOICE') {
+    const opts = Array.from(document.getElementById('add-sc-list').querySelectorAll('.sc-opt')).map(i => i.value);
+    const radio = document.querySelector('input[name="add_sc_correct"]:checked');
+    config = {options: opts, correct: radio ? parseInt(radio.value) : 0};
+  } else if (t === 'MULTIPLE_CHOICE') {
+    const opts = Array.from(document.getElementById('add-mc-list').querySelectorAll('.mc-opt')).map(i => i.value);
+    const correct = Array.from(document.querySelectorAll('input[name="add_mc_correct"]:checked')).map(c => parseInt(c.value));
+    config = {options: opts, correct};
+  } else if (t === 'ORDERING') {
+    const items = Array.from(document.getElementById('add-ord-list').querySelectorAll('.ord-item')).map(i => i.value);
+    config = {items, correct_order: items.map((_, i) => i)};
+  } else if (t === 'TRUE_FALSE') {
+    const radio = document.querySelector('input[name="add_tf_correct"]:checked');
+    config = {correct: radio ? radio.value === 'true' : true};
+  } else if (t === 'SHORT_ANSWER') {
+    config = {};
+  }
+  form.querySelector('.config-field').value = JSON.stringify(config);
+  return true;
+}
+
+// ─── Config builder — Edit form (uses JSON textarea directly) ─────
+function buildEditConfig(form, qid) {
+  const jsonText = document.getElementById('edit-config-json-' + qid).value;
+  try {
+    JSON.parse(jsonText); // validate
+    form.querySelector('.config-field').value = jsonText;
+    return true;
+  } catch (e) {
+    alert('Invalid JSON in config field: ' + e.message);
+    return false;
+  }
+}
+
+// ─── Toggle edit form ─────────────────────────────────────────────
+function toggleEdit(qid) {
+  document.getElementById('q-display-' + qid).classList.toggle('hidden');
+  document.getElementById('q-edit-' + qid).classList.toggle('hidden');
+  const typeSel = document.getElementById('edit-type-' + qid);
+  if (typeSel) onEditTypeChange(qid);
+}
+
+// ─── Anti-cheat rule builder ──────────────────────────────────────
+function addRuleRow(ev, threshold, action, penalty, msg) {
+  document.getElementById('no-rules-msg') && (document.getElementById('no-rules-msg').style.display = 'none');
+  const tr = document.createElement('tr');
+  tr.className = 'border-b border-slate-50 rule-row';
+  const events = ['tab_switch','window_blur','resize','copy_attempt','keyboard_shortcut','right_click','fullscreen_exit'];
+  const eventLabels = {'tab_switch':'Tab switch','window_blur':'Window blur','resize':'Window resize','copy_attempt':'Copy attempt','keyboard_shortcut':'Keyboard shortcut','right_click':'Right-click','fullscreen_exit':'Fullscreen exit'};
+  const evSel = events.map(e => `<option value="${e}" ${e===(ev||'tab_switch')?'selected':''}>${eventLabels[e]}</option>`).join('');
+  const actionLabels = {fail:'Auto-fail',warn:'Warn student',reduce_time:'Reduce time',flag:'Flag (silent)'};
+  const actSel = ['fail','warn','reduce_time','flag'].map(a => `<option value="${a}" ${a===(action||'warn')?'selected':''}>${actionLabels[a]}</option>`).join('');
+  const penDisabled = (action||'warn') !== 'reduce_time' ? 'disabled style="opacity:0.3"' : '';
+  tr.innerHTML = `
+    <td class="px-3 py-2"><select class="rule-event border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400">${evSel}</select></td>
+    <td class="px-3 py-2"><input type="number" class="rule-threshold border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400" min="1" value="${threshold||3}"></td>
+    <td class="px-3 py-2"><select class="rule-action border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400" onchange="togglePenalty(this)">${actSel}</select></td>
+    <td class="px-3 py-2"><input type="number" class="rule-penalty border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400" min="0" value="${penalty||60}" ${penDisabled}></td>
+    <td class="px-3 py-2"><input type="text" class="rule-message border border-slate-200 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-indigo-400" placeholder="e.g. Tab switched {count} times." value="${msg||''}"></td>
+    <td class="px-2 py-2 text-center"><button type="button" onclick="this.closest('tr').remove()" class="text-red-400 hover:text-red-600 text-xs font-bold">✕</button></td>`;
+  document.getElementById('rules-body').appendChild(tr);
+}
+
+function togglePenalty(sel) {
+  const row = sel.closest('tr');
+  const penInput = row.querySelector('.rule-penalty');
+  if (sel.value === 'reduce_time') {
+    penInput.disabled = false; penInput.style.opacity = '1';
+  } else {
+    penInput.disabled = true; penInput.style.opacity = '0.3';
+  }
+}
+
+function buildAntiCheatJson(form) {
+  const tp = document.getElementById('ac-text-protection').checked;
+  const rc = document.getElementById('ac-disable-rc').checked;
+  const fs = document.getElementById('ac-fullscreen').checked;
+  const rules = [];
+  document.querySelectorAll('#rules-body .rule-row').forEach(row => {
+    const ev = row.querySelector('.rule-event').value;
+    const threshold = parseInt(row.querySelector('.rule-threshold').value) || 1;
+    const actionType = row.querySelector('.rule-action').value;
+    const penalty = parseInt(row.querySelector('.rule-penalty').value) || 60;
+    const msg = row.querySelector('.rule-message').value;
+    const action = {type: actionType, message: msg};
+    if (actionType === 'reduce_time') action.penalty_seconds = penalty;
+    rules.push({event: ev, threshold, action});
+  });
+  const ac = {text_protection: tp, disable_right_click: rc, require_fullscreen: fs, rules};
+  form.querySelector('#ac-json-output').value = JSON.stringify(ac);
+  return true;
+}
+
+const PRESETS = {
+  none: {text_protection: false, disable_right_click: false, require_fullscreen: false, rules: []},
+  soft: {text_protection: true, disable_right_click: true, require_fullscreen: false, rules: [
+    {event:'tab_switch', threshold:5, action:{type:'warn', message:'Warning: you switched tabs {count} time(s). After {fail_threshold} this quiz will be auto-failed.'}},
+    {event:'window_blur', threshold:8, action:{type:'warn', message:'You left the quiz window {count} time(s).'}},
+    {event:'resize', threshold:3, action:{type:'flag', message:''}},
+    {event:'copy_attempt', threshold:1, action:{type:'flag', message:''}},
+  ]},
+  strict: {text_protection: true, disable_right_click: true, require_fullscreen: false, rules: [
+    {event:'tab_switch', threshold:3, action:{type:'fail', message:'You switched tabs too many times. Quiz auto-failed.'}},
+    {event:'window_blur', threshold:5, action:{type:'warn', message:'Warning: you left the quiz window {count} time(s). {fail_threshold} more will auto-fail.'}},
+    {event:'resize', threshold:2, action:{type:'reduce_time', penalty_seconds:60, message:'Window resize detected — {penalty_seconds}s deducted from your time.'}},
+    {event:'copy_attempt', threshold:1, action:{type:'warn', message:'Copy attempt recorded and flagged.'}},
+    {event:'keyboard_shortcut', threshold:3, action:{type:'reduce_time', penalty_seconds:30, message:'Suspicious key detected — {penalty_seconds}s deducted.'}},
+    {event:'fullscreen_exit', threshold:1, action:{type:'fail', message:'You exited fullscreen mode. Quiz auto-failed.'}},
+  ]},
+};
+
+function applyPreset(name) {
+  const p = PRESETS[name];
+  document.getElementById('ac-text-protection').checked = p.text_protection;
+  document.getElementById('ac-disable-rc').checked = p.disable_right_click;
+  document.getElementById('ac-fullscreen').checked = p.require_fullscreen;
+  document.getElementById('rules-body').innerHTML = '';
+  p.rules.forEach(r => addRuleRow(r.event, r.threshold, r.action.type, r.action.penalty_seconds||60, r.action.message||''));
+}
+</script>
+
+{% endblock %}

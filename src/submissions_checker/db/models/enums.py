@@ -1,73 +1,80 @@
-"""Database enums for type safety."""
+"""Database enums — all values stored as UPPERCASE_WITH_UNDERSCORE in PostgreSQL."""
 
 import enum
 
 
-class OutboxEventType(str, enum.Enum):
-    """
-    Outbox message event types.
+class SubmissionStatus(enum.StrEnum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    REVIEWING = "REVIEWING"
+    CHECKING = "CHECKING"
+    CHECK_FAILED = "CHECK_FAILED"
+    QUIZ_SENT = "QUIZ_SENT"
+    WAITING_FOR_TEACHER_REVIEW = "WAITING_FOR_TEACHER_REVIEW"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
-    Defines the types of events that can be processed via the transactional outbox.
-    Using an enum ensures type safety and prevents typos in event type strings.
-    """
+    def __str__(self) -> str:
+        return self.value
 
-    # Pull repository code and run tests
+
+class SubmissionSourceType(enum.StrEnum):
+    GITHUB_PR = "GITHUB_PR"
+    GITLAB_MR = "GITLAB_MR"
+    ZIP_UPLOAD = "ZIP_UPLOAD"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class OutboxMessageState(enum.StrEnum):
+    PENDING = "PENDING"
+    FINISHED = "FINISHED"
+    ERROR = "ERROR"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class OutboxEventType(enum.StrEnum):
     PULL = "PULL"
-
-    # Perform AI code review
     REVIEW = "REVIEW"
-
-    # Send notifications and post results
     NOTIFY = "NOTIFY"
-
-    # Generate quiz questions from AI review
-    GENERATE_QUIZ = "GENERATE_QUIZ"
-
-    # Send quiz result notification to student via email
-    NOTIFY_QUIZ_RESULT = "NOTIFY_QUIZ_RESULT"
+    SEND_CREDENTIALS = "SEND_CREDENTIALS"
+    SUBMISSION_REVIEWED = "SUBMISSION_REVIEWED"
+    QUIZ_RESULT = "QUIZ_RESULT"
+    DEADLINE_REMINDER = "DEADLINE_REMINDER"
+    NEW_SUBMISSION = "NEW_SUBMISSION"
 
     def __str__(self) -> str:
-        """Return the string value of the enum."""
         return self.value
 
 
-class OutboxMessageState(str, enum.Enum):
-    """
-    Outbox message processing states.
-
-    Defines the lifecycle states of an outbox message:
-    - PENDING: Message created, awaiting processing
-    - FINISHED: Message processed successfully
-    - ERROR: Message processing failed, will be retried
-    """
-
-    PENDING = "pending"
-    FINISHED = "finished"
-    ERROR = "error"
+class UserRole(enum.StrEnum):
+    TEACHER = "TEACHER"
+    STUDENT = "STUDENT"
+    ADMIN = "ADMIN"
 
     def __str__(self) -> str:
-        """Return the string value of the enum."""
         return self.value
 
 
-class SubmissionStatus(str, enum.Enum):
-    """
-    Submission processing status.
-
-    Defines the lifecycle states of a student submission:
-    - PENDING: Submission created, awaiting clone
-    - CLONING: Repository being cloned
-    - REVIEWING: AI review in progress
-    - COMPLETED: All processing complete
-    - FAILED: Processing failed
-    """
-
-    PENDING = "pending"
-    CLONING = "cloning"
-    REVIEWING = "reviewing"
-    COMPLETED = "completed"
-    FAILED = "failed"
+class QuizQuestionType(enum.StrEnum):
+    SINGLE_CHOICE = "SINGLE_CHOICE"
+    MULTIPLE_CHOICE = "MULTIPLE_CHOICE"
+    ORDERING = "ORDERING"
+    TRUE_FALSE = "TRUE_FALSE"
+    SHORT_ANSWER = "SHORT_ANSWER"
 
     def __str__(self) -> str:
-        """Return the string value of the enum."""
+        return self.value
+
+
+class QuizAttemptStatus(enum.StrEnum):
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    TIMED_OUT = "TIMED_OUT"
+    VIOLATION_FAIL = "VIOLATION_FAIL"
+
+    def __str__(self) -> str:
         return self.value

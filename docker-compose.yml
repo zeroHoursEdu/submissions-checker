@@ -24,6 +24,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/submissions_checker
       - LOG_LEVEL=INFO
       - DEBUG=true
+      - WATCHFILES_FORCE_POLLING=true
     env_file:
       - .env
     ports:
@@ -32,11 +33,15 @@ services:
       - ./src:/app/src
       - ./tests:/app/tests
       - ./migrations:/app/migrations
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
       - ./tmp/repos:/tmp/repos
+      - ./templates:/app/templates
+      - ./static:/app/static
     depends_on:
       postgres:
         condition: service_healthy
-    command: uvicorn submissions_checker.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn submissions_checker.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src
     dns:
       - 8.8.8.8
       - 8.8.4.4

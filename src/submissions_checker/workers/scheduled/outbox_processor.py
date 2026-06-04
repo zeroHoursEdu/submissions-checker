@@ -11,11 +11,16 @@ from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.session import get_session
+from submissions_checker.workers.tasks.notification_tasks import (
+    execute_deadline_reminder_task,
+    execute_new_submission_task,
+    execute_quiz_result_task,
+    execute_submission_reviewed_task,
+)
 from submissions_checker.workers.tasks.pull_tasks import execute_pull_task
 from submissions_checker.workers.tasks.review_tasks import execute_review_task
-from submissions_checker.workers.tasks.generate_quiz_tasks import execute_generate_quiz_task
 from submissions_checker.workers.tasks.notify_tasks import execute_notify_task
-from submissions_checker.workers.tasks.notify_quiz_result_tasks import execute_notify_quiz_result_task
+from submissions_checker.workers.tasks.send_credentials_tasks import execute_send_credentials_task
 
 logger = get_logger(__name__)
 
@@ -160,14 +165,23 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
     elif message.event_type == OutboxEventType.REVIEW:
         await execute_review_task(db, message.payload)
 
-    elif message.event_type == OutboxEventType.GENERATE_QUIZ:
-        await execute_generate_quiz_task(db, message.payload)
-
     elif message.event_type == OutboxEventType.NOTIFY:
         await execute_notify_task(db, message.payload)
 
-    elif message.event_type == OutboxEventType.NOTIFY_QUIZ_RESULT:
-        await execute_notify_quiz_result_task(db, message.payload)
+    elif message.event_type == OutboxEventType.SEND_CREDENTIALS:
+        await execute_send_credentials_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.SUBMISSION_REVIEWED:
+        await execute_submission_reviewed_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.QUIZ_RESULT:
+        await execute_quiz_result_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.DEADLINE_REMINDER:
+        await execute_deadline_reminder_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.NEW_SUBMISSION:
+        await execute_new_submission_task(db, message.payload)
 
     else:
         logger.error(

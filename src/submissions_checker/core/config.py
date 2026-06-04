@@ -37,12 +37,6 @@ class Settings(BaseSettings):
     github_app_private_key_path: str | None = None
     github_api_base_url: str = "https://api.github.com"
 
-    # Quiz grading
-    quiz_pass_threshold: int = 6
-
-    # Google Apps Script
-    google_script_url: str | None = None
-
     # Backend base URL (used to build callback URLs for external services)
     base_url: str = "https://ba36-85-114-192-246.ngrok-free.app"
 
@@ -54,7 +48,14 @@ class Settings(BaseSettings):
     ai_max_tokens: int = 4000
     ai_temperature: float = 0.7
 
-    # Brevo (https://brevo.com) — preferred over SMTP on cloud platforms
+    # Application base URL (used in emails and links sent to users)
+    app_base_url: str = "http://localhost:8000"
+
+    # Resend (https://resend.com) — preferred transactional email provider
+    resend_api_key: str | None = None
+    resend_from_address: str = "noreply@example.com"
+
+    # Brevo (https://brevo.com) — alternative transactional email provider
     brevo_api_key: str | None = None
     brevo_from_address: str = "noreply@example.com"
 

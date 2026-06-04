@@ -3,6 +3,7 @@
 from submissions_checker.services.notifications.base import NotificationChannel
 from submissions_checker.services.notifications.brevo_channel import BrevoChannel
 from submissions_checker.services.notifications.email import EmailChannel
+from submissions_checker.services.notifications.resend_channel import ResendChannel
 
 
 class NotificationDispatcher:
@@ -24,6 +25,15 @@ def build_dispatcher(settings: object) -> NotificationDispatcher:
     To add a new channel, instantiate it here and append to `channels`.
     """
     channels: list[NotificationChannel] = []
+
+    resend_api_key = getattr(settings, "resend_api_key", None)
+    if resend_api_key:
+        channels.append(
+            ResendChannel(
+                api_key=resend_api_key,
+                from_address=getattr(settings, "resend_from_address", "noreply@example.com"),
+            )
+        )
 
     brevo_api_key = getattr(settings, "brevo_api_key", None)
     if brevo_api_key:

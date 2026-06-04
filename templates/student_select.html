@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Select Student{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <div class="text-center mb-10">
+    <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-100 mb-4">
+      <svg class="w-7 h-7 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+      </svg>
+    </div>
+    <h1 class="text-2xl font-bold text-slate-900">Who are you?</h1>
+    <p class="text-slate-500 mt-1 text-sm">Pick your name to access your assignments.</p>
+  </div>
+
+  {% if students_by_group %}
+    {% for group_name, group_students in students_by_group.items() %}
+    <div class="mb-8">
+      <div class="flex items-center gap-3 mb-3">
+        <span class="text-xs font-semibold uppercase tracking-widest text-slate-400">{{ group_name }}</span>
+        <div class="flex-1 h-px bg-slate-200"></div>
+        <span class="text-xs text-slate-400">{{ group_students | length }} students</span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {% for student in group_students %}
+        <a href="/student/{{ student.id }}"
+           class="group flex flex-col items-start p-4 bg-white rounded-xl border border-slate-200 shadow-sm hover:border-indigo-400 hover:shadow-md transition-all duration-150">
+          <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center mb-2 group-hover:bg-indigo-200 transition-colors">
+            <span class="text-xs font-bold text-indigo-600">{{ student.full_name[0].upper() }}</span>
+          </div>
+          <span class="font-medium text-slate-900 text-sm leading-tight">{{ student.full_name }}</span>
+          <span class="text-xs text-slate-400 mt-0.5">@{{ student.github_username }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="text-center py-16 text-slate-400">
+      <p class="text-lg font-medium">No students found</p>
+      <p class="text-sm mt-1">Ask your instructor to add you to the system.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{% if subject %}Edit Subject{% else %}New Subject{% endif %}{% endblock %}
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">Dashboard</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{% if subject %}Edit Subject{% else %}New Subject{% endif %}</span>
+{% endblock %}
+{% block content %}
+<div class="max-w-lg">
+  <h1 class="text-2xl font-bold text-slate-900 mb-6">{% if subject %}Edit Subject{% else %}Create Subject{% endif %}</h1>
+
+  {% if error %}
+  <div class="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{{ error }}</div>
+  {% endif %}
+
+  <form method="POST"
+        action="{% if subject %}/teacher/subjects/{{ subject.id }}/edit{% else %}/teacher/subjects/create{% endif %}"
+        class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-5">
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="name">Subject name *</label>
+      <input id="name" name="name" type="text" required
+             value="{{ subject.name if subject else '' }}"
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="description">Description</label>
+      <textarea id="description" name="description" rows="3"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none">{{ subject.description if subject and subject.description else '' }}</textarea>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="github_repo">GitHub repository URL</label>
+      <input id="github_repo" name="github_repo" type="url"
+             value="{{ subject.github_repo if subject and subject.github_repo else '' }}"
+             placeholder="https://github.com/owner/repo"
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+              class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
+        {% if subject %}Save changes{% else %}Create subject{% endif %}
+      </button>
+      <a href="{% if subject %}/teacher/subjects/{{ subject.id }}{% else %}/teacher{% endif %}"
+         class="text-sm text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg border border-slate-300 transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+
+  {% if subject %}
+  <div class="mt-6 bg-red-50 border border-red-200 rounded-xl p-5">
+    <h3 class="font-semibold text-red-700 text-sm mb-2">Danger Zone</h3>
+    <p class="text-xs text-red-600 mb-3">Deleting a subject removes all its assignments and enrollment records. This cannot be undone.</p>
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/delete"
+          onsubmit="return confirm('Delete subject {{ subject.name }}? This cannot be undone.')">
+      <button type="submit"
+              class="text-sm font-medium text-red-600 hover:text-red-800 border border-red-300 hover:border-red-400 px-4 py-1.5 rounded-lg transition-colors">
+        Delete subject
+      </button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

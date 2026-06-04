@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Add Student{% endblock %}
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/students" class="text-indigo-200 hover:text-white text-sm transition">Students</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Add Student</span>
+{% endblock %}
+{% block content %}
+<div class="max-w-md">
+  <h1 class="text-2xl font-bold text-slate-900 mb-6">Add Student</h1>
+
+  {% if error %}
+  <div class="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{{ error }}</div>
+  {% endif %}
+
+  <form method="POST" action="/teacher/students/add"
+        class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-4">
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1" for="first_name">First name *</label>
+        <input id="first_name" name="first_name" type="text" required
+               class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1" for="last_name">Last name *</label>
+        <input id="last_name" name="last_name" type="text" required
+               class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="email">Email *</label>
+      <input id="email" name="email" type="email" required
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="group_name">Group *</label>
+      <input id="group_name" name="group_name" type="text" required list="groups-list"
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+             placeholder="e.g. IT-21"/>
+      <datalist id="groups-list">
+        {% for g in groups %}
+        <option value="{{ g.name }}">
+        {% endfor %}
+      </datalist>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="github_username">GitHub username (optional)</label>
+      <input id="github_username" name="github_username" type="text"
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+              class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
+        Add student
+      </button>
+      <a href="/teacher/students"
+         class="text-sm text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg border border-slate-300 transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

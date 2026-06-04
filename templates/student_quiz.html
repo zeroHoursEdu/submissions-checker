@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+
+{% block title %}Quiz{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">Portal</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Quiz</span>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+  .drag-over { border-color: #6366f1 !important; background: #eef2ff !important; }
+  .dragging { opacity: 0.4; }
+  {% if anti_cheat_config.get('text_protection') %}
+  #quiz-content { user-select: none; -webkit-user-select: none; }
+  {% endif %}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Violation warning banner (hidden by default, shown by JS) -->
+<div id="violation-banner"
+     class="hidden fixed top-14 left-0 right-0 z-50 text-white text-sm font-medium px-4 py-3 text-center shadow-md">
+</div>
+
+{% if seconds_remaining is not none %}
+<!-- Timer -->
+<div id="timer"
+     class="fixed top-14 right-4 z-30 bg-amber-50 border border-amber-300 rounded-xl px-4 py-2 shadow-md font-mono font-bold text-amber-800 text-lg min-w-[80px] text-center">
+  <div class="text-xs font-normal text-amber-600 mb-0.5">Time left</div>
+  <span id="timer-display">--:--</span>
+</div>
+{% endif %}
+
+<!-- Header -->
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-slate-900 mb-1">Quiz</h1>
+  <p class="text-sm text-slate-500">Answer all questions and click Submit when done.</p>
+  {% if attempt.config_snapshot.get('time_limit_minutes') %}
+  <p class="text-sm text-amber-600 mt-1">Time limit: {{ attempt.config_snapshot.time_limit_minutes }} minutes</p>
+  {% endif %}
+</div>
+
+<form id="quiz-form" method="POST" action="/portal/quiz/{{ attempt.id }}/submit">
+  <div id="quiz-content" class="space-y-5">
+
+  {% for q in questions %}
+  {% set q_id = q.id %}
+  {% set existing = existing_answers.get(q_id) %}
+
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+    <!-- Question header -->
+    <div class="flex items-start gap-3 mb-4">
+      <span class="shrink-0 mt-0.5 text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+        {{ loop.index }} / {{ questions|length }}
+      </span>
+      <p class="text-sm font-medium text-slate-800 leading-relaxed">{{ q.text }}</p>
+      <span class="shrink-0 ml-auto text-xs text-slate-400">{{ q.points }} pt{% if q.points != 1 %}s{% endif %}</span>
+    </div>
+
+    <!-- ── SINGLE CHOICE ── -->
+    {% if q.type == "SINGLE_CHOICE" %}
+    <div class="space-y-2">
+      {% for opt in q.config.get("options", []) %}
+      <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
+                    {% if existing and existing.get('selected') == loop.index0 %}border-indigo-400 bg-indigo-50{% endif %}">
+        <input type="radio" name="answer_{{ q_id }}" value="{{ loop.index0 }}" class="shrink-0"
+               {% if existing and existing.get('selected') == loop.index0 %}checked{% endif %}>
+        <span class="text-sm text-slate-700">{{ opt }}</span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <!-- ── MULTIPLE CHOICE ── -->
+    {% elif q.type == "MULTIPLE_CHOICE" %}
+    <p class="text-xs text-slate-400 mb-2">Select all that apply.</p>
+    <div class="space-y-2">
+      {% for opt in q.config.get("options", []) %}
+      <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
+                    {% if existing and loop.index0 in existing.get('selected', []) %}border-indigo-400 bg-indigo-50{% endif %}">
+        <input type="checkbox" name="answer_{{ q_id }}" value="{{ loop.index0 }}" class="shrink-0 rounded"
+               {% if existing and loop.index0 in existing.get('selected', []) %}checked{% endif %}>
+        <span class="text-sm text-slate-700">{{ opt }}</span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <!-- ── ORDERING ── -->
+    {% elif q.type == "ORDERING" %}
+    <p class="text-xs text-slate-400 mb-2">Drag items into the correct order.</p>
+    {% set items = q.config.get("items", []) %}
+    {% if existing and existing.get('order') %}
+      {% set display_order = existing.get('order') %}
+    {% else %}
+      {% set display_order = range(items|length)|list %}
+    {% endif %}
+    <ul id="ord-{{ q_id }}" class="space-y-2 mb-1" ondragover="event.preventDefault()">
+      {% for idx in display_order %}
+      <li data-idx="{{ idx }}" draggable="true"
+          class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 bg-white cursor-grab select-none transition-colors hover:border-indigo-300"
+          ondragstart="onDragStart(event)" ondragover="onDragOver(event)" ondrop="onDrop(event,'ord-{{ q_id }}','ord-input-{{ q_id }}')" ondragend="onDragEnd(event)">
+        <svg class="w-4 h-4 text-slate-300 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M7 2a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM13 2a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM7 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM13 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM7 15a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM13 15a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"/>
+        </svg>
+        <span class="text-sm text-slate-700">{{ items[idx] }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <input type="hidden" name="answer_ordering_{{ q_id }}" id="ord-input-{{ q_id }}"
+           value="{{ display_order | join(',') }}">
+
+    <!-- ── TRUE / FALSE ── -->
+    {% elif q.type == "TRUE_FALSE" %}
+    <div class="flex gap-4">
+      <label class="flex-1 flex items-center gap-3 p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
+                    {% if existing and existing.get('value') == true %}border-indigo-400 bg-indigo-50{% endif %}">
+        <input type="radio" name="answer_{{ q_id }}" value="true" class="shrink-0"
+               {% if existing and existing.get('value') == true %}checked{% endif %}>
+        <span class="text-sm font-medium text-slate-700">True</span>
+      </label>
+      <label class="flex-1 flex items-center gap-3 p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
+                    {% if existing and existing.get('value') == false %}border-indigo-400 bg-indigo-50{% endif %}">
+        <input type="radio" name="answer_{{ q_id }}" value="false" class="shrink-0"
+               {% if existing and existing.get('value') == false %}checked{% endif %}>
+        <span class="text-sm font-medium text-slate-700">False</span>
+      </label>
+    </div>
+
+    <!-- ── SHORT ANSWER ── -->
+    {% elif q.type == "SHORT_ANSWER" %}
+    <div>
+      <textarea name="answer_{{ q_id }}" rows="4"
+                placeholder="Write your answer here…"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400
+                       focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-y">{{ existing.get('text', '') if existing else '' }}</textarea>
+      <p class="text-xs text-slate-400 mt-1">This answer will be graded manually by your teacher.</p>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  </div>
+
+  <!-- Submit bar -->
+  <div class="mt-6 flex justify-end">
+    <button type="submit"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
+      Submit Quiz
+    </button>
+  </div>
+</form>
+
+<script>
+// ─── Drag & drop ordering ─────────────────────────────────────────
+let _dragEl = null;
+function onDragStart(e) { _dragEl = e.currentTarget; e.currentTarget.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+function onDragEnd(e) { e.currentTarget.classList.remove('dragging'); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); }
+function onDragOver(e) { e.preventDefault(); const t = e.currentTarget; if (t !== _dragEl) t.classList.add('drag-over'); }
+function onDrop(e, listId, inputId) {
+  e.preventDefault();
+  const t = e.currentTarget; t.classList.remove('drag-over');
+  if (!_dragEl || _dragEl === t) return;
+  const list = document.getElementById(listId);
+  const items = Array.from(list.children);
+  if (items.indexOf(_dragEl) < items.indexOf(t)) list.insertBefore(_dragEl, t.nextSibling);
+  else list.insertBefore(_dragEl, t);
+  document.getElementById(inputId).value = Array.from(list.children).map(li => li.dataset.idx).join(',');
+}
+
+// ─── Shared timer variable (exposed to anti-cheat scope) ──────────
+var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null' }};
+
+{% if seconds_remaining is not none %}
+// ─── Countdown timer ──────────────────────────────────────────────
+(function() {
+  const display = document.getElementById('timer-display');
+  const timerEl = document.getElementById('timer');
+  const form = document.getElementById('quiz-form');
+
+  function tick() {
+    if (remaining <= 0) {
+      display.textContent = '0:00';
+      form.submit();
+      return;
+    }
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    display.textContent = m + ':' + String(s).padStart(2, '0');
+    if (remaining <= 60) {
+      timerEl.classList.replace('bg-amber-50','bg-red-50');
+      timerEl.classList.replace('border-amber-300','border-red-300');
+      timerEl.classList.replace('text-amber-800','text-red-800');
+      const sub = timerEl.querySelector('.text-amber-600');
+      if (sub) { sub.classList.replace('text-amber-600','text-red-600'); }
+    }
+    remaining--;
+    setTimeout(tick, 1000);
+  }
+  tick();
+})();
+{% endif %}
+
+{% if anti_cheat_config %}
+// ─── Anti-cheat event tracking ────────────────────────────────────
+(function() {
+  const ac = {{ anti_cheat_config | tojson }};
+  const rules = ac.rules || [];
+  const attemptId = {{ attempt.id }};
+
+  function hasRule(ev) { return rules.some(r => r.event === ev); }
+
+  function showBanner(msg, level) {
+    const b = document.getElementById('violation-banner');
+    if (!msg) return;
+    b.textContent = msg;
+    b.className = 'fixed top-14 left-0 right-0 z-50 text-white text-sm font-medium px-4 py-3 text-center shadow-md ' +
+                  (level === 'error' ? 'bg-red-600' : 'bg-amber-500');
+    if (level !== 'error') setTimeout(() => b.classList.add('hidden'), 7000);
+  }
+
+  async function report(type) {
+    try {
+      const res = await fetch(`/portal/quiz/${attemptId}/event`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({type}),
+      });
+      const d = await res.json();
+      if (d.action === 'fail') {
+        showBanner(d.message || 'Your quiz has been automatically failed.', 'error');
+        setTimeout(() => document.getElementById('quiz-form').submit(), 2000);
+      } else if (d.action === 'reduce_time' && d.seconds_remaining !== null) {
+        remaining = d.seconds_remaining;
+        showBanner(d.message, 'warning');
+      } else if (d.action === 'warn') {
+        showBanner(d.message, 'warning');
+      }
+    } catch (_) {}
+  }
+
+  // Tab switch (visibilitychange)
+  if (hasRule('tab_switch')) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) report('tab_switch');
+    });
+  }
+
+  // Window blur (alt-tab, clicking another app)
+  if (hasRule('window_blur')) {
+    window.addEventListener('blur', () => report('window_blur'));
+  }
+
+  // Significant resize (>= 150px)
+  if (hasRule('resize')) {
+    let lw = innerWidth, lh = innerHeight;
+    window.addEventListener('resize', function() {
+      if (Math.abs(innerWidth - lw) > 150 || Math.abs(innerHeight - lh) > 150) {
+        lw = innerWidth; lh = innerHeight; report('resize');
+      }
+    });
+  }
+
+  // Copy attempt (also blocks copy if text_protection is on)
+  if (ac.text_protection || hasRule('copy_attempt')) {
+    document.addEventListener('copy', e => {
+      e.preventDefault();
+      if (hasRule('copy_attempt')) report('copy_attempt');
+    });
+    document.addEventListener('cut', e => e.preventDefault());
+    document.addEventListener('selectstart', e => { if (ac.text_protection) e.preventDefault(); });
+  }
+
+  // Right-click
+  if (ac.disable_right_click || hasRule('right_click')) {
+    document.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      if (hasRule('right_click')) report('right_click');
+    });
+  }
+
+  // Keyboard shortcuts (Ctrl+C/A/S/P, F12, PrintScreen)
+  if (hasRule('keyboard_shortcut')) {
+    document.addEventListener('keydown', e => {
+      const sus = (e.ctrlKey && 'casp'.includes((e.key || '').toLowerCase())) ||
+                  e.key === 'F12' || e.key === 'PrintScreen';
+      if (sus) { e.preventDefault(); report('keyboard_shortcut'); }
+    });
+  }
+
+  // Fullscreen
+  if (ac.require_fullscreen) {
+    const enterFS = () => document.documentElement.requestFullscreen().catch(() => {});
+    enterFS();
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement) {
+        if (hasRule('fullscreen_exit')) report('fullscreen_exit');
+        else setTimeout(enterFS, 800);
+      }
+    });
+  }
+})();
+{% endif %}
+</script>
+
+{% endblock %}

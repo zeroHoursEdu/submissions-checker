@@ -1,9 +1,10 @@
 """Transactional outbox pattern model for reliable event processing."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Enum as SQLEnum, Index, Integer, String, Text
+from sqlalchemy import DateTime, Index, Integer, Text
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -70,7 +71,7 @@ class OutboxMessage(Base, TimestampMixin):
     def mark_finished(self) -> None:
         """Mark the message as successfully finished."""
         self.state = OutboxMessageState.FINISHED
-        self.finished_at = datetime.now(timezone.utc)
+        self.finished_at = datetime.now(UTC)
 
     def mark_error(self, error: str) -> None:
         """Mark the message as failed and increment retry count for retry."""

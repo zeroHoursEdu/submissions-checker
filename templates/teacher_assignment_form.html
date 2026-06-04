@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{% if assignment %}Edit Assignment{% else %}New Assignment{% endif %}{% endblock %}
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">Dashboard</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/subjects/{{ subject.id }}" class="text-indigo-200 hover:text-white text-sm transition truncate max-w-[120px]">{{ subject.name }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{% if assignment %}Edit{% else %}New Assignment{% endif %}</span>
+{% endblock %}
+{% block content %}
+<div class="max-w-lg">
+  <h1 class="text-2xl font-bold text-slate-900 mb-6">
+    {% if assignment %}Edit Assignment{% else %}Create Assignment{% endif %}
+  </h1>
+
+  {% if error %}
+  <div class="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{{ error }}</div>
+  {% endif %}
+
+  <form method="POST"
+        action="{% if assignment %}/teacher/subjects/{{ subject.id }}/assignments/{{ assignment.id }}/edit{% else %}/teacher/subjects/{{ subject.id }}/assignments/create{% endif %}"
+        class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-5">
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="title">Title *</label>
+      <input id="title" name="title" type="text" required
+             value="{{ assignment.title if assignment else '' }}"
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="description">Description</label>
+      <textarea id="description" name="description" rows="4"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y">{{ assignment.description if assignment and assignment.description else '' }}</textarea>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1" for="min_grade">Min grade</label>
+        <input id="min_grade" name="min_grade" type="number" min="0"
+               value="{{ assignment.min_grade if assignment else 0 }}"
+               class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1" for="max_grade">Max grade</label>
+        <input id="max_grade" name="max_grade" type="number" min="0"
+               value="{{ assignment.max_grade if assignment else 100 }}"
+               class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="deadline">Deadline (optional)</label>
+      <input id="deadline" name="deadline" type="datetime-local"
+             value="{% if assignment and assignment.deadline %}{{ assignment.deadline.strftime('%Y-%m-%dT%H:%M') }}{% endif %}"
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1" for="review_mode">Review mode</label>
+        <select id="review_mode" name="review_mode"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+          {% set cur_mode = assignment.config.get('review_mode', 'none') if assignment else 'none' %}
+          <option value="none" {% if cur_mode == 'none' %}selected{% endif %}>None (auto-complete)</option>
+          <option value="quiz" {% if cur_mode == 'quiz' %}selected{% endif %}>Quiz</option>
+          <option value="teacher_review" {% if cur_mode == 'teacher_review' %}selected{% endif %}>Teacher review</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1" for="late_policy">Late submissions</label>
+        <select id="late_policy" name="late_policy"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+          {% set cur_policy = assignment.config.get('late_policy', 'block') if assignment else 'block' %}
+          <option value="block" {% if cur_policy == 'block' %}selected{% endif %}>Block (hard deadline)</option>
+          <option value="allow" {% if cur_policy == 'allow' %}selected{% endif %}>Allow (soft deadline)</option>
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1" for="max_submissions">Max submissions (optional)</label>
+      <input id="max_submissions" name="max_submissions" type="number" min="1"
+             value="{{ assignment.config.get('max_submissions', '') if assignment else '' }}"
+             placeholder="Unlimited"
+             class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+    </div>
+
+    <div class="flex gap-3 pt-2">
+      <button type="submit"
+              class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
+        {% if assignment %}Save changes{% else %}Create assignment{% endif %}
+      </button>
+      <a href="/teacher/subjects/{{ subject.id }}"
+         class="text-sm text-slate-500 hover:text-slate-700 px-4 py-2 rounded-lg border border-slate-300 transition-colors">
+        Cancel
+      </a>
+    </div>
+  </form>
+
+  {% if assignment %}
+  <div class="mt-6 bg-red-50 border border-red-200 rounded-xl p-5">
+    <h3 class="font-semibold text-red-700 text-sm mb-2">Danger Zone</h3>
+    <p class="text-xs text-red-600 mb-3">Deleting an assignment removes all submissions and grades for it. This cannot be undone.</p>
+    <form method="POST"
+          action="/teacher/subjects/{{ subject.id }}/assignments/{{ assignment.id }}/delete"
+          onsubmit="return confirm('Delete assignment {{ assignment.title }}? This cannot be undone.')">
+      <button type="submit"
+              class="text-sm font-medium text-red-600 hover:text-red-800 border border-red-300 hover:border-red-400 px-4 py-1.5 rounded-lg transition-colors">
+        Delete assignment
+      </button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

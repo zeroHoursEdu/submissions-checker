@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Notifications{% endblock %}
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Notifications</span>
+{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-slate-900">Notifications</h1>
+  {% if notifications %}
+  <form method="POST" action="/notifications/read-all">
+    <button type="submit"
+            class="text-sm text-indigo-600 hover:text-indigo-800 font-medium hover:underline transition-colors">
+      Mark all as read
+    </button>
+  </form>
+  {% endif %}
+</div>
+
+{% if notifications %}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm divide-y divide-slate-100">
+  {% for n in notifications %}
+  <div class="flex gap-4 px-5 py-4 {% if not n.is_read %}bg-indigo-50{% endif %}">
+    <div class="shrink-0 mt-0.5">
+      {% if not n.is_read %}
+      <div class="w-2 h-2 rounded-full bg-indigo-500 mt-1.5"></div>
+      {% else %}
+      <div class="w-2 h-2 rounded-full bg-slate-200 mt-1.5"></div>
+      {% endif %}
+    </div>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="font-medium text-slate-900 text-sm">{{ n.title }}</p>
+          <p class="text-slate-500 text-sm mt-0.5">{{ n.body }}</p>
+          {% if n.link %}
+          <a href="{{ n.link }}" class="text-xs text-indigo-600 hover:underline mt-1 inline-block">View →</a>
+          {% endif %}
+        </div>
+        <div class="shrink-0 flex flex-col items-end gap-2">
+          <span class="text-xs text-slate-400">{{ n.created_at.strftime("%b %d, %H:%M") }}</span>
+          {% if not n.is_read %}
+          <form method="POST" action="/notifications/{{ n.id }}/read">
+            <button type="submit" class="text-xs text-slate-400 hover:text-slate-600 hover:underline">
+              Mark read
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-20 bg-white rounded-xl border border-slate-200 shadow-sm">
+  <div class="text-4xl mb-3">🔔</div>
+  <p class="text-slate-600 font-medium">No notifications yet</p>
+  <p class="text-slate-400 text-sm mt-1">You'll be notified about submission reviews, quiz results, and deadlines.</p>
+</div>
+{% endif %}
+{% endblock %}

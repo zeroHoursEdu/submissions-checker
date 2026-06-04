@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Student Portal{% endblock %} — EduTrack</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .line-clamp-2 {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+    }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="min-h-full bg-slate-50 text-slate-900 antialiased">
+
+  <header class="sticky top-0 z-20 bg-indigo-700 shadow-md">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-2">
+      <a href="/" class="text-white font-bold text-base tracking-tight hover:text-indigo-200 transition shrink-0">
+        EduTrack
+      </a>
+      {% block breadcrumbs %}{% endblock %}
+      <div class="ml-auto flex items-center gap-3 shrink-0">
+        {% if current_user %}
+          <span class="text-indigo-200 text-sm hidden sm:block">
+            {{ current_user.username }}
+            <span class="text-indigo-400 ml-1 text-xs">
+              {% if current_user.role == "TEACHER" %}Teacher
+              {% elif current_user.role == "ADMIN" %}Admin
+              {% else %}Student{% endif %}
+            </span>
+          </span>
+          <!-- Notification bell -->
+          <a href="/notifications" id="notif-bell"
+             class="relative text-indigo-200 hover:text-white transition-colors"
+             title="Notifications">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+            </svg>
+            <span id="notif-count"
+                  class="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold leading-4 text-center hidden">
+            </span>
+          </a>
+          {% if current_user.role == "ADMIN" %}
+          <a href="/admin"
+             class="text-xs font-medium text-indigo-200 hover:text-white transition-colors hidden sm:block">
+            Admin
+          </a>
+          {% endif %}
+          <form action="/auth/logout" method="POST">
+            <button type="submit"
+                    class="text-xs font-medium text-indigo-100 hover:text-white border border-indigo-500
+                           hover:border-indigo-300 px-3 py-1 rounded-lg transition-colors">
+              Sign out
+            </button>
+          </form>
+        {% else %}
+          <a href="/auth/login" class="text-xs font-medium text-indigo-200 hover:text-white transition">
+            Sign in
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+    {% block content %}{% endblock %}
+  </main>
+
+<script>
+  (function() {
+    const bell = document.getElementById('notif-bell');
+    const badge = document.getElementById('notif-count');
+    if (!bell || !badge) return;
+    fetch('/notifications/unread-count', {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(data => {
+        if (data.count > 0) {
+          badge.textContent = data.count > 9 ? '9+' : data.count;
+          badge.classList.remove('hidden');
+        }
+      })
+      .catch(() => {});
+  })();
+</script>
+</body>
+</html>

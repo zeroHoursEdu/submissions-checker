@@ -1,4 +1,4 @@
-"""AI code review tasks using OpenAI and lecture knowledge from the project DB."""
+"""AI code review tasks using OpenAI."""
 
 import asyncio
 import json
@@ -13,9 +13,6 @@ from openai import AsyncOpenAI
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models import (
-    LectureKnowledge,
-    OutboxEventType,
-    OutboxMessage,
     Submission,
     SubmissionStatus,
 )
@@ -29,10 +26,10 @@ def extract_lab_id(submission: Submission) -> int:
     Examples: 'lab_1' -> 1, 'lab-3-feature' -> 3. Falls back to 1 if no
     number is found.
     """
-    match = re.search(r"\d+", submission.head_ref or "")
+    match = re.search(r"\d+", getattr(submission, "head_ref", None) or "")
     if match:
         return int(match.group())
-    logger.warning("extract_lab_id_fallback", head_ref=submission.head_ref)
+    logger.warning("extract_lab_id_fallback")
     return 1
 
 
@@ -71,11 +68,13 @@ async def collect_lab_data(path: str) -> tuple[str, str]:
     return await asyncio.to_thread(_walk)
 
 
-async def execute_review_task(db: AsyncSession, review_data: dict) -> None:
-    """Perform AI code review using OpenAI and RAG from lecture_knowledge table.
+async def execute_review_task(db: AsyncSession, review_data: dict) -> None:  # type: ignore[type-arg]
+    """Perform AI code review using OpenAI.
 
     All DB writes occur without an intermediate commit — the outbox processor
     commits the entire unit of work atomically after this function returns.
+    After review, submission ends in REVIEWING status (teacher grades manually
+    for PR-based submissions without a quiz template).
     """
     submission_id = review_data.get("submission_id")
     logger.info("execute_review_task_started", submission_id=submission_id)
@@ -89,19 +88,13 @@ async def execute_review_task(db: AsyncSession, review_data: dict) -> None:
     repo_path = submission.repository_path
     lab_id = extract_lab_id(submission)
 
-    task_text, code_text = await collect_lab_data(repo_path)
+    task_text, code_text = await collect_lab_data(repo_path or "")
 
     if not code_text:
         logger.warning("no_code_found", submission_id=submission_id)
         code_text = "# Код відсутній"
 
     theory = "Теорія відсутня."
-    lk_result = await db.execute(
-        select(LectureKnowledge).where(LectureKnowledge.lab_id == lab_id)
-    )
-    lk_row = lk_result.scalar_one_or_none()
-    if lk_row:
-        theory = lk_row.content
 
     prompt = f"""
     Ти викладач Python. Перевір лабораторну роботу №{lab_id}.
@@ -111,10 +104,6 @@ async def execute_review_task(db: AsyncSession, review_data: dict) -> None:
 
     Умова: {task_text}
     Код студента: {code_text}
-
-    ВИМОГИ ДО ПИТАНЬ:
-    1. Усі 10 питань мають бути НА ПЕРЕТИНІ теорії та коду студента.
-    2. Питай про застосування теорії в конкретних рядках коду.
     """
 
     client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0)
@@ -126,18 +115,13 @@ async def execute_review_task(db: AsyncSession, review_data: dict) -> None:
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "Повертай відповідь ВИНЯТКОВО у форматі JSON: "
-                    '{"questions": [{"question": "Текст", '
-                    '"options": ["А", "Б", "В", "Г"], "correct_answer": "А"}]}'
-                ),
+                "content": "Надай стислий огляд коду студента у форматі JSON: {\"review\": \"...\"}",
             },
             {"role": "user", "content": prompt},
         ],
     )
 
     ai_response_text = response.choices[0].message.content or ""
-    # Strip markdown code fences that some models add around JSON
     ai_response_text = ai_response_text.strip()
     if ai_response_text.startswith("```"):
         ai_response_text = ai_response_text.split("```")[1]
@@ -151,14 +135,6 @@ async def execute_review_task(db: AsyncSession, review_data: dict) -> None:
         )
 
     parsed_review = json.loads(ai_response_text)
-
     submission.ai_review = parsed_review
-    submission.status = SubmissionStatus.COMPLETED
-
-    generate_quiz_message = OutboxMessage(
-        event_type=OutboxEventType.GENERATE_QUIZ,
-        payload={"submission_id": submission.id, "ai_review": parsed_review},
-    )
-    db.add(generate_quiz_message)
 
     logger.info("execute_review_task_completed", submission_id=submission_id)

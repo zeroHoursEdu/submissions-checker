@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Student Registration — Teacher{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 text-sm hover:text-white transition">Dashboard</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Students</span>
+{% endblock %}
+
+{% block content %}
+<div class="flex items-start justify-between mb-8">
+  <div>
+    <h1 class="text-2xl font-bold text-slate-900">Student Registration</h1>
+    <p class="text-slate-500 mt-1 text-sm">Register students by uploading a completed CSV file.</p>
+  </div>
+</div>
+
+<!-- Import result banner -->
+{% if imported or skipped %}
+<div class="mb-6 flex items-start gap-3 rounded-xl border px-5 py-4
+  {% if imported %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-slate-50 border-slate-200 text-slate-700{% endif %}">
+  <svg class="w-5 h-5 mt-0.5 shrink-0 {% if imported %}text-emerald-500{% else %}text-slate-400{% endif %}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+  </svg>
+  <div class="text-sm">
+    {% if imported %}
+      <span class="font-semibold">{{ imported }} new student{{ 's' if imported != 1 else '' }} registered.</span>
+      {% if skipped %}
+        <span class="ml-1 text-emerald-700">{{ skipped }} already had an account and {{ 'were' if skipped != 1 else 'was' }} skipped.</span>
+      {% endif %}
+    {% else %}
+      <span class="font-semibold">No new students imported.</span>
+      {% if skipped %}<span class="ml-1">{{ skipped }} student{{ 's' if skipped != 1 else '' }} already registered.</span>{% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- How-to card -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
+  <div class="flex items-center gap-2 mb-4">
+    <svg class="w-5 h-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
+    </svg>
+    <h2 class="text-base font-semibold text-slate-900">How to register students</h2>
+  </div>
+  <ol class="space-y-2 text-sm text-slate-600">
+    <li class="flex gap-2">
+      <span class="flex-none w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center mt-0.5">1</span>
+      <span>Download the <a href="/teacher/students/sample.csv" class="text-indigo-600 font-medium hover:underline">sample CSV template</a> below.</span>
+    </li>
+    <li class="flex gap-2">
+      <span class="flex-none w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center mt-0.5">2</span>
+      <span>Share the empty CSV with your students in your group chat or by email.</span>
+    </li>
+    <li class="flex gap-2">
+      <span class="flex-none w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center mt-0.5">3</span>
+      <span>Each student fills in their row: group name, first name, last name, and email address.</span>
+    </li>
+    <li class="flex gap-2">
+      <span class="flex-none w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold flex items-center justify-center mt-0.5">4</span>
+      <span>Collect the completed CSV and upload it using the form below. The system will create accounts and send each student their login credentials automatically.</span>
+    </li>
+  </ol>
+
+  <div class="mt-5 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+    <strong class="font-semibold">Tips:</strong>
+    <ul class="list-disc list-inside mt-1 space-y-1">
+      <li>Each student is identified by their email — uploading the same CSV twice is safe, duplicates are skipped.</li>
+      <li>Student accounts receive a login email automatically once an email provider is configured.</li>
+      <li>The group name in the CSV is created automatically if it does not exist yet.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- Upload form -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-8">
+  <h2 class="text-base font-semibold text-slate-900 mb-4">Upload student CSV</h2>
+  <div class="flex flex-col sm:flex-row gap-4 items-start">
+    <a href="/teacher/students/sample.csv"
+       class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-slate-50 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors shrink-0"
+       title="CSV columns: student_group, student_name, student_surname, email">
+      <svg class="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      </svg>
+      Download sample CSV
+    </a>
+
+    <form action="/teacher/students/import" method="POST" enctype="multipart/form-data"
+          class="flex flex-col sm:flex-row gap-3 items-start w-full">
+      <div class="flex flex-col gap-1 w-full sm:max-w-xs">
+        <label class="sr-only" for="csv-file">CSV file</label>
+        <input id="csv-file" type="file" name="file" accept=".csv,text/csv" required
+               class="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 border border-slate-300 rounded-lg cursor-pointer" />
+        <p class="text-xs text-slate-400">Accepted: .csv · UTF-8 · max 1 MB</p>
+        <p class="text-xs text-slate-400">Required columns: <code class="bg-slate-100 px-1 rounded">student_group, student_name, student_surname, email</code></p>
+      </div>
+      <button type="submit"
+              class="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+        </svg>
+        Import students
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Students table -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+  <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+    <h2 class="text-base font-semibold text-slate-900">Registered students</h2>
+    {% if students %}
+    <span class="text-xs text-slate-400">{{ students | length }} total</span>
+    {% endif %}
+  </div>
+
+  {% if students %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50 border-b border-slate-100 text-left">
+          <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">Name</th>
+          <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">Group</th>
+          <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">Email</th>
+          <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">Username</th>
+          <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">
+            <span title="Whether the credentials email was delivered successfully">Email status</span>
+          </th>
+          <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">
+            <span title="The first time this student logged in to the portal">First login</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for s in students %}
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3 font-medium text-slate-800">{{ s.full_name }}</td>
+          <td class="px-4 py-3 text-slate-600">{{ s.group_name }}</td>
+          <td class="px-4 py-3 text-slate-600 font-mono text-xs">{{ s.email }}</td>
+          <td class="px-4 py-3 text-slate-600 font-mono text-xs">{{ s.username or '—' }}</td>
+          <td class="px-4 py-3">
+            {% if s.email_state == 'FINISHED' %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700"
+                    title="Credentials email was delivered successfully">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Sent
+              </span>
+            {% elif s.email_state == 'PENDING' %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700"
+                    title="Email is queued and will be sent once an email provider is configured in settings">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Pending
+              </span>
+            {% elif s.email_state == 'ERROR' %}
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700"
+                    title="Delivery failed — check the outbox in the database or verify email provider settings">
+                <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>Error
+              </span>
+            {% else %}
+              <span class="text-slate-400 text-xs" title="No email has been queued for this student">—</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-slate-600 text-xs">
+            {% if s.first_login %}
+              <span title="First logged in on {{ s.first_login }}">
+                {{ s.first_login.strftime('%Y-%m-%d %H:%M') if s.first_login.strftime is defined else s.first_login }}
+              </span>
+            {% else %}
+              <span class="text-slate-400" title="This student has not logged in yet">Never</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="py-16 text-center">
+    <svg class="mx-auto w-10 h-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
+    </svg>
+    <p class="text-slate-600 font-medium">No students registered yet.</p>
+    <p class="text-slate-400 text-sm mt-1">Download the sample CSV above and follow the steps to get started.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -5,8 +5,10 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
-from submissions_checker.api.routes import health, users, webhooks
+from submissions_checker.api.routes import admin, analytics, auth, health, notifications, student_portal, student_quiz, teacher_portal, teacher_quiz, users, webhooks
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.database import close_db, init_db
 from submissions_checker.core.logging import configure_logging, get_logger
@@ -94,6 +96,17 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(webhooks.router)
     app.include_router(users.router)
+    app.include_router(auth.router)
+    app.include_router(student_portal.router)
+    app.include_router(student_quiz.router)
+    app.include_router(teacher_portal.router)
+    app.include_router(teacher_quiz.router)
+    app.include_router(analytics.router)
+    app.include_router(admin.router)
+    app.include_router(notifications.router)
+
+    # Serve static assets
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
     logger.info(
         "application_configured",
@@ -109,11 +122,6 @@ app = create_app()
 
 
 @app.get("/")
-async def root() -> dict[str, str]:
-    """Root endpoint with API information."""
-    return {
-        "service": "Submissions Checker",
-        "version": "0.1.0",
-        "status": "running",
-        "docs": "/docs",
-    }
+async def root() -> RedirectResponse:
+    """Redirect to login."""
+    return RedirectResponse(url="/auth/login", status_code=302)

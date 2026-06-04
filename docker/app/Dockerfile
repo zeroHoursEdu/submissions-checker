@@ -21,6 +21,10 @@ RUN uv pip install --system -e ".[dev]"
 
 # Copy remaining files
 COPY migrations ./migrations
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY templates ./templates
+COPY static ./static
 
 # Expose port
 EXPOSE 8000

@@ -1,3 +1,0 @@
-ALTER TABLE submissions
-  ADD COLUMN IF NOT EXISTS quiz_score INTEGER,
-  ADD COLUMN IF NOT EXISTS quiz_max_score INTEGER;

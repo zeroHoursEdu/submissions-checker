@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — Admin{% endblock %}
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/admin" class="text-indigo-200 hover:text-white text-sm transition">Admin</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Audit Log</span>
+{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold text-slate-900 mb-6">Audit Log</h1>
+
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+          <th class="px-5 py-3 text-left font-medium">Time</th>
+          <th class="px-5 py-3 text-left font-medium">Actor</th>
+          <th class="px-5 py-3 text-left font-medium">Action</th>
+          <th class="px-5 py-3 text-left font-medium">Target</th>
+          <th class="px-5 py-3 text-left font-medium">Detail</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for log in logs %}
+        <tr class="hover:bg-slate-50 align-top">
+          <td class="px-5 py-3 text-slate-400 text-xs whitespace-nowrap">{{ log.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td class="px-5 py-3 text-slate-700">{{ log.actor_username or '—' }}</td>
+          <td class="px-5 py-3 font-mono text-xs text-indigo-700 whitespace-nowrap">{{ log.action }}</td>
+          <td class="px-5 py-3 text-slate-500 text-xs">
+            {% if log.target_type %}{{ log.target_type }}{% if log.target_id %} #{{ log.target_id }}{% endif %}{% else %}—{% endif %}
+          </td>
+          <td class="px-5 py-3 text-slate-400 text-xs font-mono max-w-xs truncate">{{ log.detail | tojson if log.detail else '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not logs %}
+  <div class="px-5 py-8 text-center text-slate-400 text-sm">No audit records yet.</div>
+  {% endif %}
+</div>
+{% endblock %}

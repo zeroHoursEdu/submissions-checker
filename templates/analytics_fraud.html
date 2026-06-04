@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}Fraud Detection — Analytics{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 text-sm hover:text-white transition">Dashboard</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/analytics" class="text-indigo-200 text-sm hover:text-white transition">Analytics</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">Fraud Detection</span>
+{% endblock %}
+
+{% block content %}
+<div class="flex items-start justify-between mb-8">
+  <div>
+    <h1 class="text-2xl font-bold text-slate-900">Fraud Detection</h1>
+    <p class="text-slate-500 mt-1 text-sm">Suspicious patterns based on login activity and submission timing. These are signals — not proof — and require teacher judgement.</p>
+  </div>
+  <a href="/teacher/analytics"
+     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm hover:bg-slate-50 transition-colors">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+    </svg>
+    Back to Analytics
+  </a>
+</div>
+
+{# --- Flag 1: Late first login + high grade --- #}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm mb-6 border-l-4 border-l-red-400">
+  <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-red-100 text-red-600 shrink-0">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+      </svg>
+    </span>
+    <div>
+      <h2 class="text-base font-semibold text-slate-900">Late First Login + High Grade</h2>
+      <p class="text-xs text-slate-400 mt-0.5">First login within 24 h before deadline · grade ≥ 80% of maximum</p>
+    </div>
+    <span class="ml-auto text-sm font-semibold {% if late_login_flags %}text-red-600{% else %}text-slate-400{% endif %}">
+      {{ late_login_flags | length }} flag{{ 's' if late_login_flags | length != 1 else '' }}
+    </span>
+  </div>
+  <div class="overflow-x-auto">
+    {% if late_login_flags %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
+          <th class="px-6 py-3 font-medium">Student</th>
+          <th class="px-4 py-3 font-medium">Group</th>
+          <th class="px-4 py-3 font-medium">Assignment</th>
+          <th class="px-4 py-3 font-medium">Deadline</th>
+          <th class="px-4 py-3 font-medium">First Login</th>
+          <th class="px-4 py-3 font-medium text-center">Grade / Max</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-50">
+        {% for f in late_login_flags %}
+        <tr class="hover:bg-red-50 transition-colors">
+          <td class="px-6 py-3.5">
+            <a href="/teacher/analytics/students/{{ f.student_id }}" class="font-medium text-indigo-600 hover:text-indigo-800 transition-colors">
+              {{ f.full_name }}
+            </a>
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs">{{ f.group_name }}</td>
+          <td class="px-4 py-3.5 text-slate-700 max-w-xs truncate">{{ f.assignment_title }}</td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+            {% if f.deadline %}{{ f.deadline.strftime('%b %d, %Y') }}{% else %}—{% endif %}
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+            {% if f.first_login %}{{ f.first_login.strftime('%b %d, %Y %H:%M') }}{% else %}—{% endif %}
+          </td>
+          <td class="px-4 py-3.5 text-center">
+            <span class="font-semibold text-green-600">{{ f.grade }}</span>
+            <span class="text-slate-400 text-xs"> / {{ f.max_grade }}</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-6 py-8 text-center text-slate-400 text-sm">No flags detected.</div>
+    {% endif %}
+  </div>
+</div>
+
+{# --- Flag 2: Few logins + high grade --- #}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm mb-6 border-l-4 border-l-amber-400">
+  <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-600 shrink-0">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+      </svg>
+    </span>
+    <div>
+      <h2 class="text-base font-semibold text-slate-900">Few Logins + High Grade</h2>
+      <p class="text-xs text-slate-400 mt-0.5">Fewer than {{ low_login_threshold }} total logins · average grade ≥ {{ high_grade_threshold }}</p>
+    </div>
+    <span class="ml-auto text-sm font-semibold {% if few_logins_flags %}text-amber-600{% else %}text-slate-400{% endif %}">
+      {{ few_logins_flags | length }} flag{{ 's' if few_logins_flags | length != 1 else '' }}
+    </span>
+  </div>
+  <div class="overflow-x-auto">
+    {% if few_logins_flags %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
+          <th class="px-6 py-3 font-medium">Student</th>
+          <th class="px-4 py-3 font-medium">Group</th>
+          <th class="px-4 py-3 font-medium text-center">Logins</th>
+          <th class="px-4 py-3 font-medium">First Login</th>
+          <th class="px-4 py-3 font-medium">Last Login</th>
+          <th class="px-4 py-3 font-medium text-center">Avg Grade</th>
+          <th class="px-4 py-3 font-medium text-center">Graded</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-50">
+        {% for f in few_logins_flags %}
+        <tr class="hover:bg-amber-50 transition-colors">
+          <td class="px-6 py-3.5">
+            <a href="/teacher/analytics/students/{{ f.student_id }}" class="font-medium text-indigo-600 hover:text-indigo-800 transition-colors">
+              {{ f.full_name }}
+            </a>
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs">{{ f.group_name }}</td>
+          <td class="px-4 py-3.5 text-center">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+              {{ f.login_count }}
+            </span>
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+            {% if f.first_login %}{{ f.first_login.strftime('%b %d, %Y') }}{% else %}—{% endif %}
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+            {% if f.last_login %}{{ f.last_login.strftime('%b %d, %Y') }}{% else %}—{% endif %}
+          </td>
+          <td class="px-4 py-3.5 text-center font-semibold text-green-600">{{ f.avg_grade }}</td>
+          <td class="px-4 py-3.5 text-center text-slate-500">{{ f.graded_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-6 py-8 text-center text-slate-400 text-sm">No flags detected.</div>
+    {% endif %}
+  </div>
+</div>
+
+{# --- Flag 3: All submissions in one day --- #}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm mb-8 border-l-4 border-l-orange-400">
+  <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-orange-100 text-orange-600 shrink-0">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+    </span>
+    <div>
+      <h2 class="text-base font-semibold text-slate-900">Single-Day Submission Burst</h2>
+      <p class="text-xs text-slate-400 mt-0.5">3+ submissions all submitted on the same calendar day</p>
+    </div>
+    <span class="ml-auto text-sm font-semibold {% if single_day_flags %}text-orange-600{% else %}text-slate-400{% endif %}">
+      {{ single_day_flags | length }} flag{{ 's' if single_day_flags | length != 1 else '' }}
+    </span>
+  </div>
+  <div class="overflow-x-auto">
+    {% if single_day_flags %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
+          <th class="px-6 py-3 font-medium">Student</th>
+          <th class="px-4 py-3 font-medium">Group</th>
+          <th class="px-4 py-3 font-medium text-center">Submissions</th>
+          <th class="px-4 py-3 font-medium">Day</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-50">
+        {% for f in single_day_flags %}
+        <tr class="hover:bg-orange-50 transition-colors">
+          <td class="px-6 py-3.5">
+            <a href="/teacher/analytics/students/{{ f.student_id }}" class="font-medium text-indigo-600 hover:text-indigo-800 transition-colors">
+              {{ f.full_name }}
+            </a>
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs">{{ f.group_name }}</td>
+          <td class="px-4 py-3.5 text-center">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+              {{ f.total_submissions }}
+            </span>
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs">
+            {% if f.earliest_day %}{{ f.earliest_day.strftime('%b %d, %Y') if f.earliest_day is not string else f.earliest_day }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-6 py-8 text-center text-slate-400 text-sm">No flags detected.</div>
+    {% endif %}
+  </div>
+</div>
+
+{# --- Login Activity Overview --- #}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+  <div class="px-6 py-4 border-b border-slate-100">
+    <h2 class="text-base font-semibold text-slate-900">Login Activity Overview</h2>
+    <p class="text-xs text-slate-400 mt-0.5">All students sorted by login count — least active first</p>
+  </div>
+  <div class="overflow-x-auto">
+    {% if login_activity %}
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
+          <th class="px-6 py-3 font-medium">Student</th>
+          <th class="px-4 py-3 font-medium">Group</th>
+          <th class="px-4 py-3 font-medium text-center">Logins</th>
+          <th class="px-4 py-3 font-medium">First Login</th>
+          <th class="px-4 py-3 font-medium">Last Login</th>
+          <th class="px-4 py-3 font-medium text-center">Risk Score</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-50">
+        {% for s in login_activity %}
+        {% set risk = risk_scores.get(s.student_id, 0) %}
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="px-6 py-3.5">
+            <a href="/teacher/analytics/students/{{ s.student_id }}" class="font-medium text-indigo-600 hover:text-indigo-800 transition-colors">
+              {{ s.full_name }}
+            </a>
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs">{{ s.group_name }}</td>
+          <td class="px-4 py-3.5 text-center">
+            {% if s.login_count == 0 %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Never logged in</span>
+            {% else %}
+              <span class="text-slate-700 font-medium">{{ s.login_count }}</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+            {% if s.first_login %}{{ s.first_login.strftime('%b %d, %Y') }}{% else %}<span class="text-slate-300">—</span>{% endif %}
+          </td>
+          <td class="px-4 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+            {% if s.last_login %}{{ s.last_login.strftime('%b %d, %Y') }}{% else %}<span class="text-slate-300">—</span>{% endif %}
+          </td>
+          <td class="px-4 py-3.5 text-center">
+            {% if risk == 0 %}
+              <span class="text-slate-300 text-xs font-medium">—</span>
+            {% elif risk <= 2 %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Low</span>
+            {% elif risk <= 4 %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">Medium</span>
+            {% else %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">High</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-6 py-10 text-center text-slate-400 text-sm">No students found.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
