@@ -15,6 +15,7 @@ from submissions_checker.db.models.enums import SubmissionSourceType, Submission
 if TYPE_CHECKING:
     from submissions_checker.db.models.quiz_template import QuizAttempt  # noqa: F401
     from submissions_checker.db.models.student_assignment import StudentAssignment
+    from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 
 
 class Submission(Base, TimestampMixin):
@@ -47,6 +48,10 @@ class Submission(Base, TimestampMixin):
     )
     test_results: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     ai_review: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Pinned when checking starts; retries always use the same config version
+    plugin_config_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("subject_plugin_configs.id", ondelete="SET NULL"), nullable=True
+    )
 
     students_assignment: Mapped[StudentAssignment] = relationship(
         "StudentAssignment", back_populates="submissions"
@@ -54,8 +59,12 @@ class Submission(Base, TimestampMixin):
     quiz_attempts: Mapped[list[QuizAttempt]] = relationship(
         "QuizAttempt", back_populates="submission", uselist=True, order_by="QuizAttempt.started_at"
     )
+    plugin_config: Mapped[SubjectPluginConfig | None] = relationship(
+        "SubjectPluginConfig", foreign_keys=[plugin_config_id]
+    )
 
     __table_args__ = (
         Index("ix_submissions_students_assignment_id", "students_assignment_id"),
         Index("ix_submissions_status", "status"),
+        Index("ix_submissions_plugin_config_id", "plugin_config_id"),
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from submissions_checker.db.models.base import Base, TimestampMixin
@@ -26,6 +26,7 @@ class StudentAssignment(Base, TimestampMixin):
         BigInteger, ForeignKey("subjects_assignments.id", ondelete="RESTRICT"), nullable=False
     )
     grade: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    variant: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     student: Mapped[Student] = relationship("Student", back_populates="students_assignments")
     subjects_assignment: Mapped[SubjectsAssignment] = relationship(

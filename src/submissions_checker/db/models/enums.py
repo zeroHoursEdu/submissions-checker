@@ -4,13 +4,23 @@ import enum
 
 
 class SubmissionStatus(enum.StrEnum):
+    # Legacy values (kept for backwards compat with existing data)
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
     REVIEWING = "REVIEWING"
     CHECKING = "CHECKING"
     CHECK_FAILED = "CHECK_FAILED"
-    QUIZ_SENT = "QUIZ_SENT"
     WAITING_FOR_TEACHER_REVIEW = "WAITING_FOR_TEACHER_REVIEW"
+    # Current precise statuses
+    VALIDATING = "VALIDATING"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    TESTING = "TESTING"
+    TEST_FAILED = "TEST_FAILED"
+    AWAITING_AI_REVIEW = "AWAITING_AI_REVIEW"
+    AI_REVIEWING = "AI_REVIEWING"
+    AI_REVIEW_FAILED = "AI_REVIEW_FAILED"
+    AWAITING_TEACHER_REVIEW = "AWAITING_TEACHER_REVIEW"
+    QUIZ_SENT = "QUIZ_SENT"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -45,6 +55,8 @@ class OutboxEventType(enum.StrEnum):
     QUIZ_RESULT = "QUIZ_RESULT"
     DEADLINE_REMINDER = "DEADLINE_REMINDER"
     NEW_SUBMISSION = "NEW_SUBMISSION"
+    RUN_CHECKS = "RUN_CHECKS"
+    RUN_AI_REVIEW = "RUN_AI_REVIEW"
 
     def __str__(self) -> str:
         return self.value

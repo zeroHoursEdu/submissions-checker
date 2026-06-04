@@ -19,11 +19,9 @@ from submissions_checker.api.schemas.student_portal import (
     AssignmentRow,
     SubjectCard,
 )
-from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
     OutboxMessage,
     QuizAttempt,
-    QuizTemplate,
     Student,
     StudentAssignment,
     Subject,
@@ -33,11 +31,11 @@ from submissions_checker.db.models import (
     SubmissionSourceType,
     SubmissionStatus,
 )
+from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, QuizAttemptStatus
 from submissions_checker.services.audit import audit
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import compare_zip_files
-from submissions_checker.services.submission_checker import check_submission
 
 router = APIRouter(prefix="/portal", tags=["student-portal"])
 templates = Jinja2Templates(directory="templates")
@@ -214,7 +212,7 @@ async def assignment_detail(
     )
     quiz_attempts_used: int = attempts_used_result.scalar_one() or 0
 
-    # Latest attempt id (for result link) and max_attempts from template config
+    # Latest attempt id (for result link) and max_attempts from config
     quiz_attempt_id: int | None = None
     quiz_max_attempts: int | None = None
     if latest_sub:
@@ -227,15 +225,17 @@ async def assignment_detail(
         latest_attempt = latest_attempt_result.scalar_one_or_none()
         if latest_attempt:
             quiz_attempt_id = latest_attempt.id
-
-    tmpl_result = await db.execute(
-        select(QuizTemplate.config).where(
-            QuizTemplate.subjects_assignment_id == sa.subjects_assignment_id
-        )
-    )
-    tmpl_cfg = tmpl_result.scalar_one_or_none()
-    if tmpl_cfg:
-        quiz_max_attempts = tmpl_cfg.get("max_quiz_attempts")
+            quiz_max_attempts = latest_attempt.config_snapshot.get("max_quiz_attempts")
+        elif latest_sub.plugin_config_id and sa.subjects_assignment.code:
+            plugin_cfg = await db.get(SubjectPluginConfig, latest_sub.plugin_config_id)
+            if plugin_cfg:
+                quiz_cfg = (
+                    plugin_cfg.config
+                    .get("assignments", {})
+                    .get(sa.subjects_assignment.code, {})
+                    .get("quiz", {})
+                )
+                quiz_max_attempts = quiz_cfg.get("max_quiz_attempts")
 
     check_reason: str | None = None
     if latest_sub and latest_sub.test_results:
@@ -366,28 +366,12 @@ async def submit_assignment(
     db.add(submission)
     await db.flush()
 
-    transition(submission, "start_check")
-
-    passed, reason = check_submission(save_path)
-
-    if not passed:
-        submission.test_results = {"check_reason": reason}
-        transition(submission, "check_failed")
-    else:
-        review_mode = subjects_assignment.config.get("review_mode", "none")
-
-        if review_mode == "quiz":
-            transition(submission, "check_passed_quiz")
-        elif review_mode == "teacher_review":
-            transition(submission, "check_passed_teacher_review")
-            # Notify teachers that a new submission awaits review
-            db.add(OutboxMessage(
-                event_type=OutboxEventType.NEW_SUBMISSION,
-                state=OutboxMessageState.PENDING,
-                payload={"submission_id": submission.id},
-            ))
-        else:
-            transition(submission, "check_passed_none")
+    # Enqueue background check — submission stays PENDING until worker picks it up
+    db.add(OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS,
+        state=OutboxMessageState.PENDING,
+        payload={"submission_id": submission.id},
+    ))
 
     await audit(
         db,

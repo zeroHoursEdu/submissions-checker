@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import secrets
-from datetime import UTC, datetime
 
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
@@ -20,7 +18,6 @@ from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
     OutboxMessage,
     QuizAttempt,
-    QuizTemplate,
     Student,
     StudentAssignment,
     Subject,
@@ -33,7 +30,6 @@ from submissions_checker.db.models import (
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, SubmissionStatus, UserRole
 from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
-from submissions_checker.services.notification_service import push_notification
 
 router = APIRouter(prefix="/teacher", tags=["teacher-portal"])
 templates = Jinja2Templates(directory="templates")
@@ -227,6 +223,216 @@ async def download_sample_csv(current_user: TeacherUser) -> StreamingResponse:
     )
 
 
+@router.get("/subjects/{subject_id}/students/template.csv")
+async def download_subject_enrollment_template(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> StreamingResponse:
+    """Generate enrollment+variant CSV template for a subject.
+
+    Columns: student_group, student_name, student_surname, email
+    + one variant_{assignment.code} column per assignment with variants_required=true.
+    """
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    assignments_result = await db.execute(
+        select(SubjectsAssignment)
+        .where(SubjectsAssignment.subject_id == subject_id)
+        .order_by(SubjectsAssignment.title)
+    )
+    assignments = assignments_result.scalars().all()
+
+    variant_columns = [
+        f"variant_{sa.code}"
+        for sa in assignments
+        if sa.code and sa.config.get("variants_required")
+    ]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["student_group", "student_name", "student_surname", "email"] + variant_columns)
+
+    # Include currently enrolled students as example rows
+    students_result = await db.execute(
+        select(Student, Group.name.label("group_name"))
+        .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
+        .join(Group, Group.id == Student.group_id)
+        .where(SubjectsStudents.subject_id == subject_id)
+        .order_by(Student.full_name)
+    )
+    for row in students_result:
+        student = row.Student
+        name_parts = student.full_name.split(" ", 1)
+        first = name_parts[0] if name_parts else ""
+        last = name_parts[1] if len(name_parts) > 1 else ""
+        writer.writerow([row.group_name, first, last, student.email] + [""] * len(variant_columns))
+
+    csv_content = output.getvalue()
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=subject_{subject_id}_students.csv"},
+    )
+
+
+@router.post("/subjects/{subject_id}/students/import")
+async def import_subject_students(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    file: UploadFile,
+) -> RedirectResponse:
+    """Import enrollment+variant CSV for a specific subject.
+
+    Creates/enrolls students and sets per-assignment variants from variant_ columns.
+    """
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    if file.size and file.size > 1_048_576:
+        raise HTTPException(status_code=413, detail="File too large (max 1 MB)")
+
+    content = await file.read()
+    try:
+        text_content = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=422, detail="File must be UTF-8 encoded")
+
+    reader = csv.DictReader(io.StringIO(text_content))
+    required = {"student_group", "student_name", "student_surname", "email"}
+    fieldnames = set(reader.fieldnames or [])
+    if not required.issubset(fieldnames):
+        missing = required - fieldnames
+        raise HTTPException(status_code=422, detail=f"Missing CSV columns: {', '.join(sorted(missing))}")
+
+    # Identify variant columns and their assignment codes
+    variant_col_map: dict[str, str] = {}  # col_name → assignment_code
+    for col in fieldnames:
+        if col.startswith("variant_"):
+            variant_col_map[col] = col[len("variant_"):]
+
+    # Load subject assignments by code for variant validation
+    assignments_by_code: dict[str, SubjectsAssignment] = {}
+    if variant_col_map:
+        sa_result = await db.execute(
+            select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject_id)
+        )
+        for sa in sa_result.scalars():
+            if sa.code:
+                assignments_by_code[sa.code] = sa
+
+    imported_count = 0
+    skipped_count = 0
+    variants_updated = 0
+
+    for row in reader:
+        group_name = row["student_group"].strip()
+        first_name = row["student_name"].strip()
+        last_name = row["student_surname"].strip()
+        email = row["email"].strip().lower()
+
+        if not all([group_name, first_name, last_name, email]):
+            continue
+
+        # Get or create student
+        existing_result = await db.execute(select(Student).where(Student.email == email))
+        student = existing_result.scalar_one_or_none()
+
+        if student is None:
+            group_result = await db.execute(select(Group).where(Group.name == group_name))
+            group = group_result.scalar_one_or_none()
+            if group is None:
+                group = Group(name=group_name)
+                db.add(group)
+                await db.flush()
+
+            full_name = f"{first_name} {last_name}"
+            student = Student(group_id=group.id, full_name=full_name, email=email)
+            db.add(student)
+            await db.flush()
+
+            base_username = f"{first_name.lower()}.{last_name.lower()}"
+            username = await _generate_username(base_username, db)
+            password = _generate_password()
+            password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
+
+            user = User(
+                username=username,
+                password_hash=password_hash,
+                role=UserRole.STUDENT,
+                student_id=student.id,
+            )
+            db.add(user)
+            await db.flush()
+
+            db.add(OutboxMessage(
+                event_type=OutboxEventType.SEND_CREDENTIALS,
+                state=OutboxMessageState.PENDING,
+                payload={
+                    "student_email": email,
+                    "full_name": full_name,
+                    "username": username,
+                    "password": password,
+                },
+            ))
+            imported_count += 1
+        else:
+            skipped_count += 1
+
+        # Enroll in subject if not already enrolled
+        enrollment_result = await db.execute(
+            select(SubjectsStudents).where(
+                SubjectsStudents.subject_id == subject_id,
+                SubjectsStudents.student_id == student.id,
+            )
+        )
+        if enrollment_result.scalar_one_or_none() is None:
+            db.add(SubjectsStudents(subject_id=subject_id, student_id=student.id))
+            sa_ids_result = await db.execute(
+                select(SubjectsAssignment.id).where(SubjectsAssignment.subject_id == subject_id)
+            )
+            for (sa_id_val,) in sa_ids_result:
+                existing_sa = await db.execute(
+                    select(StudentAssignment.id).where(
+                        StudentAssignment.student_id == student.id,
+                        StudentAssignment.subjects_assignment_id == sa_id_val,
+                    )
+                )
+                if existing_sa.scalar_one_or_none() is None:
+                    db.add(StudentAssignment(student_id=student.id, subjects_assignment_id=sa_id_val))
+            await db.flush()
+
+        # Set variants from variant_ columns
+        for col_name, assignment_code in variant_col_map.items():
+            variant_value = row.get(col_name, "").strip()
+            if not variant_value:
+                continue
+            sa = assignments_by_code.get(assignment_code)
+            if sa is None:
+                continue
+            sa_result = await db.execute(
+                select(StudentAssignment).where(
+                    StudentAssignment.student_id == student.id,
+                    StudentAssignment.subjects_assignment_id == sa.id,
+                )
+            )
+            student_assignment = sa_result.scalar_one_or_none()
+            if student_assignment is not None:
+                student_assignment.variant = variant_value
+                variants_updated += 1
+
+    await db.commit()
+
+    return RedirectResponse(
+        url=f"/teacher/subjects/{subject_id}?imported={imported_count}&skipped={skipped_count}&variants_updated={variants_updated}",
+        status_code=303,
+    )
+
+
 @router.get("/students", response_class=HTMLResponse)
 async def teacher_students(
     request: Request,
@@ -387,7 +593,11 @@ async def teacher_review_submission(
         )
     )
     submission = result.scalar_one_or_none()
-    if submission is None or submission.status != SubmissionStatus.WAITING_FOR_TEACHER_REVIEW:
+    _teacher_review_statuses = {
+        SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
+        SubmissionStatus.AWAITING_TEACHER_REVIEW,
+    }
+    if submission is None or submission.status not in _teacher_review_statuses:
         raise HTTPException(status_code=404)
 
     sa = submission.students_assignment
@@ -420,11 +630,16 @@ async def teacher_review_submission_action(
         .options(
             selectinload(Submission.students_assignment).selectinload(
                 StudentAssignment.subjects_assignment
-            ).selectinload(SubjectsAssignment.quiz_template),
+            ),
+            selectinload(Submission.plugin_config),
         )
     )
     submission = result.scalar_one_or_none()
-    if submission is None or submission.status != SubmissionStatus.WAITING_FOR_TEACHER_REVIEW:
+    _teacher_review_statuses = {
+        SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
+        SubmissionStatus.AWAITING_TEACHER_REVIEW,
+    }
+    if submission is None or submission.status not in _teacher_review_statuses:
         raise HTTPException(status_code=404)
 
     sa = submission.students_assignment
@@ -432,11 +647,24 @@ async def teacher_review_submission_action(
 
     clean_reason = reason.strip()
     if action == "approve":
-        has_quiz = subjects_assignment.quiz_template is not None
-        transition(submission, "teacher_approve_quiz" if has_quiz else "teacher_approve_done")
+        has_quiz = False
+        if submission.plugin_config and subjects_assignment.code:
+            asgn_cfg = (
+                submission.plugin_config.config
+                .get("assignments", {})
+                .get(subjects_assignment.code, {})
+            )
+            has_quiz = bool(asgn_cfg.get("quiz", {}).get("questions"))
+        if submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW:
+            transition(submission, "teacher_send_quiz" if has_quiz else "teacher_approve")
+        else:
+            transition(submission, "teacher_approve_quiz" if has_quiz else "teacher_approve_done")
     elif action == "reject":
         submission.test_results = {"check_reason": clean_reason or "Rejected by teacher"}
-        transition(submission, "teacher_reject")
+        if submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW:
+            transition(submission, "teacher_reject")
+        else:
+            transition(submission, "teacher_reject")
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
 
@@ -467,311 +695,6 @@ async def teacher_review_submission_action(
         url=f"/teacher/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}",
         status_code=303,
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Subject CRUD
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.get("/subjects/create", response_class=HTMLResponse)
-async def create_subject_page(
-    request: Request,
-    current_user: TeacherUser,
-) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_subject_form.html",
-        context={"current_user": current_user, "subject": None, "error": None},
-    )
-
-
-@router.post("/subjects/create", response_model=None)
-async def create_subject(
-    request: Request,
-    db: DBSession,
-    current_user: TeacherUser,
-    name: str = Form(...),
-    description: str = Form(""),
-    github_repo: str = Form(""),
-) -> RedirectResponse | HTMLResponse:
-    existing = await db.execute(select(Subject.id).where(Subject.name == name.strip()))
-    if existing.scalar_one_or_none() is not None:
-        return templates.TemplateResponse(  # type: ignore[return-value]
-            request=request,
-            name="teacher_subject_form.html",
-            context={"current_user": current_user, "subject": None, "error": "A subject with this name already exists."},
-            status_code=422,
-        )
-    subject = Subject(
-        name=name.strip(),
-        description=description.strip() or None,
-        github_repo=github_repo.strip() or None,
-    )
-    db.add(subject)
-    await audit(db, action="create_subject", actor_id=current_user.user_id, actor_username=current_user.username, name=name)
-    await db.commit()
-    await db.refresh(subject)
-    return RedirectResponse(url=f"/teacher/subjects/{subject.id}", status_code=303)
-
-
-@router.get("/subjects/{subject_id}/edit", response_class=HTMLResponse)
-async def edit_subject_page(
-    request: Request,
-    subject_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-) -> HTMLResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_subject_form.html",
-        context={"current_user": current_user, "subject": subject, "error": None},
-    )
-
-
-@router.post("/subjects/{subject_id}/edit")
-async def edit_subject(
-    subject_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-    name: str = Form(...),
-    description: str = Form(""),
-    github_repo: str = Form(""),
-) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
-    subject.name = name.strip()
-    subject.description = description.strip() or None
-    subject.github_repo = github_repo.strip() or None
-    await audit(db, action="edit_subject", actor_id=current_user.user_id, actor_username=current_user.username, subject_id=subject_id)
-    await db.commit()
-    return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
-
-
-@router.post("/subjects/{subject_id}/delete")
-async def delete_subject(
-    subject_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
-    await db.delete(subject)
-    await audit(db, action="delete_subject", actor_id=current_user.user_id, actor_username=current_user.username, subject_id=subject_id)
-    await db.commit()
-    return RedirectResponse(url="/teacher", status_code=303)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Assignment CRUD
-# ─────────────────────────────────────────────────────────────────────────────
-
-@router.get("/subjects/{subject_id}/assignments/create", response_class=HTMLResponse)
-async def create_assignment_page(
-    request: Request,
-    subject_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-) -> HTMLResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404)
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_assignment_form.html",
-        context={"current_user": current_user, "subject": subject, "assignment": None, "error": None},
-    )
-
-
-@router.post("/subjects/{subject_id}/assignments/create")
-async def create_assignment(
-    request: Request,
-    subject_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-    title: str = Form(...),
-    description: str = Form(""),
-    deadline: str = Form(""),
-    min_grade: int = Form(0),
-    max_grade: int = Form(100),
-    review_mode: str = Form("none"),
-    download_links_json: str = Form(""),
-    max_submissions: str = Form(""),
-    late_policy: str = Form("block"),
-) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404)
-
-    deadline_dt: datetime | None = None
-    if deadline.strip():
-        try:
-            deadline_dt = datetime.fromisoformat(deadline.strip()).replace(tzinfo=UTC)
-        except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid deadline format")
-
-    download_links = []
-    if download_links_json.strip():
-        try:
-            download_links = json.loads(download_links_json.strip())
-        except json.JSONDecodeError:
-            pass
-
-    config: dict = {"review_mode": review_mode, "late_policy": late_policy}
-    if download_links:
-        config["download_links"] = download_links
-    if max_submissions.strip():
-        try:
-            config["max_submissions"] = int(max_submissions.strip())
-        except ValueError:
-            pass
-
-    sa = SubjectsAssignment(
-        subject_id=subject_id,
-        title=title.strip(),
-        description=description.strip() or None,
-        deadline=deadline_dt,
-        min_grade=min_grade,
-        max_grade=max_grade,
-        config=config,
-    )
-    db.add(sa)
-
-    # Create StudentAssignment records for all enrolled students
-    await db.flush()
-    enrolled_result = await db.execute(
-        select(SubjectsStudents.student_id).where(SubjectsStudents.subject_id == subject_id)
-    )
-    for (sid,) in enrolled_result:
-        db.add(StudentAssignment(student_id=sid, subjects_assignment_id=sa.id))
-
-    await audit(
-        db, action="create_assignment", actor_id=current_user.user_id,
-        actor_username=current_user.username, subject_id=subject_id, title=title,
-    )
-    await db.commit()
-    await db.refresh(sa)
-    return RedirectResponse(
-        url=f"/teacher/subjects/{subject_id}/assignments/{sa.id}", status_code=303
-    )
-
-
-@router.get("/subjects/{subject_id}/assignments/{sa_id}/edit", response_class=HTMLResponse)
-async def edit_assignment_page(
-    request: Request,
-    subject_id: int,
-    sa_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-) -> HTMLResponse:
-    result = await db.execute(
-        select(SubjectsAssignment)
-        .where(SubjectsAssignment.id == sa_id, SubjectsAssignment.subject_id == subject_id)
-        .options(selectinload(SubjectsAssignment.subject))
-    )
-    sa = result.scalar_one_or_none()
-    if sa is None:
-        raise HTTPException(status_code=404)
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_assignment_form.html",
-        context={"current_user": current_user, "subject": sa.subject, "assignment": sa, "error": None},
-    )
-
-
-@router.post("/subjects/{subject_id}/assignments/{sa_id}/edit")
-async def edit_assignment(
-    subject_id: int,
-    sa_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-    title: str = Form(...),
-    description: str = Form(""),
-    deadline: str = Form(""),
-    min_grade: int = Form(0),
-    max_grade: int = Form(100),
-    review_mode: str = Form("none"),
-    download_links_json: str = Form(""),
-    max_submissions: str = Form(""),
-    late_policy: str = Form("block"),
-) -> RedirectResponse:
-    result = await db.execute(
-        select(SubjectsAssignment)
-        .where(SubjectsAssignment.id == sa_id, SubjectsAssignment.subject_id == subject_id)
-    )
-    sa = result.scalar_one_or_none()
-    if sa is None:
-        raise HTTPException(status_code=404)
-
-    deadline_dt: datetime | None = None
-    if deadline.strip():
-        try:
-            deadline_dt = datetime.fromisoformat(deadline.strip()).replace(tzinfo=UTC)
-        except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid deadline format")
-
-    download_links = []
-    if download_links_json.strip():
-        try:
-            download_links = json.loads(download_links_json.strip())
-        except json.JSONDecodeError:
-            pass
-
-    config = dict(sa.config)
-    config["review_mode"] = review_mode
-    config["late_policy"] = late_policy
-    if download_links:
-        config["download_links"] = download_links
-    else:
-        config.pop("download_links", None)
-    if max_submissions.strip():
-        try:
-            config["max_submissions"] = int(max_submissions.strip())
-        except ValueError:
-            pass
-    else:
-        config.pop("max_submissions", None)
-
-    sa.title = title.strip()
-    sa.description = description.strip() or None
-    sa.deadline = deadline_dt
-    sa.min_grade = min_grade
-    sa.max_grade = max_grade
-    sa.config = config
-
-    await audit(
-        db, action="edit_assignment", actor_id=current_user.user_id,
-        actor_username=current_user.username, sa_id=sa_id,
-    )
-    await db.commit()
-    return RedirectResponse(url=f"/teacher/subjects/{subject_id}/assignments/{sa_id}", status_code=303)
-
-
-@router.post("/subjects/{subject_id}/assignments/{sa_id}/delete")
-async def delete_assignment(
-    subject_id: int,
-    sa_id: int,
-    db: DBSession,
-    current_user: TeacherUser,
-) -> RedirectResponse:
-    result = await db.execute(
-        select(SubjectsAssignment)
-        .where(SubjectsAssignment.id == sa_id, SubjectsAssignment.subject_id == subject_id)
-    )
-    sa = result.scalar_one_or_none()
-    if sa is None:
-        raise HTTPException(status_code=404)
-    await db.delete(sa)
-    await audit(
-        db, action="delete_assignment", actor_id=current_user.user_id,
-        actor_username=current_user.username, sa_id=sa_id,
-    )
-    await db.commit()
-    return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -8,9 +8,40 @@ if TYPE_CHECKING:
     from submissions_checker.db.models.submission import Submission
 
 _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
+    # ── New precise flow ──────────────────────────────────────────────────────
     SubmissionStatus.PENDING: {
+        "start_validation": SubmissionStatus.VALIDATING,
+        # Legacy: kept so existing code paths don't crash during migration
         "start_check": SubmissionStatus.CHECKING,
     },
+    SubmissionStatus.VALIDATING: {
+        "validation_passed": SubmissionStatus.TESTING,
+        "validation_failed": SubmissionStatus.VALIDATION_FAILED,
+    },
+    SubmissionStatus.TESTING: {
+        "test_failed": SubmissionStatus.TEST_FAILED,
+        "test_passed_tests_only": SubmissionStatus.COMPLETED,
+        "test_passed_ai": SubmissionStatus.AWAITING_AI_REVIEW,
+        "test_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        "test_passed_quiz": SubmissionStatus.QUIZ_SENT,
+    },
+    SubmissionStatus.AWAITING_AI_REVIEW: {
+        "start_ai_review": SubmissionStatus.AI_REVIEWING,
+    },
+    SubmissionStatus.AI_REVIEWING: {
+        "ai_review_done_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        "ai_review_done_completed": SubmissionStatus.COMPLETED,
+        "ai_review_failed": SubmissionStatus.AI_REVIEW_FAILED,
+    },
+    SubmissionStatus.AI_REVIEW_FAILED: {
+        "retry_ai_review": SubmissionStatus.AI_REVIEWING,
+    },
+    SubmissionStatus.AWAITING_TEACHER_REVIEW: {
+        "teacher_approve": SubmissionStatus.COMPLETED,
+        "teacher_reject": SubmissionStatus.FAILED,
+        "teacher_send_quiz": SubmissionStatus.QUIZ_SENT,
+    },
+    # ── Legacy flow (kept for backward compat with existing data) ─────────────
     SubmissionStatus.CHECKING: {
         "check_passed_quiz":           SubmissionStatus.QUIZ_SENT,
         "check_passed_teacher_review": SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,

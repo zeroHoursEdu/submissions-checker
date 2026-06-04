@@ -82,6 +82,9 @@ class Settings(BaseSettings):
         description="Directory where cloned repositories are stored"
     )
 
+    # Subject plugins directory (gitignored; each subdirectory is a plugin with config.yml)
+    plugins_dir: str = "plugins"
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""

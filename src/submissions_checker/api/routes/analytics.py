@@ -150,7 +150,7 @@ async def analytics_dashboard(
                 g.name          AS group_name,
                 sa.title        AS assignment_title,
                 subj.name       AS subject_name,
-                (qt.config->>'max_quiz_attempts')::int AS max_attempts,
+                MAX((qa.config_snapshot->>'max_quiz_attempts')::int) AS max_attempts,
                 COUNT(qa.id)    AS attempts_used,
                 MAX(qa.submitted_at) AS last_attempt_at
             FROM students_assignments stud_asgn
@@ -158,14 +158,12 @@ async def analytics_dashboard(
             JOIN subjects subj             ON subj.id = sa.subject_id
             JOIN students s                ON s.id    = stud_asgn.student_id
             JOIN groups g                  ON g.id    = s.group_id
-            JOIN quiz_templates qt         ON qt.subjects_assignment_id = sa.id
             JOIN submissions sub           ON sub.students_assignment_id = stud_asgn.id
             JOIN quiz_attempts qa          ON qa.submission_id = sub.id
                                            AND qa.status IN ('COMPLETED', 'TIMED_OUT')
-            WHERE (qt.config->>'max_quiz_attempts') IS NOT NULL
-            GROUP BY s.id, s.full_name, g.name, sa.title, subj.name,
-                     stud_asgn.id, qt.config->>'max_quiz_attempts'
-            HAVING COUNT(qa.id) >= (qt.config->>'max_quiz_attempts')::int
+            WHERE (qa.config_snapshot->>'max_quiz_attempts') IS NOT NULL
+            GROUP BY s.id, s.full_name, g.name, sa.title, subj.name, stud_asgn.id
+            HAVING COUNT(qa.id) >= MAX((qa.config_snapshot->>'max_quiz_attempts')::int)
                AND bool_and(qa.is_passed IS NOT TRUE)
             ORDER BY subj.name, sa.title, s.full_name
         """)

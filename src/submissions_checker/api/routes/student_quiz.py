@@ -17,12 +17,13 @@ from submissions_checker.db.models import (
     OutboxMessage,
     QuizAnswer,
     QuizAttempt,
-    QuizTemplate,
     StudentAssignment,
     Submission,
     SubmissionStatus,
 )
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, QuizAttemptStatus
+from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 
 router = APIRouter(prefix="/portal", tags=["student-quiz"])
 templates = Jinja2Templates(directory="templates")
@@ -77,48 +78,70 @@ def _seconds_remaining_from_violations(attempt: QuizAttempt, violations: dict[st
     return max(0, int(effective_limit - elapsed))
 
 
-def _build_questions_snapshot(template: QuizTemplate) -> list[dict[str, Any]]:
-    """Select and snapshot questions for a new attempt."""
-    config = template.config
-    total = config.get("total_questions") or len(template.questions)
-    shuffle_q = config.get("shuffle_questions", True)
-    shuffle_opts = config.get("shuffle_options", True)
+def _build_question_config(q_type: str, q: dict[str, Any]) -> dict[str, Any]:
+    if q_type == "SINGLE_CHOICE":
+        return {"options": q.get("options", []), "correct": int(q.get("correct", 0))}
+    if q_type == "MULTIPLE_CHOICE":
+        return {"options": q.get("options", []), "correct": [int(x) for x in q.get("correct", [])]}
+    if q_type == "ORDERING":
+        return {"items": q.get("items", []), "correct_order": [int(x) for x in q.get("correct_order", [])]}
+    if q_type == "TRUE_FALSE":
+        return {"correct": bool(q.get("correct", False))}
+    return {}
 
-    required = [q for q in template.questions if q.is_required]
-    optional = [q for q in template.questions if not q.is_required]
+
+def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Select and snapshot questions from config quiz section.
+
+    Each question's ``id`` is its 0-based index in the config ``questions`` list so
+    grading can reference it without DB rows.
+    """
+    questions_raw: list[dict[str, Any]] = quiz_cfg.get("questions", [])
+    total = int(quiz_cfg.get("questions_to_send", len(questions_raw)))
+    shuffle_q = bool(quiz_cfg.get("shuffle_questions", True))
+    shuffle_opts = bool(quiz_cfg.get("shuffle_options", True))
+
+    indexed = list(enumerate(questions_raw))
+    required = [(i, q) for i, q in indexed if q.get("required")]
+    optional = [(i, q) for i, q in indexed if not q.get("required")]
 
     if shuffle_q:
         random.shuffle(optional)
 
-    remaining_slots = max(0, total - len(required))
-    selected = required + optional[:remaining_slots]
+    remaining = max(0, total - len(required))
+    selected = required + optional[:remaining]
 
     if shuffle_q:
         random.shuffle(selected)
 
-    snapshot = []
-    for q in selected:
+    snapshot: list[dict[str, Any]] = []
+    for orig_idx, q in selected:
+        q_type = str(q.get("type", "")).upper()
+        q_config = _build_question_config(q_type, q)
+
         q_snap: dict[str, Any] = {
-            "id": q.id,
-            "type": q.type.value,
-            "text": q.text,
-            "points": q.points,
-            "is_required": q.is_required,
-            "config": dict(q.config),
+            "id": orig_idx,
+            "type": q_type,
+            "text": str(q.get("text", "")),
+            "points": int(q.get("points", 1)),
+            "is_required": bool(q.get("required", False)),
+            "config": q_config,
         }
-        if shuffle_opts and q.type.value in ("SINGLE_CHOICE", "MULTIPLE_CHOICE"):
-            options = list(q.config.get("options", []))
+
+        if shuffle_opts and q_type in ("SINGLE_CHOICE", "MULTIPLE_CHOICE"):
+            options = list(q_config.get("options", []))
             indices = list(range(len(options)))
             random.shuffle(indices)
             shuffled_options = [options[i] for i in indices]
-            if q.type.value == "SINGLE_CHOICE":
-                original_correct = q.config.get("correct", 0)
+            if q_type == "SINGLE_CHOICE":
+                original_correct = q_config.get("correct", 0)
                 new_correct = indices.index(original_correct)
                 q_snap["config"] = {"options": shuffled_options, "correct": new_correct}
             else:
-                original_correct = set(q.config.get("correct", []))
+                original_correct = set(q_config.get("correct", []))
                 new_correct = [i for i, orig in enumerate(indices) if orig in original_correct]
                 q_snap["config"] = {"options": shuffled_options, "correct": sorted(new_correct)}
+
         snapshot.append(q_snap)
     return snapshot
 
@@ -169,7 +192,6 @@ def _grade_answer(
         return {"value": student_bool}, is_correct, q_points if is_correct else 0
 
     elif q_type == "SHORT_ANSWER":
-        # Manual grading required — store raw text, mark as pending (is_correct=None)
         text_answer = str(raw_answer).strip() if raw_answer else ""
         return {"text": text_answer}, None, 0  # type: ignore[return-value]
 
@@ -232,7 +254,6 @@ async def _grade_and_finalize(
                     attempts_left = max_attempts - (prior + 1)
             # else: leave at QUIZ_SENT so student can retry
 
-    # Queue email notification about quiz result
     db.add(OutboxMessage(
         event_type=OutboxEventType.QUIZ_RESULT,
         state=OutboxMessageState.PENDING,
@@ -261,11 +282,14 @@ async def start_or_resume_quiz(
     current_user: StudentUser,
     student_id: StudentId,
 ) -> RedirectResponse:
-    """Create or resume a QuizAttempt, respecting max_quiz_attempts."""
+    """Create or resume a QuizAttempt, drawing questions from the pinned plugin config."""
     sa_result = await db.execute(
         select(StudentAssignment)
         .where(StudentAssignment.id == sa_id, StudentAssignment.student_id == student_id)
-        .options(selectinload(StudentAssignment.submissions))
+        .options(
+            selectinload(StudentAssignment.submissions),
+            selectinload(StudentAssignment.subjects_assignment),
+        )
     )
     sa = sa_result.scalar_one_or_none()
     if sa is None:
@@ -290,32 +314,52 @@ async def start_or_resume_quiz(
     if passed:
         return RedirectResponse(url=f"/portal/quiz/{passed.id}/result", status_code=303)
 
-    template_result = await db.execute(
-        select(QuizTemplate)
-        .where(QuizTemplate.subjects_assignment_id == sa.subjects_assignment_id)
-        .options(selectinload(QuizTemplate.questions))
+    # Load plugin config pinned for this submission
+    if not latest_sub.plugin_config_id:
+        raise HTTPException(status_code=503, detail="No plugin config pinned to this submission")
+    config_record = await db.get(SubjectPluginConfig, latest_sub.plugin_config_id)
+    if config_record is None:
+        raise HTTPException(status_code=503, detail="Plugin config not found")
+
+    assignment_code = sa.subjects_assignment.code
+    if not assignment_code:
+        raise HTTPException(status_code=404, detail="Assignment has no config code")
+
+    quiz_cfg: dict[str, Any] = (
+        config_record.config
+        .get("assignments", {})
+        .get(assignment_code, {})
+        .get("quiz", {})
     )
-    template = template_result.scalar_one_or_none()
-    if template is None:
+    if not quiz_cfg or not quiz_cfg.get("questions"):
         raise HTTPException(status_code=404, detail="No quiz configured for this assignment")
 
-    used_count = sum(
-        1 for a in existing if a.status in _TERMINAL_STATUSES
-    )
-    max_attempts = template.config.get("max_quiz_attempts")
+    # Check max attempts
+    max_attempts = quiz_cfg.get("max_quiz_attempts")
+    used_count = sum(1 for a in existing if a.status in _TERMINAL_STATUSES)
     if max_attempts is not None and used_count >= max_attempts:
         latest_finished = existing[-1] if existing else None
         if latest_finished:
             return RedirectResponse(url=f"/portal/quiz/{latest_finished.id}/result", status_code=303)
         raise HTTPException(status_code=403, detail="No quiz attempts remaining")
 
-    questions_snapshot = _build_questions_snapshot(template)
+    questions_snapshot = _build_questions_from_config(quiz_cfg)
+    config_snapshot: dict[str, Any] = {
+        "pass_threshold_pct": float(quiz_cfg.get("pass_threshold_pct", 0.6)),
+        "show_correct_answers_after": bool(quiz_cfg.get("show_correct_answers_after", False)),
+        "anti_cheat": quiz_cfg.get("anti_cheat", {}),
+    }
+    if max_attempts is not None:
+        config_snapshot["max_quiz_attempts"] = int(max_attempts)
+    if quiz_cfg.get("time_limit_minutes") is not None:
+        config_snapshot["time_limit_minutes"] = int(quiz_cfg["time_limit_minutes"])
+
     attempt = QuizAttempt(
         submission_id=latest_sub.id,
-        quiz_template_id=template.id,
-        template_version=template.version,
+        plugin_config_id=config_record.id,
+        plugin_config_version=config_record.version,
         questions_snapshot=questions_snapshot,
-        config_snapshot=dict(template.config),
+        config_snapshot=config_snapshot,
         started_at=_utcnow(),
         status=QuizAttemptStatus.IN_PROGRESS,
     )
@@ -354,12 +398,10 @@ async def show_quiz(
     if attempt.status in _TERMINAL_STATUSES:
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
 
-    # Check for a pending force-fail from a prior violation report
     if (attempt.violations or {}).get("_force_fail"):
         await _grade_and_finalize(attempt, db, status=QuizAttemptStatus.VIOLATION_FAIL)
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
 
-    # Server-side timeout check (applies time penalties)
     if _is_timed_out(attempt):
         await _grade_and_finalize(attempt, db, status=QuizAttemptStatus.TIMED_OUT)
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
@@ -416,7 +458,6 @@ async def report_violation(
 
     anti_cheat = attempt.config_snapshot.get("anti_cheat", {})
 
-    # Find the fail threshold for this event (for message interpolation)
     fail_threshold = next(
         (
             r["threshold"]
@@ -461,7 +502,7 @@ async def report_violation(
                 if isinstance(flagged, list):
                     flagged.append(event_type)
                 response_action = "flag"
-                message = ""  # silent to student
+                message = ""
 
             break
 
@@ -502,7 +543,6 @@ async def submit_quiz(
     if attempt.status in _TERMINAL_STATUSES:
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
 
-    # Determine terminal status
     if (attempt.violations or {}).get("_force_fail"):
         final_status = QuizAttemptStatus.VIOLATION_FAIL
     elif _is_timed_out(attempt):

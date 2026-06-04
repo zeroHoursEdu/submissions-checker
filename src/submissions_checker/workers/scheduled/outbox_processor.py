@@ -11,6 +11,7 @@ from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.session import get_session
+from submissions_checker.workers.tasks.check_tasks import execute_check_task
 from submissions_checker.workers.tasks.notification_tasks import (
     execute_deadline_reminder_task,
     execute_new_submission_task,
@@ -18,7 +19,7 @@ from submissions_checker.workers.tasks.notification_tasks import (
     execute_submission_reviewed_task,
 )
 from submissions_checker.workers.tasks.pull_tasks import execute_pull_task
-from submissions_checker.workers.tasks.review_tasks import execute_review_task
+from submissions_checker.workers.tasks.review_tasks import execute_review_task, execute_ai_review_task
 from submissions_checker.workers.tasks.notify_tasks import execute_notify_task
 from submissions_checker.workers.tasks.send_credentials_tasks import execute_send_credentials_task
 
@@ -182,6 +183,12 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     elif message.event_type == OutboxEventType.NEW_SUBMISSION:
         await execute_new_submission_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.RUN_CHECKS:
+        await execute_check_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.RUN_AI_REVIEW:
+        await execute_ai_review_task(db, message.payload)
 
     else:
         logger.error(

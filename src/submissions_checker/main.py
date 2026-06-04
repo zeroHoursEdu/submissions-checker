@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from submissions_checker.api.routes import admin, analytics, auth, health, notifications, student_portal, student_quiz, teacher_portal, teacher_quiz, users, webhooks
+from pathlib import Path
+
+from submissions_checker.api.routes import admin, analytics, auth, health, notifications, student_portal, student_quiz, teacher_portal, users, webhooks
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.database import close_db, init_db
 from submissions_checker.core.logging import configure_logging, get_logger
@@ -18,6 +20,8 @@ from submissions_checker.core.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
+from submissions_checker.db.session import get_session
+from submissions_checker.services.plugin_loader import PluginLoader
 
 # Configure logging before anything else
 configure_logging()
@@ -47,7 +51,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     logger.info("database_initialized")
 
-    # 3. Start scheduler (if enabled)
+    # 3. Load subject plugins from plugins directory
+    plugins_dir = Path(settings.plugins_dir)
+    async with get_session() as db:
+        await PluginLoader().load_all(plugins_dir, db)
+    logger.info("plugins_loaded", plugins_dir=str(plugins_dir))
+
+    # 4. Start scheduler (if enabled)
     if settings.scheduler_enabled:
         init_scheduler()
         await start_scheduler()
@@ -100,7 +110,6 @@ def create_app() -> FastAPI:
     app.include_router(student_portal.router)
     app.include_router(student_quiz.router)
     app.include_router(teacher_portal.router)
-    app.include_router(teacher_quiz.router)
     app.include_router(analytics.router)
     app.include_router(admin.router)
     app.include_router(notifications.router)

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from submissions_checker.db.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
     from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 
 
@@ -41,7 +42,12 @@ class Subject(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     github_repo: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Plugin identifier — used exclusively to match/upsert Subject from config.yml; not displayed
+    code: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
 
     assignments: Mapped[list[SubjectsAssignment]] = relationship(
         "SubjectsAssignment", back_populates="subject"
+    )
+    plugin_configs: Mapped[list[SubjectPluginConfig]] = relationship(
+        "SubjectPluginConfig", back_populates="subject", order_by="SubjectPluginConfig.version"
     )

@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
+from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
     Submission,
     SubmissionStatus,
@@ -138,3 +139,68 @@ async def execute_review_task(db: AsyncSession, review_data: dict) -> None:  # t
     submission.ai_review = parsed_review
 
     logger.info("execute_review_task_completed", submission_id=submission_id)
+
+
+async def execute_ai_review_task(db: AsyncSession, payload: dict) -> None:  # type: ignore[type-arg]
+    """AI review step in the new plugin-based check flow.
+
+    Runs after tests pass. Transitions submission to AWAITING_TEACHER_REVIEW or COMPLETED
+    depending on the next_step field in the payload.
+    """
+    submission_id = payload.get("submission_id")
+    next_step = payload.get("next_step", "completed")
+    logger.info("execute_ai_review_task_started", submission_id=submission_id)
+
+    result = await db.execute(select(Submission).where(Submission.id == submission_id))
+    submission = result.scalar_one()
+
+    transition(submission, "start_ai_review")
+
+    settings = get_settings()
+    repo_path = submission.repository_path
+    lab_id = extract_lab_id(submission)
+    task_text, code_text = await collect_lab_data(repo_path or "")
+
+    if not code_text:
+        code_text = "# No code found"
+
+    prompt = f"""
+    You are a programming instructor. Review this student's code submission.
+
+    Task: {task_text}
+    Student code: {code_text}
+    """
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0)
+    response = await client.chat.completions.create(
+        model=settings.openai_model,
+        max_tokens=settings.ai_max_tokens,
+        messages=[
+            {
+                "role": "system",
+                "content": 'Provide a concise code review in JSON format: {"review": "..."}',
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    ai_response_text = (response.choices[0].message.content or "").strip()
+    if ai_response_text.startswith("```"):
+        ai_response_text = ai_response_text.split("```")[1]
+        if ai_response_text.startswith("json"):
+            ai_response_text = ai_response_text[4:]
+        ai_response_text = ai_response_text.strip()
+
+    if not ai_response_text:
+        transition(submission, "ai_review_failed")
+        raise ValueError(f"OpenAI returned empty content (finish_reason={response.choices[0].finish_reason})")
+
+    parsed_review = json.loads(ai_response_text)
+    submission.ai_review = parsed_review
+
+    if next_step == "teacher":
+        transition(submission, "ai_review_done_teacher")
+    else:
+        transition(submission, "ai_review_done_completed")
+
+    logger.info("execute_ai_review_task_completed", submission_id=submission_id)
