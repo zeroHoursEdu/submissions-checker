@@ -8,7 +8,6 @@ from sqlalchemy import and_, func, select, text
 
 from submissions_checker.api.dependencies import DBSession, TeacherUser
 from submissions_checker.db.models import (
-from submissions_checker.core.templates import render
     Group,
     Student,
     StudentAssignment,
@@ -19,6 +18,7 @@ from submissions_checker.core.templates import render
     User,
     UserLogin,
 )
+from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/teacher/analytics", tags=["analytics"])
 

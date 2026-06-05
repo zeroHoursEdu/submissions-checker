@@ -2,6 +2,7 @@
 
 from submissions_checker.db.models.audit_log import AuditLog
 from submissions_checker.db.models.enums import (
+    EntityType,
     NotificationCase,
     NotificationMethod,
     OutboxEventType,
@@ -27,6 +28,7 @@ from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from submissions_checker.db.models.subject_test_student import SubjectTestStudent
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.user import User
@@ -51,6 +53,7 @@ __all__ = [
     "QuizQuestionType",
     "SubmissionSourceType",
     "SubmissionStatus",
+    "EntityType",
     "SubjectStatus",
     "UserRole",
     "Group",
@@ -59,6 +62,7 @@ __all__ = [
     "StudentAssignment",
     "Subject",
     "SubjectPluginConfig",
+    "SubjectTestStudent",
     "SubjectsAssignment",
     "SubjectsStudents",
     "Submission",

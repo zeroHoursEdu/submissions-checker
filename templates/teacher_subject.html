@@ -72,6 +72,16 @@
 </div>
 {% endif %}
 
+{% if test_student_flash == "created" %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-teal-50 border border-teal-200 text-teal-800 text-sm">
+  Test student created. Credentials are shown in the panel below.
+</div>
+{% elif test_student_flash == "existing" %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm">
+  A test student already exists for this subject.
+</div>
+{% endif %}
+
 <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
   <!-- Students section -->
@@ -149,4 +159,49 @@
   </div>
 
 </div>
+
+{% if current_user.user_id == subject.owner_id %}
+<div class="mt-6">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+      <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21a48.25 48.25 0 0 1-8.135-.687c-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+      </svg>
+      <h2 class="font-semibold text-slate-900">Test Student</h2>
+      <span class="ml-auto text-xs text-slate-400 font-medium">Owner only</span>
+    </div>
+
+    <div class="px-5 py-4">
+      {% if test_student_info %}
+      <p class="text-sm text-slate-500 mb-4">Use these credentials to log in as the test student and verify your assignment setup. Stats and enrollment counts exclude this account.</p>
+      <div class="flex flex-col sm:flex-row gap-3 mb-4">
+        <div class="flex-1 bg-slate-50 rounded-lg border border-slate-200 px-4 py-3">
+          <p class="text-xs text-slate-400 mb-1">Username</p>
+          <p class="text-sm font-mono font-medium text-slate-800 select-all">{{ test_student_info.username }}</p>
+        </div>
+        <div class="flex-1 bg-slate-50 rounded-lg border border-slate-200 px-4 py-3">
+          <p class="text-xs text-slate-400 mb-1">Password</p>
+          <p class="text-sm font-mono font-medium text-slate-800 select-all">{{ test_student_info.plain_password }}</p>
+        </div>
+      </div>
+      <form method="POST" action="/teacher/subjects/{{ subject.id }}/test-student/enter"
+            onsubmit="return confirm('You will be switched to the test student session. Log out and back in to return to your teacher account.')">
+        <button type="submit"
+                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 transition-colors">
+          Enter as Test Student
+        </button>
+      </form>
+      {% else %}
+      <p class="text-sm text-slate-500 mb-4">Create a test student to verify that your assignments and grading setup work correctly before real students enroll.</p>
+      <form method="POST" action="/teacher/subjects/{{ subject.id }}/test-student">
+        <button type="submit"
+                class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-teal-300 bg-teal-50 text-teal-700 text-sm font-medium hover:bg-teal-100 transition-colors">
+          Create Test Student
+        </button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}

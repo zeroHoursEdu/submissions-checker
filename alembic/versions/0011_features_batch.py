@@ -20,16 +20,17 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # ── Enum: UserRole — add ADMIN ────────────────────────────────────────────
-    op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN'")
-
-    # ── Enum: QuizQuestionType — add SHORT_ANSWER ─────────────────────────────
-    op.execute("ALTER TYPE quiz_question_type ADD VALUE IF NOT EXISTS 'SHORT_ANSWER'")
-
-    # ── Enum: OutboxEventType — add new event types ───────────────────────────
-    op.execute("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'SUBMISSION_REVIEWED'")
-    op.execute("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'QUIZ_RESULT'")
-    op.execute("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'DEADLINE_REMINDER'")
-    op.execute("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'NEW_SUBMISSION'")
+    # ALTER TYPE ADD VALUE cannot be used in the same transaction as the new value.
+    # Commit, add enum values (auto-committed), then start a fresh transaction.
+    conn = op.get_bind()
+    conn.execute(sa.text("COMMIT"))
+    conn.execute(sa.text("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN'"))
+    conn.execute(sa.text("ALTER TYPE quiz_question_type ADD VALUE IF NOT EXISTS 'SHORT_ANSWER'"))
+    conn.execute(sa.text("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'SUBMISSION_REVIEWED'"))
+    conn.execute(sa.text("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'QUIZ_RESULT'"))
+    conn.execute(sa.text("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'DEADLINE_REMINDER'"))
+    conn.execute(sa.text("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'NEW_SUBMISSION'"))
+    conn.execute(sa.text("BEGIN"))
 
     # ── Update users check constraint to allow ADMIN ──────────────────────────
     op.drop_constraint("ck_users_student_role_has_student_id", "users", type_="check")
@@ -65,7 +66,7 @@ def upgrade() -> None:
         sa.Column("action", sa.String(100), nullable=False),
         sa.Column("target_type", sa.String(100), nullable=True),
         sa.Column("target_id", sa.BigInteger(), nullable=True),
-        sa.Column("detail", postgresql.JSONB(), nullable=False, server_default="'{}'"),
+        sa.Column("detail", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.PrimaryKeyConstraint("id"),

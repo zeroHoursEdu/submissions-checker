@@ -21,7 +21,7 @@ def upgrade() -> None:
     op.execute("CREATE TYPE subject_status AS ENUM ('ACTIVE', 'DELETED')")
 
     # Drop existing unique constraint on subjects.code (replaced by partial index below)
-    op.drop_constraint("subjects_code_key", "subjects", type_="unique")
+    op.drop_constraint("uq_subjects_code", "subjects", type_="unique")
 
     # Add owner_id column (nullable — legacy rows created by startup loader have no owner)
     op.add_column(
@@ -74,6 +74,6 @@ def downgrade() -> None:
     op.drop_column("subjects", "owner_id")
 
     # Restore original unique constraint on subjects.code
-    op.create_unique_constraint("subjects_code_key", "subjects", ["code"])
+    op.create_unique_constraint("uq_subjects_code", "subjects", ["code"])
 
     op.execute("DROP TYPE subject_status")

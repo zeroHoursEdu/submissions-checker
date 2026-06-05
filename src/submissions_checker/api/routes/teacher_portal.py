@@ -16,8 +16,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.dependencies import AppSettings, DBSession, TeacherUser
+from submissions_checker.core.security import COOKIE_NAME, create_access_token
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
+    EntityType,
     FeedbackRequest,
     FeedbackResponse,
     FeedbackToken,
@@ -27,6 +29,7 @@ from submissions_checker.db.models import (
     Student,
     StudentAssignment,
     Subject,
+    SubjectTestStudent,
     SubjectsAssignment,
     SubjectsStudents,
     Submission,
@@ -71,9 +74,13 @@ async def teacher_dashboard(
             Subject.name,
             Subject.description,
             Subject.owner_id,
-            func.count(SubjectsStudents.student_id).label("enrolled_count"),
+            func.count(Student.id).label("enrolled_count"),
         )
         .outerjoin(SubjectsStudents, SubjectsStudents.subject_id == Subject.id)
+        .outerjoin(
+            Student,
+            and_(Student.id == SubjectsStudents.student_id, Student.type == EntityType.REAL),
+        )
         .where(Subject.status == SubjectStatus.ACTIVE)
         .group_by(Subject.id, Subject.name, Subject.description, Subject.owner_id)
         .order_by(Subject.name)
@@ -139,6 +146,99 @@ async def delete_subject(
     return RedirectResponse("/teacher", status_code=303)
 
 
+@router.post("/subjects/{subject_id}/test-student")
+async def provision_test_student(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> RedirectResponse:
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    if subject.owner_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Only the subject owner can provision a test student")
+
+    existing = await db.execute(
+        select(SubjectTestStudent).where(SubjectTestStudent.subject_id == subject_id)
+    )
+    if existing.scalar_one_or_none() is not None:
+        return RedirectResponse(f"/teacher/subjects/{subject_id}?test_student=existing", status_code=303)
+
+    test_group_result = await db.execute(select(Group).where(Group.name == "__TEST__"))
+    test_group = test_group_result.scalar_one()
+
+    password = _generate_password()
+    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
+    username = f"test_{subject_id}"
+
+    student = Student(
+        group_id=test_group.id,
+        full_name=f"Test Student (subject {subject_id})",
+        email=f"test+{subject_id}@test.internal",
+        type=EntityType.TEST,
+    )
+    db.add(student)
+    await db.flush()
+
+    user = User(
+        username=username,
+        password_hash=password_hash,
+        role=UserRole.STUDENT,
+        student_id=student.id,
+    )
+    db.add(user)
+    await db.flush()
+
+    db.add(SubjectsStudents(subject_id=subject_id, student_id=student.id))
+    await db.flush()
+
+    sa_ids_result = await db.execute(
+        select(SubjectsAssignment.id).where(SubjectsAssignment.subject_id == subject_id)
+    )
+    for (sa_id_val,) in sa_ids_result:
+        db.add(StudentAssignment(student_id=student.id, subjects_assignment_id=sa_id_val))
+
+    db.add(SubjectTestStudent(subject_id=subject_id, student_id=student.id, plain_password=password))
+    await db.commit()
+
+    return RedirectResponse(f"/teacher/subjects/{subject_id}?test_student=created", status_code=303)
+
+
+@router.post("/subjects/{subject_id}/test-student/enter")
+async def enter_as_test_student(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> RedirectResponse:
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    if subject.owner_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Only the subject owner can enter as the test student")
+
+    sts_result = await db.execute(
+        select(SubjectTestStudent).where(SubjectTestStudent.subject_id == subject_id)
+    )
+    sts = sts_result.scalar_one_or_none()
+    if sts is None:
+        raise HTTPException(status_code=404, detail="No test student provisioned for this subject")
+
+    user_result = await db.execute(select(User).where(User.student_id == sts.student_id))
+    test_user = user_result.scalar_one()
+
+    token = create_access_token(test_user.id, test_user.username, test_user.role.value)
+    response = RedirectResponse("/portal", status_code=303)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="strict",
+        secure=False,
+        max_age=8 * 3600,
+    )
+    return response
+
+
 @router.get("/subjects/{subject_id}", response_class=HTMLResponse)
 async def teacher_subject(
     request: Request, subject_id: int, db: DBSession, current_user: TeacherUser
@@ -151,7 +251,7 @@ async def teacher_subject(
         select(Student, Group.name.label("group_name"))
         .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
         .join(Group, Group.id == Student.group_id)
-        .where(SubjectsStudents.subject_id == subject_id)
+        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
         .order_by(Group.name, Student.full_name)
     )
     students = [{"student": row.Student, "group_name": row.group_name} for row in students_result]
@@ -179,6 +279,22 @@ async def teacher_subject(
     feedback_sent = request.query_params.get("feedback_sent") == "1"
     feedback_error = request.query_params.get("feedback_error")
 
+    test_student_info = None
+    if subject.owner_id == current_user.user_id:
+        sts_result = await db.execute(
+            select(SubjectTestStudent, User.username)
+            .join(User, User.student_id == SubjectTestStudent.student_id)
+            .where(SubjectTestStudent.subject_id == subject_id)
+        )
+        sts_row = sts_result.one_or_none()
+        if sts_row is not None:
+            test_student_info = {
+                "username": sts_row.username,
+                "plain_password": sts_row.SubjectTestStudent.plain_password,
+            }
+
+    test_student_flash = request.query_params.get("test_student")
+
     return render(request, "teacher_subject.html", {
             "current_user": current_user,
             "subject": subject,
@@ -188,6 +304,8 @@ async def teacher_subject(
             "feedback_request": feedback_request,
             "feedback_sent": feedback_sent,
             "feedback_error": feedback_error,
+            "test_student_info": test_student_info,
+            "test_student_flash": test_student_flash,
         })
 
 
@@ -252,7 +370,7 @@ async def teacher_assignment(
                 Submission.created_at == latest_sub_sq.c.max_created_at,
             ),
         )
-        .where(SubjectsStudents.subject_id == subject_id)
+        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
         .order_by(Student.full_name)
     )
     rows = [row._asdict() for row in rows_result]
@@ -329,12 +447,12 @@ async def download_subject_enrollment_template(
     writer = csv.writer(output)
     writer.writerow(["student_group", "student_name", "student_surname", "email"] + variant_columns)
 
-    # Include currently enrolled students as example rows
+    # Include currently enrolled real students as example rows
     students_result = await db.execute(
         select(Student, Group.name.label("group_name"))
         .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
         .join(Group, Group.id == Student.group_id)
-        .where(SubjectsStudents.subject_id == subject_id)
+        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
         .order_by(Student.full_name)
     )
     for row in students_result:

@@ -114,3 +114,11 @@ class SubjectStatus(enum.StrEnum):
 
     def __str__(self) -> str:
         return self.value
+
+
+class EntityType(enum.StrEnum):
+    REAL = "REAL"
+    TEST = "TEST"
+
+    def __str__(self) -> str:
+        return self.value
