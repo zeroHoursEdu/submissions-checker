@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import secrets
+import urllib.parse
 from datetime import UTC, date, datetime
 
 import bcrypt
@@ -14,7 +15,7 @@ from sqlalchemy import and_, false, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
-from submissions_checker.api.dependencies import DBSession, TeacherUser
+from submissions_checker.api.dependencies import AppSettings, DBSession, TeacherUser
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
     FeedbackRequest,
@@ -32,9 +33,11 @@ from submissions_checker.db.models import (
     User,
     UserLogin,
 )
-from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, SubmissionStatus, UserRole
+from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, SubmissionStatus, SubjectStatus, UserRole
 from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
+from submissions_checker.services.config_apply import ConfigApplyService
+from submissions_checker.services.storage import StorageService
 from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/teacher", tags=["teacher-portal"])
@@ -67,15 +70,73 @@ async def teacher_dashboard(
             Subject.id,
             Subject.name,
             Subject.description,
+            Subject.owner_id,
             func.count(SubjectsStudents.student_id).label("enrolled_count"),
         )
         .outerjoin(SubjectsStudents, SubjectsStudents.subject_id == Subject.id)
-        .group_by(Subject.id, Subject.name, Subject.description)
+        .where(Subject.status == SubjectStatus.ACTIVE)
+        .group_by(Subject.id, Subject.name, Subject.description, Subject.owner_id)
         .order_by(Subject.name)
     )
     subjects = [row._asdict() for row in result]
 
-    return render(request, "teacher_dashboard.html", {"current_user": current_user, "subjects": subjects})
+    apply_result = request.query_params.get("apply_result")
+    apply_error = request.query_params.get("apply_error")
+    if apply_error:
+        apply_error = urllib.parse.unquote(apply_error)
+
+    return render(request, "teacher_dashboard.html", {
+        "current_user": current_user,
+        "subjects": subjects,
+        "apply_result": apply_result,
+        "apply_error": apply_error,
+    })
+
+
+@router.post("/subjects/apply-config")
+async def apply_subject_config(
+    request: Request,
+    db: DBSession,
+    current_user: TeacherUser,
+    settings: AppSettings,
+    config_zip: UploadFile,
+) -> RedirectResponse:
+    storage = StorageService(settings) if settings.s3_endpoint_url else None
+    service = ConfigApplyService(storage)
+    try:
+        zip_bytes = await config_zip.read()
+        result = await service.apply(zip_bytes, owner_id=current_user.user_id, db=db)
+        return RedirectResponse(
+            f"/teacher?apply_result={result.subject_action}",
+            status_code=303,
+        )
+    except PermissionError as exc:
+        encoded = urllib.parse.quote(str(exc))
+        return RedirectResponse(f"/teacher?apply_error={encoded}", status_code=303)
+    except ValueError as exc:
+        encoded = urllib.parse.quote(str(exc))
+        return RedirectResponse(f"/teacher?apply_error={encoded}", status_code=303)
+    except Exception as exc:
+        from submissions_checker.core.logging import get_logger
+        get_logger(__name__).error("config_apply_unexpected_error", error=str(exc))
+        encoded = urllib.parse.quote("An unexpected error occurred while applying the config.")
+        return RedirectResponse(f"/teacher?apply_error={encoded}", status_code=303)
+
+
+@router.post("/subjects/{subject_id}/delete")
+async def delete_subject(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> RedirectResponse:
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    if subject.owner_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Only the subject owner can delete this subject")
+    subject.status = SubjectStatus.DELETED
+    await db.commit()
+    return RedirectResponse("/teacher", status_code=303)
 
 
 @router.get("/subjects/{subject_id}", response_class=HTMLResponse)

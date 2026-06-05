@@ -37,6 +37,12 @@ class StorageService:
         logger.info("file_uploaded", key=key, url=url)
         return url
 
+    async def delete_file(self, key: str) -> None:
+        """Delete an object from S3."""
+        async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:
+            await s3.delete_object(Bucket=self._bucket, Key=key)
+        logger.info("file_deleted", key=key)
+
     def _build_url(self, key: str) -> str:
         if self._public_base_url:
             return f"{self._public_base_url.rstrip('/')}/{key}"

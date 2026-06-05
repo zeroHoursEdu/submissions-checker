@@ -46,6 +46,15 @@
        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 text-sm hover:bg-slate-50 transition-colors">
       {{ vocab.teacher.export_csv }}
     </a>
+    {% if current_user.user_id == subject.owner_id %}
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/delete"
+          onsubmit="return confirm('{{ vocab.teacher.remove_subject_confirm }}')">
+      <button type="submit"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm hover:bg-red-100 transition-colors">
+        {{ vocab.teacher.remove_subject_button }}
+      </button>
+    </form>
+    {% endif %}
   </div>
 </div>
 

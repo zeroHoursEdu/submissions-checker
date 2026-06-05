@@ -10,6 +10,7 @@ from submissions_checker.db.models.enums import (
     QuizQuestionType,
     SubmissionSourceType,
     SubmissionStatus,
+    SubjectStatus,
     UserRole,
 )
 from submissions_checker.db.models.feedback_request import FeedbackRequest
@@ -50,6 +51,7 @@ __all__ = [
     "QuizQuestionType",
     "SubmissionSourceType",
     "SubmissionStatus",
+    "SubjectStatus",
     "UserRole",
     "Group",
     "OutboxMessage",

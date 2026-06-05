@@ -308,6 +308,14 @@ teacher:
   what_went_well: Що пройшло добре
   what_didnt_go_well: Що пройшло погано
   what_to_change: Що змінити наступного семестру
+  upload_config_button: Завантажити конфіг
+  config_apply_created: "Предмет успішно створено: "
+  config_apply_updated: "Предмет успішно оновлено: "
+  config_apply_unchanged: Конфіг не змінився — оновлень не потрібно.
+  config_apply_error_ownership: Ви не є власником цього предмету. Лише власник може застосовувати конфіг.
+  config_apply_error_invalid: Невірний файл конфігурації.
+  remove_subject_button: Видалити предмет
+  remove_subject_confirm: Ви впевнені? Предмет буде позначено як видалений.
   quiz_editor_title: Редактор тесту
   quiz_settings: Налаштування тесту
   quiz_export_json: Експорт JSON

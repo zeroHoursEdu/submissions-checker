@@ -106,3 +106,11 @@ class NotificationMethod(enum.StrEnum):
 
     def __str__(self) -> str:
         return self.value
+
+
+class SubjectStatus(enum.StrEnum):
+    ACTIVE = "ACTIVE"
+    DELETED = "DELETED"
+
+    def __str__(self) -> str:
+        return self.value

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,8 @@ class SubjectPluginConfig(Base, TimestampMixin):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     loaded_from: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Raw ZIP bytes from UI upload; NULL for rows inserted by the startup PluginLoader
+    zip_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
 
     subject: Mapped[Subject] = relationship("Subject", back_populates="plugin_configs")
 
