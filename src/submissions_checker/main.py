@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from pathlib import Path
 
-from submissions_checker.api.routes import admin, analytics, auth, health, notifications, student_portal, student_quiz, teacher_portal, users, webhooks
+from submissions_checker.api.routes import admin, analytics, auth, feedback, health, notifications, student_portal, student_quiz, teacher_portal, users, webhooks
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.database import close_db, init_db
 from submissions_checker.core.logging import configure_logging, get_logger
@@ -106,6 +106,7 @@ def create_app() -> FastAPI:
 
     # Register routers
     app.include_router(health.router)
+    app.include_router(feedback.router)
     app.include_router(webhooks.router)
     app.include_router(users.router)
     app.include_router(auth.router)

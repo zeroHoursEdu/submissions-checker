@@ -16,8 +16,11 @@ from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.user import User
 from submissions_checker.services.notifications.dispatcher import build_dispatcher
+from submissions_checker.db.models.feedback_token import FeedbackToken
+from submissions_checker.db.models.subject import Subject
 from submissions_checker.services.notifications.templates import (
     deadline_reminder_template,
+    feedback_request_template,
     new_submission_template,
     quiz_result_template,
     submission_reviewed_template,
@@ -40,6 +43,68 @@ async def _is_email_enabled(db: AsyncSession, student_id: int, case: Notificatio
     )
     pref = result.scalar_one_or_none()
     return pref is None or pref.enabled
+
+
+async def execute_feedback_request_task(db: AsyncSession, payload: dict) -> None:
+    """Email a student their personal feedback link.
+
+    Payload: feedback_token_id
+    """
+    from submissions_checker.db.models.feedback_request import FeedbackRequest
+    from submissions_checker.db.models.semester import Semester
+
+    settings = get_settings()
+    token_id: int = payload["feedback_token_id"]
+
+    token_result = await db.execute(select(FeedbackToken).where(FeedbackToken.id == token_id))
+    token = token_result.scalar_one_or_none()
+    if token is None:
+        logger.warning("feedback_request_task_token_not_found", token_id=token_id)
+        return
+
+    student_result = await db.execute(select(Student).where(Student.id == token.student_id))
+    student = student_result.scalar_one_or_none()
+    if student is None:
+        logger.warning("feedback_request_task_student_not_found", student_id=token.student_id)
+        return
+
+    if not await _is_email_enabled(db, student.id, NotificationCase.FEEDBACK_REQUEST):
+        logger.info("feedback_request_email_suppressed", token_id=token_id, student_id=student.id)
+        return
+
+    fr_result = await db.execute(select(FeedbackRequest).where(FeedbackRequest.id == token.feedback_request_id))
+    feedback_request = fr_result.scalar_one_or_none()
+    if feedback_request is None:
+        logger.warning("feedback_request_task_request_not_found", feedback_request_id=token.feedback_request_id)
+        return
+
+    subject_result = await db.execute(select(Subject).where(Subject.id == feedback_request.subject_id))
+    subject = subject_result.scalar_one_or_none()
+    if subject is None:
+        logger.warning("feedback_request_task_subject_not_found", subject_id=feedback_request.subject_id)
+        return
+
+    semester_result = await db.execute(select(Semester).where(Semester.id == feedback_request.semester_id))
+    semester = semester_result.scalar_one_or_none()
+    if semester is None:
+        logger.warning("feedback_request_task_semester_not_found", semester_id=feedback_request.semester_id)
+        return
+
+    feedback_url = f"{settings.app_base_url.rstrip('/')}/feedback/{token.token}"
+    email_subject, body = feedback_request_template(
+        full_name=student.full_name,
+        subject_name=subject.name,
+        semester_name=semester.name,
+        feedback_url=feedback_url,
+    )
+
+    dispatcher = build_dispatcher(settings)
+    if not dispatcher._channels:
+        logger.warning("feedback_request_task_no_channel", student_email=student.email)
+        return
+
+    await dispatcher.notify(student.email, email_subject, body)
+    logger.info("feedback_request_email_sent", token_id=token_id, student_email=student.email)
 
 
 async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> None:

@@ -129,6 +129,21 @@ def failed_template(github_username: str, score: int, max_score: int, lab_id: in
     return subject, body
 
 
+def feedback_request_template(full_name: str, subject_name: str, semester_name: str, feedback_url: str) -> tuple[str, str]:
+    """Return (subject, body) for a feedback request notification."""
+    subject = f"Share your feedback for '{subject_name}' — {semester_name}"
+    body = (
+        f"Hi {full_name},\n\n"
+        f"Your teacher would like to hear your feedback for the course '{subject_name}' "
+        f"({semester_name}).\n\n"
+        f"Please take a few minutes to share your thoughts by clicking the link below:\n\n"
+        f"{feedback_url}\n\n"
+        f"The link is personal and can only be used once.\n\n"
+        f"Best regards,\nThe Teaching Team"
+    )
+    return subject, body
+
+
 def credentials_template(full_name: str, username: str, password: str, login_url: str) -> tuple[str, str]:
     """Return (subject, body) for a new student account welcome email."""
     subject = "Your account credentials for EduTrack"

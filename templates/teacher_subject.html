@@ -17,7 +17,27 @@
     <p class="text-slate-500 text-sm mt-1">{{ subject.description }}</p>
     {% endif %}
   </div>
-  <div class="flex gap-2 shrink-0">
+  <div class="flex gap-2 shrink-0 flex-wrap">
+    <a href="/teacher/subjects/{{ subject.id }}/feedback"
+       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm hover:bg-indigo-100 transition-colors">
+      View Feedback
+    </a>
+    {% if not current_semester %}
+    <span title="No active semester (summer gap)" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-sm cursor-not-allowed">
+      Request Feedback
+    </span>
+    {% elif feedback_request %}
+    <span title="Already sent for {{ current_semester.name }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-sm cursor-not-allowed">
+      Feedback Sent
+    </span>
+    {% else %}
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/feedback/request">
+      <button type="submit"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-300 bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition-colors">
+        Request Feedback
+      </button>
+    </form>
+    {% endif %}
     <a href="/teacher/subjects/{{ subject.id }}/edit"
        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 text-sm hover:bg-slate-50 transition-colors">
       Edit
@@ -28,6 +48,20 @@
     </a>
   </div>
 </div>
+
+{% if feedback_sent %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
+  Feedback requests sent to all enrolled students.
+</div>
+{% elif feedback_error == "already_sent" %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+  Feedback request was already sent for this semester.
+</div>
+{% elif feedback_error == "no_active_semester" %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm">
+  Feedback requests can only be sent during an active semester (Sep–Jan or Feb–Jun).
+</div>
+{% endif %}
 
 <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
 

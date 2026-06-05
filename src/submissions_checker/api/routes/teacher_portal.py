@@ -5,19 +5,25 @@ from __future__ import annotations
 import csv
 import io
 import secrets
+from datetime import UTC, date, datetime
 
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, false, func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.dependencies import DBSession, TeacherUser
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
+    FeedbackRequest,
+    FeedbackResponse,
+    FeedbackToken,
     OutboxMessage,
     QuizAttempt,
+    Semester,
     Student,
     StudentAssignment,
     Subject,
@@ -101,6 +107,22 @@ async def teacher_subject(
     )
     assignments = assignments_result.scalars().all()
 
+    semester_result = await db.execute(_current_semester_query())
+    current_semester = semester_result.scalar_one_or_none()
+
+    feedback_request = None
+    if current_semester:
+        fr_result = await db.execute(
+            select(FeedbackRequest).where(
+                FeedbackRequest.subject_id == subject_id,
+                FeedbackRequest.semester_id == current_semester.id,
+            )
+        )
+        feedback_request = fr_result.scalar_one_or_none()
+
+    feedback_sent = request.query_params.get("feedback_sent") == "1"
+    feedback_error = request.query_params.get("feedback_error")
+
     return templates.TemplateResponse(
         request=request,
         name="teacher_subject.html",
@@ -109,6 +131,10 @@ async def teacher_subject(
             "subject": subject,
             "students": students,
             "assignments": assignments,
+            "current_semester": current_semester,
+            "feedback_request": feedback_request,
+            "feedback_sent": feedback_sent,
+            "feedback_error": feedback_error,
         },
     )
 
@@ -937,3 +963,176 @@ async def add_student(
     await db.commit()
 
     return RedirectResponse(url="/teacher/students?imported=1&skipped=0", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+def _current_semester_query():
+    today = date.today()
+    return select(Semester).where(Semester.start_date <= today, Semester.end_date >= today)
+
+
+@router.post("/subjects/{subject_id}/feedback/request")
+async def request_feedback(
+    subject_id: int,
+    request: Request,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> RedirectResponse:
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    semester_result = await db.execute(_current_semester_query())
+    semester = semester_result.scalar_one_or_none()
+    if semester is None:
+        return RedirectResponse(
+            url=f"/teacher/subjects/{subject_id}?feedback_error=no_active_semester",
+            status_code=303,
+        )
+
+    students_result = await db.execute(
+        select(Student)
+        .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
+        .where(SubjectsStudents.subject_id == subject_id)
+    )
+    students = students_result.scalars().all()
+
+    feedback_request = FeedbackRequest(
+        subject_id=subject_id,
+        semester_id=semester.id,
+        created_by_teacher_id=current_user.user_id,
+    )
+    db.add(feedback_request)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        return RedirectResponse(
+            url=f"/teacher/subjects/{subject_id}?feedback_error=already_sent",
+            status_code=303,
+        )
+
+    for student in students:
+        token_str = secrets.token_urlsafe(32)
+        db.add(FeedbackToken(
+            feedback_request_id=feedback_request.id,
+            student_id=student.id,
+            token=token_str,
+        ))
+        await db.flush()
+        token_result = await db.execute(
+            select(FeedbackToken).where(FeedbackToken.token == token_str)
+        )
+        saved_token = token_result.scalar_one()
+        db.add(OutboxMessage(
+            event_type=OutboxEventType.FEEDBACK_REQUEST_SENT,
+            state=OutboxMessageState.PENDING,
+            payload={"feedback_token_id": saved_token.id},
+        ))
+
+    await db.commit()
+    return RedirectResponse(
+        url=f"/teacher/subjects/{subject_id}?feedback_sent=1",
+        status_code=303,
+    )
+
+
+@router.get("/subjects/{subject_id}/feedback", response_class=HTMLResponse)
+async def view_feedback(
+    subject_id: int,
+    request: Request,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> HTMLResponse:
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    semester_result = await db.execute(_current_semester_query())
+    current_semester = semester_result.scalar_one_or_none()
+
+    fr_result = await db.execute(
+        select(FeedbackRequest)
+        .where(
+            FeedbackRequest.subject_id == subject_id,
+            *(
+                [FeedbackRequest.semester_id == current_semester.id]
+                if current_semester
+                else [false()]
+            ),
+        )
+        .options(selectinload(FeedbackRequest.semester))
+    )
+    feedback_request = fr_result.scalar_one_or_none()
+
+    responses = []
+    avg_rating = None
+    if feedback_request:
+        rows_result = await db.execute(
+            select(FeedbackResponse, Student)
+            .join(FeedbackToken, FeedbackToken.id == FeedbackResponse.feedback_token_id)
+            .join(Student, Student.id == FeedbackToken.student_id)
+            .where(FeedbackResponse.subject_id == subject_id)
+            .order_by(FeedbackResponse.submitted_at.desc())
+        )
+        rows = rows_result.all()
+        responses = [{"response": r, "student": s} for r, s in rows]
+        if responses:
+            avg_rating = round(sum(row["response"].rating for row in responses) / len(responses), 1)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="teacher_feedback_view.html",
+        context={
+            "current_user": current_user,
+            "subject": subject,
+            "feedback_request": feedback_request,
+            "responses": responses,
+            "avg_rating": avg_rating,
+            "current_semester": current_semester,
+        },
+    )
+
+
+@router.get("/subjects/{subject_id}/feedback/export.csv")
+async def export_feedback_csv(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> StreamingResponse:
+    subject = await db.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    rows_result = await db.execute(
+        select(FeedbackResponse, Student)
+        .join(FeedbackToken, FeedbackToken.id == FeedbackResponse.feedback_token_id)
+        .join(Student, Student.id == FeedbackToken.student_id)
+        .where(FeedbackResponse.subject_id == subject_id)
+        .order_by(FeedbackResponse.submitted_at.asc())
+    )
+    rows = rows_result.all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["student_name", "student_email", "rating", "went_well", "went_bad", "to_change", "submitted_at"])
+    for resp, student in rows:
+        writer.writerow([
+            student.full_name,
+            student.email,
+            resp.rating,
+            resp.went_well,
+            resp.went_bad,
+            resp.to_change,
+            resp.submitted_at.isoformat(),
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=feedback_{subject_id}.csv"},
+    )

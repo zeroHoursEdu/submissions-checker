@@ -14,6 +14,7 @@ from submissions_checker.db.session import get_session
 from submissions_checker.workers.tasks.check_tasks import execute_check_task
 from submissions_checker.workers.tasks.notification_tasks import (
     execute_deadline_reminder_task,
+    execute_feedback_request_task,
     execute_new_submission_task,
     execute_quiz_result_task,
     execute_submission_reviewed_task,
@@ -189,6 +190,9 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     elif message.event_type == OutboxEventType.RUN_AI_REVIEW:
         await execute_ai_review_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.FEEDBACK_REQUEST_SENT:
+        await execute_feedback_request_task(db, message.payload)
 
     else:
         logger.error(

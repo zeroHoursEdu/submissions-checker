@@ -533,6 +533,7 @@ async def student_summary(
 
 _ALL_CASES: list[tuple[NotificationCase, str]] = [
     (NotificationCase.SUBMISSION_CHECKED, "Submission Checked"),
+    (NotificationCase.FEEDBACK_REQUEST, "Feedback Request"),
 ]
 _ALL_METHODS: list[tuple[NotificationMethod, str]] = [
     (NotificationMethod.EMAIL, "Email"),

@@ -57,6 +57,7 @@ class OutboxEventType(enum.StrEnum):
     NEW_SUBMISSION = "NEW_SUBMISSION"
     RUN_CHECKS = "RUN_CHECKS"
     RUN_AI_REVIEW = "RUN_AI_REVIEW"
+    FEEDBACK_REQUEST_SENT = "FEEDBACK_REQUEST_SENT"
 
     def __str__(self) -> str:
         return self.value
@@ -94,6 +95,7 @@ class QuizAttemptStatus(enum.StrEnum):
 
 class NotificationCase(enum.StrEnum):
     SUBMISSION_CHECKED = "SUBMISSION_CHECKED"
+    FEEDBACK_REQUEST = "FEEDBACK_REQUEST"
 
     def __str__(self) -> str:
         return self.value
