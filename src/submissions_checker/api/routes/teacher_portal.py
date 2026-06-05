@@ -10,7 +10,6 @@ from datetime import UTC, date, datetime
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, false, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -36,9 +35,9 @@ from submissions_checker.db.models import (
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, SubmissionStatus, UserRole
 from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
+from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/teacher", tags=["teacher-portal"])
-templates = Jinja2Templates(directory="templates")
 
 _SAMPLE_CSV = "student_group,student_name,student_surname,email\nIT-21,Ivan,Petrenko,ivan@example.com\nIT-21,Olena,Kovalenko,olena@example.com\n"
 
@@ -76,11 +75,7 @@ async def teacher_dashboard(
     )
     subjects = [row._asdict() for row in result]
 
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_dashboard.html",
-        context={"current_user": current_user, "subjects": subjects},
-    )
+    return render(request, "teacher_dashboard.html", {"current_user": current_user, "subjects": subjects})
 
 
 @router.get("/subjects/{subject_id}", response_class=HTMLResponse)
@@ -123,10 +118,7 @@ async def teacher_subject(
     feedback_sent = request.query_params.get("feedback_sent") == "1"
     feedback_error = request.query_params.get("feedback_error")
 
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_subject.html",
-        context={
+    return render(request, "teacher_subject.html", {
             "current_user": current_user,
             "subject": subject,
             "students": students,
@@ -135,8 +127,7 @@ async def teacher_subject(
             "feedback_request": feedback_request,
             "feedback_sent": feedback_sent,
             "feedback_error": feedback_error,
-        },
-    )
+        })
 
 
 @router.get("/subjects/{subject_id}/assignments/{sa_id}", response_class=HTMLResponse)
@@ -226,17 +217,13 @@ async def teacher_assignment(
             if sa_id_val not in violation_flags:
                 violation_flags[sa_id_val] = vr.violations or {}
 
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_assignment.html",
-        context={
+    return render(request, "teacher_assignment.html", {
             "current_user": current_user,
             "assignment": assignment,
             "subject_id": subject_id,
             "rows": rows,
             "violation_flags": violation_flags,
-        },
-    )
+        })
 
 
 @router.get("/students/sample.csv")
@@ -494,16 +481,12 @@ async def teacher_students(
     )
     students = [row._asdict() for row in rows_result]
 
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_students.html",
-        context={
+    return render(request, "teacher_students.html", {
             "current_user": current_user,
             "students": students,
             "imported": imported,
             "skipped": skipped,
-        },
-    )
+        })
 
 
 @router.post("/students/import")
@@ -629,17 +612,13 @@ async def teacher_review_submission(
     sa = submission.students_assignment
     subjects_assignment = sa.subjects_assignment
 
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_submission_review.html",
-        context={
+    return render(request, "teacher_submission_review.html", {
             "current_user": current_user,
             "submission": submission,
             "student": sa.student,
             "assignment": subjects_assignment,
             "subject": subjects_assignment.subject,
-        },
-    )
+        })
 
 
 @router.post("/submissions/{submission_id}/review")
@@ -878,11 +857,7 @@ async def add_student_page(
 ) -> HTMLResponse:
     groups_result = await db.execute(select(Group).order_by(Group.name))
     groups = groups_result.scalars().all()
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_add_student.html",
-        context={"current_user": current_user, "groups": groups, "error": None, "success": None},
-    )
+    return render(request, "teacher_add_student.html", {"current_user": current_user, "groups": groups, "error": None, "success": None})
 
 
 @router.post("/students/add", response_model=None)
@@ -902,17 +877,12 @@ async def add_student(
     existing = await db.execute(select(Student.id).where(Student.email == email))
     if existing.scalar_one_or_none() is not None:
         groups_result = await db.execute(select(Group).order_by(Group.name))
-        return templates.TemplateResponse(  # type: ignore[return-value]
-            request=request,
-            name="teacher_add_student.html",
-            context={
+        return render(request, "teacher_add_student.html", {
                 "current_user": current_user,
                 "groups": groups_result.scalars().all(),
                 "error": "A student with this email already exists.",
                 "success": None,
-            },
-            status_code=422,
-        )
+            }, status_code=422)  # type: ignore[return-value]
 
     group_result = await db.execute(select(Group).where(Group.name == group_name))
     group = group_result.scalar_one_or_none()
@@ -1083,18 +1053,14 @@ async def view_feedback(
         if responses:
             avg_rating = round(sum(row["response"].rating for row in responses) / len(responses), 1)
 
-    return templates.TemplateResponse(
-        request=request,
-        name="teacher_feedback_view.html",
-        context={
+    return render(request, "teacher_feedback_view.html", {
             "current_user": current_user,
             "subject": subject,
             "feedback_request": feedback_request,
             "responses": responses,
             "avg_rating": avg_rating,
             "current_semester": current_semester,
-        },
-    )
+        })
 
 
 @router.get("/subjects/{subject_id}/feedback/export.csv")

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ student.full_name }} — Subjects{% endblock %}
+{% block title %}{{ student.full_name }} — {{ vocab.student.subjects_page }}{% endblock %}
 
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
@@ -11,20 +11,20 @@
 <div class="flex items-start justify-between mb-8">
   <div>
     <h1 class="text-2xl font-bold text-slate-900">
-      Hello, {{ student.full_name.split()[0] }} 👋
+      {{ vocab.student.hello }} {{ student.full_name.split()[0] }} 👋
     </h1>
     <p class="text-slate-500 mt-1 text-sm">
       {% if subjects %}
-        {{ subjects | length }} subject{{ 's' if subjects | length != 1 else '' }} enrolled
+        {{ subjects | length }} {{ vocab.student.subjects_enrolled }}
       {% else %}
-        No subjects yet
+        {{ vocab.student.no_subjects }}
       {% endif %}
     </p>
   </div>
   <div class="flex items-center gap-3 flex-wrap shrink-0">
     <a href="/portal/summary"
        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
-      My Summary
+      {{ vocab.student.my_summary }}
     </a>
     {% if subjects %}
     <div class="hidden sm:flex items-center gap-6 text-sm text-slate-500">
@@ -32,7 +32,7 @@
       {% set total_all = subjects | sum(attribute='total_assignments') %}
       <div class="text-right">
         <div class="text-2xl font-bold text-slate-900">{{ total_done }}<span class="text-slate-400 font-normal text-base">/{{ total_all }}</span></div>
-        <div class="text-xs text-slate-400 mt-0.5">assignments done</div>
+        <div class="text-xs text-slate-400 mt-0.5">{{ vocab.student.assignments_done }}</div>
       </div>
     </div>
     {% endif %}
@@ -59,7 +59,7 @@
 
       <div class="mt-auto">
         <div class="flex justify-between text-xs text-slate-400 mb-1.5">
-          <span>Progress</span>
+          <span>{{ vocab.common.progress }}</span>
           <span class="font-medium {% if s.total_assignments > 0 and s.done_assignments == s.total_assignments %}text-green-600{% endif %}">
             {{ s.done_assignments }} / {{ s.total_assignments }}
           </span>
@@ -80,8 +80,8 @@
 {% else %}
   <div class="text-center py-20 bg-white rounded-xl border border-slate-200 shadow-sm">
     <div class="text-4xl mb-3">📚</div>
-    <p class="text-slate-600 font-medium">No subjects yet</p>
-    <p class="text-slate-400 text-sm mt-1">Contact your instructor to get enrolled in subjects.</p>
+    <p class="text-slate-600 font-medium">{{ vocab.student.no_subjects }}</p>
+    <p class="text-slate-400 text-sm mt-1">{{ vocab.student.no_subjects_hint }}</p>
   </div>
 {% endif %}
 {% endblock %}

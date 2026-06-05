@@ -6,16 +6,15 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from submissions_checker.api.dependencies import DBSession
 from submissions_checker.db.models.feedback_response import FeedbackResponse
 from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.subject import Subject
+from submissions_checker.core.templates import render
 
 router = APIRouter(tags=["feedback"])
-templates = Jinja2Templates(directory="templates")
 
 
 @router.get("/feedback/{token}", response_class=HTMLResponse)
@@ -26,19 +25,10 @@ async def feedback_form(token: str, request: Request, db: DBSession) -> HTMLResp
     feedback_token = token_result.scalar_one_or_none()
 
     if feedback_token is None:
-        return templates.TemplateResponse(
-            request=request,
-            name="feedback_not_found.html",
-            status_code=404,
-            context={},
-        )
+        return render(request, "feedback_not_found.html", {}, status_code=404)
 
     if feedback_token.used_at is not None:
-        return templates.TemplateResponse(
-            request=request,
-            name="feedback_already_submitted.html",
-            context={},
-        )
+        return render(request, "feedback_already_submitted.html", {})
 
     from submissions_checker.db.models.feedback_request import FeedbackRequest
     fr_result = await db.execute(
@@ -48,11 +38,7 @@ async def feedback_form(token: str, request: Request, db: DBSession) -> HTMLResp
     subject_result = await db.execute(select(Subject).where(Subject.id == feedback_request.subject_id))
     subject = subject_result.scalar_one()
 
-    return templates.TemplateResponse(
-        request=request,
-        name="feedback_form.html",
-        context={"token": token, "subject": subject},
-    )
+    return render(request, "feedback_form.html", {"token": token, "subject": subject})
 
 
 @router.post("/feedback/{token}", response_model=None)
@@ -71,19 +57,10 @@ async def submit_feedback(
     feedback_token = token_result.scalar_one_or_none()
 
     if feedback_token is None:
-        return templates.TemplateResponse(
-            request=request,
-            name="feedback_not_found.html",
-            status_code=404,
-            context={},
-        )
+        return render(request, "feedback_not_found.html", {}, status_code=404)
 
     if feedback_token.used_at is not None:
-        return templates.TemplateResponse(
-            request=request,
-            name="feedback_already_submitted.html",
-            context={},
-        )
+        return render(request, "feedback_already_submitted.html", {})
 
     if rating < 1 or rating > 5:
         from submissions_checker.db.models.feedback_request import FeedbackRequest
@@ -93,12 +70,7 @@ async def submit_feedback(
         feedback_request = fr_result.scalar_one()
         subject_result = await db.execute(select(Subject).where(Subject.id == feedback_request.subject_id))
         subject = subject_result.scalar_one()
-        return templates.TemplateResponse(
-            request=request,
-            name="feedback_form.html",
-            status_code=422,
-            context={"token": token, "subject": subject, "error": "Rating must be between 1 and 5."},
-        )
+        return render(request, "feedback_form.html", {"token": token, "subject": subject, "error": "Rating must be between 1 and 5."}, status_code=422)
 
     from submissions_checker.db.models.feedback_request import FeedbackRequest
     fr_result = await db.execute(
@@ -123,8 +95,4 @@ async def submit_feedback(
 
 @router.get("/feedback/{token}/thanks", response_class=HTMLResponse)
 async def feedback_thanks(token: str, request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request=request,
-        name="feedback_thank_you.html",
-        context={},
-    )
+    return render(request, "feedback_thank_you.html", {})

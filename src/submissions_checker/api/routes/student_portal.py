@@ -9,7 +9,6 @@ from pathlib import Path
 import aiofiles
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, nullslast, select
 from sqlalchemy.orm import selectinload
 
@@ -38,9 +37,9 @@ from submissions_checker.db.models.notification_preference import NotificationPr
 from submissions_checker.services.audit import audit
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import compare_zip_files
+from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/portal", tags=["student-portal"])
-templates = Jinja2Templates(directory="templates")
 
 UPLOADS_DIR = Path("uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
@@ -98,11 +97,7 @@ async def subjects_grid(
         for s in subjects
     ]
 
-    return templates.TemplateResponse(
-        request=request,
-        name="subjects.html",
-        context={"current_user": current_user, "student": student, "subjects": subject_cards},
-    )
+    return render(request, "subjects.html", {"current_user": current_user, "student": student, "subjects": subject_cards})
 
 
 @router.get("/subjects/{subject_id}", response_class=HTMLResponse)
@@ -162,16 +157,12 @@ async def assignments_list(
             )
         )
 
-    return templates.TemplateResponse(
-        request=request,
-        name="assignments.html",
-        context={
+    return render(request, "assignments.html", {
             "current_user": current_user,
             "student": student,
             "subject": subject,
             "assignments": assignment_rows,
-        },
-    )
+        })
 
 
 @router.get("/subjects/{subject_id}/assignments/{sa_id}", response_class=HTMLResponse)
@@ -268,16 +259,12 @@ async def assignment_detail(
 
     student = await db.get(Student, student_id)
 
-    return templates.TemplateResponse(
-        request=request,
-        name="assignment_detail.html",
-        context={
+    return render(request, "assignment_detail.html", {
             "current_user": current_user,
             "student": student,
             "subject_id": subject_id,
             "assignment": detail,
-        },
-    )
+        })
 
 
 @router.post("/subjects/{subject_id}/assignments/{sa_id}/submit")
@@ -511,10 +498,7 @@ async def student_summary(
             "is_overdue": is_overdue,
         })
 
-    return templates.TemplateResponse(
-        request=request,
-        name="student_summary.html",
-        context={
+    return render(request, "student_summary.html", {
             "current_user": current_user,
             "student": student,
             "summary_rows": summary_rows,
@@ -523,8 +507,7 @@ async def student_summary(
             "total_assignments": len(all_rows),
             "upcoming_deadlines": upcoming_deadlines,
             "overdue": overdue,
-        },
-    )
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -561,11 +544,7 @@ async def notification_preferences_page(
             methods.append({"method": method, "method_label": method_label, "enabled": enabled})
         preferences.append({"case": case, "case_label": case_label, "methods": methods})
 
-    return templates.TemplateResponse(
-        request=request,
-        name="student_notification_preferences.html",
-        context={"current_user": current_user, "preferences": preferences},
-    )
+    return render(request, "student_notification_preferences.html", {"current_user": current_user, "preferences": preferences})
 
 
 @router.post("/notification-preferences/{case}/{method}/toggle")

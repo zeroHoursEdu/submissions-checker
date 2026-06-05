@@ -1,24 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Audit Log — Admin{% endblock %}
+{% block title %}{{ vocab.admin.audit_title }} — Admin{% endblock %}
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/admin" class="text-indigo-200 hover:text-white text-sm transition">Admin</a>
+  <a href="/admin" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.nav.admin_link }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Audit Log</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.admin.audit_log }}</span>
 {% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold text-slate-900 mb-6">Audit Log</h1>
+<h1 class="text-2xl font-bold text-slate-900 mb-6">{{ vocab.admin.audit_title }}</h1>
 
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
         <tr class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
-          <th class="px-5 py-3 text-left font-medium">Time</th>
-          <th class="px-5 py-3 text-left font-medium">Actor</th>
-          <th class="px-5 py-3 text-left font-medium">Action</th>
-          <th class="px-5 py-3 text-left font-medium">Target</th>
-          <th class="px-5 py-3 text-left font-medium">Detail</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_time }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_actor }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_action }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_target }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_detail }}</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
@@ -37,7 +37,7 @@
     </table>
   </div>
   {% if not logs %}
-  <div class="px-5 py-8 text-center text-slate-400 text-sm">No audit records yet.</div>
+  <div class="px-5 py-8 text-center text-slate-400 text-sm">{{ vocab.admin.no_audit_records }}</div>
   {% endif %}
 </div>
 {% endblock %}

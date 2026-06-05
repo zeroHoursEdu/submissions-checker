@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}My Summary{% endblock %}
+{% block title %}{{ vocab.student.summary_title }}{% endblock %}
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">Portal</a>
+  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.student.portal_tab }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Summary</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.student.summary_tab }}</span>
 {% endblock %}
 {% block content %}
 <div class="mb-7">
-  <h1 class="text-2xl font-bold text-slate-900 mb-1">My Progress Summary</h1>
+  <h1 class="text-2xl font-bold text-slate-900 mb-1">{{ vocab.student.my_progress }}</h1>
   <p class="text-slate-500 text-sm">{{ student.full_name }}</p>
 </div>
 
@@ -16,11 +16,11 @@
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-7">
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
     <div class="text-3xl font-bold text-indigo-600">{{ graded_count }}</div>
-    <div class="text-xs text-slate-500 mt-0.5">Graded</div>
+    <div class="text-xs text-slate-500 mt-0.5">{{ vocab.student.stat_graded }}</div>
   </div>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
     <div class="text-3xl font-bold text-slate-700">{{ total_assignments }}</div>
-    <div class="text-xs text-slate-500 mt-0.5">Total assignments</div>
+    <div class="text-xs text-slate-500 mt-0.5">{{ vocab.student.stat_total_assignments }}</div>
   </div>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
     {% if avg_grade is not none %}
@@ -28,11 +28,11 @@
     {% else %}
     <div class="text-3xl font-bold text-slate-300">—</div>
     {% endif %}
-    <div class="text-xs text-slate-500 mt-0.5">Avg grade</div>
+    <div class="text-xs text-slate-500 mt-0.5">{{ vocab.student.stat_avg_grade }}</div>
   </div>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
     <div class="text-3xl font-bold {% if overdue %}text-red-500{% else %}text-slate-300{% endif %}">{{ overdue | length }}</div>
-    <div class="text-xs text-slate-500 mt-0.5">Overdue</div>
+    <div class="text-xs text-slate-500 mt-0.5">{{ vocab.student.stat_overdue }}</div>
   </div>
 </div>
 
@@ -43,7 +43,7 @@
     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
     </svg>
-    Due within 7 days
+    {{ vocab.student.upcoming_deadlines }}
   </h2>
   <ul class="space-y-1">
     {% for r in upcoming_deadlines %}
@@ -60,17 +60,17 @@
 <!-- All assignments table -->
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
   <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-    <h2 class="font-semibold text-slate-900">All Assignments</h2>
+    <h2 class="font-semibold text-slate-900">{{ vocab.student.all_assignments }}</h2>
   </div>
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
         <tr class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-          <th class="px-5 py-3 text-left font-medium">Subject</th>
-          <th class="px-5 py-3 text-left font-medium">Assignment</th>
-          <th class="px-5 py-3 text-left font-medium">Deadline</th>
-          <th class="px-5 py-3 text-left font-medium">Status</th>
-          <th class="px-5 py-3 text-left font-medium">Grade</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.student.col_subject }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.student.col_assignment }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.student.col_deadline }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.student.col_status }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.student.col_grade }}</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
@@ -94,24 +94,24 @@
               <span class="{% if row.is_overdue %}text-red-600 font-medium{% endif %}">
                 {{ row.deadline.strftime("%b %d, %Y") }}
               </span>
-              {% if row.is_overdue %}<span class="ml-1 text-red-500 text-xs">Overdue</span>{% endif %}
+              {% if row.is_overdue %}<span class="ml-1 text-red-500 text-xs">{{ vocab.common.overdue }}</span>{% endif %}
             {% else %}
               <span class="text-slate-300">—</span>
             {% endif %}
           </td>
           <td class="px-5 py-3">
             {% if row.submission_status == "COMPLETED" %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Completed</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">{{ vocab.common.status_completed }}</span>
             {% elif row.submission_status == "FAILED" %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Failed</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{{ vocab.common.status_failed }}</span>
             {% elif row.submission_status == "QUIZ_SENT" %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Quiz pending</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{{ vocab.common.status_quiz_pending }}</span>
             {% elif row.submission_status == "WAITING_FOR_TEACHER_REVIEW" %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">In review</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">{{ vocab.common.status_in_review }}</span>
             {% elif row.submission_status %}
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{{ row.submission_status }}</span>
             {% else %}
-              <span class="text-slate-300 text-xs">Not submitted</span>
+              <span class="text-slate-300 text-xs">{{ vocab.common.status_not_submitted }}</span>
             {% endif %}
           </td>
           <td class="px-5 py-3">

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="uk" class="h-full">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Student Portal{% endblock %} — EduTrack</title>
+  <title>{% block title %}{{ vocab.student.portal_tab }}{% endblock %} — {{ vocab.nav.brand }}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style type="text/tailwindcss">
     @layer utilities {
@@ -22,7 +22,7 @@
   <header class="sticky top-0 z-20 bg-indigo-700 shadow-md">
     <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-2">
       <a href="/" class="text-white font-bold text-base tracking-tight hover:text-indigo-200 transition shrink-0">
-        EduTrack
+        {{ vocab.nav.brand }}
       </a>
       {% block breadcrumbs %}{% endblock %}
       <div class="ml-auto flex items-center gap-3 shrink-0">
@@ -30,15 +30,15 @@
           <span class="text-indigo-200 text-sm hidden sm:block">
             {{ current_user.username }}
             <span class="text-indigo-400 ml-1 text-xs">
-              {% if current_user.role == "TEACHER" %}Teacher
-              {% elif current_user.role == "ADMIN" %}Admin
-              {% else %}Student{% endif %}
+              {% if current_user.role == "TEACHER" %}{{ vocab.nav.role_teacher }}
+              {% elif current_user.role == "ADMIN" %}{{ vocab.nav.role_admin }}
+              {% else %}{{ vocab.nav.role_student }}{% endif %}
             </span>
           </span>
           <!-- Notification bell -->
           <a href="/notifications" id="notif-bell"
              class="relative text-indigo-200 hover:text-white transition-colors"
-             title="Notifications">
+             title="{{ vocab.nav.notifications }}">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round"
                     d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
@@ -50,25 +50,37 @@
           {% if current_user.role == "ADMIN" %}
           <a href="/admin"
              class="text-xs font-medium text-indigo-200 hover:text-white transition-colors hidden sm:block">
-            Admin
+            {{ vocab.nav.admin_link }}
           </a>
           {% endif %}
           {% if current_user.role == "STUDENT" %}
           <a href="/portal/notification-preferences"
              class="text-xs font-medium text-indigo-200 hover:text-white transition-colors hidden sm:block">
-            Notifications
+            {{ vocab.nav.notification_prefs_link }}
           </a>
+          {% endif %}
+          {% if available_languages | length > 1 %}
+          <form method="POST" action="/set-language" class="flex items-center">
+            <select name="lang" onchange="this.form.submit()"
+                    class="text-xs bg-indigo-600 text-indigo-100 border border-indigo-500 rounded px-1 py-0.5 focus:outline-none cursor-pointer">
+              {% for lang in available_languages %}
+              <option value="{{ lang.code }}" {% if request.cookies.get('lang') == lang.code %}selected{% endif %}>
+                {{ lang.label }}
+              </option>
+              {% endfor %}
+            </select>
+          </form>
           {% endif %}
           <form action="/auth/logout" method="POST">
             <button type="submit"
                     class="text-xs font-medium text-indigo-100 hover:text-white border border-indigo-500
                            hover:border-indigo-300 px-3 py-1 rounded-lg transition-colors">
-              Sign out
+              {{ vocab.nav.sign_out }}
             </button>
           </form>
         {% else %}
           <a href="/auth/login" class="text-xs font-medium text-indigo-200 hover:text-white transition">
-            Sign in
+            {{ vocab.nav.sign_in }}
           </a>
         {% endif %}
       </div>

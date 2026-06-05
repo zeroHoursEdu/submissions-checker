@@ -1,17 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Quiz Result{% endblock %}
+{% block title %}{{ vocab.quiz.result_breadcrumb }}{% endblock %}
 
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">Portal</a>
+  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.student.portal_tab }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Quiz Result</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.quiz.result_breadcrumb }}</span>
 {% endblock %}
 
 {% block content %}
 
-<!-- Score card -->
 {% set pct = ((attempt.score / attempt.max_score * 100) | round(1)) if attempt.max_score else 0 %}
 
 {% if attempt.status == "VIOLATION_FAIL" %}
@@ -20,7 +19,7 @@
     <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/>
   </svg>
   <div>
-    <strong>This attempt was automatically terminated</strong> due to anti-cheat policy violations detected during the quiz.
+    <strong>{{ vocab.quiz.violation_terminated }}</strong>
   </div>
 </div>
 {% endif %}
@@ -28,53 +27,50 @@
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6 text-center">
   {% if attempt.is_passed %}
   <div class="text-5xl mb-2">🎉</div>
-  <h1 class="text-2xl font-bold text-green-700 mb-1">Passed!</h1>
+  <h1 class="text-2xl font-bold text-green-700 mb-1">{{ vocab.quiz.result_passed }}</h1>
   {% elif attempt.status == "TIMED_OUT" %}
   <div class="text-5xl mb-2">⏱️</div>
-  <h1 class="text-2xl font-bold text-amber-700 mb-1">Time's up</h1>
+  <h1 class="text-2xl font-bold text-amber-700 mb-1">{{ vocab.quiz.result_times_up }}</h1>
   {% elif attempt.status == "VIOLATION_FAIL" %}
   <div class="text-5xl mb-2">🚫</div>
-  <h1 class="text-2xl font-bold text-red-700 mb-1">Quiz terminated</h1>
+  <h1 class="text-2xl font-bold text-red-700 mb-1">{{ vocab.quiz.result_terminated }}</h1>
   {% else %}
   <div class="text-5xl mb-2">📚</div>
-  <h1 class="text-2xl font-bold text-red-700 mb-1">Not passed</h1>
+  <h1 class="text-2xl font-bold text-red-700 mb-1">{{ vocab.quiz.result_not_passed }}</h1>
   {% endif %}
 
   <p class="text-slate-500 text-sm mb-5">
-    {% if attempt.status == "TIMED_OUT" %}Time ran out before you could submit.
-    {% elif attempt.status == "VIOLATION_FAIL" %}Your quiz was automatically failed. The teacher has been notified.
-    {% elif attempt.is_passed %}Great job — you answered enough questions correctly.
-    {% else %}You can retry the quiz if attempts remain, or contact your teacher.{% endif %}
+    {% if attempt.status == "TIMED_OUT" %}{{ vocab.quiz.result_time_out_msg }}
+    {% elif attempt.status == "VIOLATION_FAIL" %}{{ vocab.quiz.result_violation_msg }}
+    {% elif attempt.is_passed %}{{ vocab.quiz.result_great_job }}
+    {% else %}{{ vocab.quiz.result_retry_msg }}{% endif %}
   </p>
 
-  <!-- Score display -->
   <div class="inline-flex items-baseline gap-1.5 mb-4">
     <span class="text-4xl font-bold {% if attempt.is_passed %}text-green-700{% else %}text-slate-700{% endif %}">{{ attempt.score }}</span>
     <span class="text-slate-400 text-lg">/ {{ attempt.max_score }}</span>
     <span class="text-slate-500 text-sm ml-1">({{ pct }}%)</span>
   </div>
 
-  <!-- Progress bar -->
   <div class="w-full max-w-xs mx-auto bg-slate-100 rounded-full h-3 overflow-hidden mb-2">
     <div class="h-full rounded-full transition-all {% if attempt.is_passed %}bg-green-500{% else %}bg-red-400{% endif %}"
          style="width: {{ pct }}%"></div>
   </div>
   {% set threshold_pct = (attempt.config_snapshot.get('pass_threshold_pct', 0.6) * 100) | round(0) | int %}
-  <p class="text-xs text-slate-400">Pass threshold: {{ threshold_pct }}%</p>
+  <p class="text-xs text-slate-400">{{ vocab.quiz.pass_threshold }} {{ threshold_pct }}%</p>
 </div>
 
 <!-- Per-question breakdown -->
 {% if show_correct or question_results %}
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
   <div class="px-5 py-4 border-b border-slate-100">
-    <h2 class="font-semibold text-slate-900">Question Breakdown</h2>
+    <h2 class="font-semibold text-slate-900">{{ vocab.quiz.question_breakdown }}</h2>
   </div>
   <div class="divide-y divide-slate-100">
     {% for qr in question_results %}
     {% set q = qr.question %}
     <div class="p-4">
       <div class="flex items-start gap-3">
-        <!-- Correct / wrong icon -->
         <div class="shrink-0 mt-0.5">
           {% if qr.is_correct %}
             <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-700">
@@ -91,27 +87,26 @@
 
           {% if qr.answer is not none %}
           <p class="text-xs text-slate-500 mb-1">
-            <span class="font-medium text-slate-600">Your answer: </span>
+            <span class="font-medium text-slate-600">{{ vocab.quiz.your_answer }}</span>
             {% if q.type == "SINGLE_CHOICE" %}
               {{ q.config.options[qr.answer.selected] if qr.answer.selected is not none and qr.answer.selected < q.config.options|length else "—" }}
             {% elif q.type == "MULTIPLE_CHOICE" %}
               {% if qr.answer.selected %}
                 {{ qr.answer.selected | map('int') | map('string') | join(', ') }}
-                {# Would be nicer to resolve option labels but indices are safe #}
-              {% else %}none{% endif %}
+              {% else %}{{ vocab.quiz.none_answer }}{% endif %}
             {% elif q.type == "ORDERING" %}
               {% if qr.answer.order %}
                 {{ qr.answer.order | map('int') | list | map(attribute='__str__') | join(' → ') }}
               {% else %}—{% endif %}
             {% elif q.type == "TRUE_FALSE" %}
-              {{ "True" if qr.answer.value else "False" }}
+              {{ vocab.common.true if qr.answer.value else vocab.common.false }}
             {% endif %}
           </p>
           {% endif %}
 
           {% if show_correct and not qr.is_correct %}
           <p class="text-xs text-green-700 font-medium">
-            Correct answer:
+            {{ vocab.quiz.correct_answer }}
             {% if q.type == "SINGLE_CHOICE" %}
               {{ q.config.options[q.config.correct] }}
             {% elif q.type == "MULTIPLE_CHOICE" %}
@@ -119,7 +114,7 @@
             {% elif q.type == "ORDERING" %}
               {% for idx in q.config.correct_order %}{{ q.config.items[idx] }}{% if not loop.last %} → {% endif %}{% endfor %}
             {% elif q.type == "TRUE_FALSE" %}
-              {{ "True" if q.config.correct else "False" }}
+              {{ vocab.common.true if q.config.correct else vocab.common.false }}
             {% endif %}
           </p>
           {% endif %}
@@ -139,10 +134,10 @@
     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
     </svg>
-    Back to Assignment
+    {{ vocab.quiz.back_to_assignment }}
   </a>
   {% if not attempt.is_passed %}
-  <p class="text-xs text-slate-400">Re-submit your work to get a new quiz attempt.</p>
+  <p class="text-xs text-slate-400">{{ vocab.quiz.resubmit_for_new_quiz }}</p>
   {% endif %}
 </div>
 

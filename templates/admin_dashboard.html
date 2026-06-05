@@ -1,34 +1,33 @@
 {% extends "base.html" %}
-{% block title %}Admin Dashboard{% endblock %}
+{% block title %}{{ vocab.admin.dashboard_title }}{% endblock %}
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Admin</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.nav.admin_link }}</span>
 {% endblock %}
 {% block content %}
 <div class="flex items-start justify-between mb-8">
   <div>
-    <h1 class="text-2xl font-bold text-slate-900">Admin Dashboard</h1>
-    <p class="text-slate-500 mt-1 text-sm">System overview and management</p>
+    <h1 class="text-2xl font-bold text-slate-900">{{ vocab.admin.dashboard_title }}</h1>
+    <p class="text-slate-500 mt-1 text-sm">{{ vocab.admin.system_overview }}</p>
   </div>
   <div class="flex gap-3">
     <a href="/admin/users"
        class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors">
-      Users
+      {{ vocab.admin.users }}
     </a>
     <a href="/admin/audit"
        class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors">
-      Audit Log
+      {{ vocab.admin.audit_log }}
     </a>
     <a href="/admin/teachers/create"
        class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
-      Add Teacher
+      {{ vocab.admin.add_teacher }}
     </a>
   </div>
 </div>
 
-<!-- Stats -->
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-  {% for role, label in [('TEACHER','Teachers'),('STUDENT','Students'),('ADMIN','Admins')] %}
+  {% for role, label in [('TEACHER', vocab.nav.role_teacher), ('STUDENT', vocab.nav.role_student), ('ADMIN', vocab.nav.role_admin)] %}
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
     <div class="text-3xl font-bold text-indigo-600">{{ user_counts.get(role, 0) }}</div>
     <div class="text-xs text-slate-500 mt-0.5">{{ label }}</div>
@@ -38,24 +37,23 @@
     <div class="text-3xl font-bold {% if outbox_counts.get('PENDING', 0) > 0 %}text-amber-500{% else %}text-slate-300{% endif %}">
       {{ outbox_counts.get('PENDING', 0) }}
     </div>
-    <div class="text-xs text-slate-500 mt-0.5">Outbox pending</div>
+    <div class="text-xs text-slate-500 mt-0.5">{{ vocab.admin.stat_outbox_pending }}</div>
   </div>
 </div>
 
-<!-- Recent audit -->
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
   <div class="px-5 py-4 border-b border-slate-100">
-    <h2 class="font-semibold text-slate-900">Recent Activity</h2>
+    <h2 class="font-semibold text-slate-900">{{ vocab.admin.recent_activity }}</h2>
   </div>
   {% if recent_audit %}
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
         <tr class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
-          <th class="px-5 py-3 text-left font-medium">Time</th>
-          <th class="px-5 py-3 text-left font-medium">Actor</th>
-          <th class="px-5 py-3 text-left font-medium">Action</th>
-          <th class="px-5 py-3 text-left font-medium">Target</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_time }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_actor }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_action }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_target }}</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
@@ -73,7 +71,7 @@
     </table>
   </div>
   {% else %}
-  <div class="px-5 py-8 text-center text-slate-400 text-sm">No activity yet.</div>
+  <div class="px-5 py-8 text-center text-slate-400 text-sm">{{ vocab.admin.no_activity }}</div>
   {% endif %}
 </div>
 {% endblock %}

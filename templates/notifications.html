@@ -1,17 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Notifications{% endblock %}
+{% block title %}{{ vocab.notifications.page_title }}{% endblock %}
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Notifications</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.notifications.breadcrumb }}</span>
 {% endblock %}
 {% block content %}
 <div class="flex items-center justify-between mb-6">
-  <h1 class="text-2xl font-bold text-slate-900">Notifications</h1>
+  <h1 class="text-2xl font-bold text-slate-900">{{ vocab.notifications.page_title }}</h1>
   {% if notifications %}
   <form method="POST" action="/notifications/read-all">
     <button type="submit"
             class="text-sm text-indigo-600 hover:text-indigo-800 font-medium hover:underline transition-colors">
-      Mark all as read
+      {{ vocab.notifications.mark_all_read }}
     </button>
   </form>
   {% endif %}
@@ -34,7 +34,7 @@
           <p class="font-medium text-slate-900 text-sm">{{ n.title }}</p>
           <p class="text-slate-500 text-sm mt-0.5">{{ n.body }}</p>
           {% if n.link %}
-          <a href="{{ n.link }}" class="text-xs text-indigo-600 hover:underline mt-1 inline-block">View →</a>
+          <a href="{{ n.link }}" class="text-xs text-indigo-600 hover:underline mt-1 inline-block">{{ vocab.notifications.view_link }}</a>
           {% endif %}
         </div>
         <div class="shrink-0 flex flex-col items-end gap-2">
@@ -42,7 +42,7 @@
           {% if not n.is_read %}
           <form method="POST" action="/notifications/{{ n.id }}/read">
             <button type="submit" class="text-xs text-slate-400 hover:text-slate-600 hover:underline">
-              Mark read
+              {{ vocab.notifications.mark_read }}
             </button>
           </form>
           {% endif %}
@@ -55,8 +55,8 @@
 {% else %}
 <div class="text-center py-20 bg-white rounded-xl border border-slate-200 shadow-sm">
   <div class="text-4xl mb-3">🔔</div>
-  <p class="text-slate-600 font-medium">No notifications yet</p>
-  <p class="text-slate-400 text-sm mt-1">You'll be notified about submission reviews, quiz results, and deadlines.</p>
+  <p class="text-slate-600 font-medium">{{ vocab.notifications.no_notifications }}</p>
+  <p class="text-slate-400 text-sm mt-1">{{ vocab.notifications.no_notifications_hint }}</p>
 </div>
 {% endif %}
 {% endblock %}

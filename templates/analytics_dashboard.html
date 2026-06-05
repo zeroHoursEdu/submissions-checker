@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Analytics — Teacher{% endblock %}
+{% block title %}{{ vocab.analytics.title }} — Teacher{% endblock %}
 
 {% block extra_head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -8,23 +8,23 @@
 
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/teacher" class="text-indigo-200 text-sm hover:text-white transition">Dashboard</a>
+  <a href="/teacher" class="text-indigo-200 text-sm hover:text-white transition">{{ vocab.teacher.dashboard_title }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Analytics</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.analytics.title }}</span>
 {% endblock %}
 
 {% block content %}
 <div class="flex items-start justify-between mb-8">
   <div>
-    <h1 class="text-2xl font-bold text-slate-900">Analytics</h1>
-    <p class="text-slate-500 mt-1 text-sm">Platform-wide performance overview</p>
+    <h1 class="text-2xl font-bold text-slate-900">{{ vocab.analytics.title }}</h1>
+    <p class="text-slate-500 mt-1 text-sm">{{ vocab.analytics.platform_overview }}</p>
   </div>
   <a href="/teacher/analytics/fraud"
      class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm font-medium hover:bg-red-100 transition-colors">
     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
     </svg>
-    Fraud Detection
+    {{ vocab.analytics.fraud_detection }}
   </a>
 </div>
 
@@ -32,35 +32,35 @@
 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 text-center">
     <div class="text-3xl font-bold text-indigo-700">{{ total_students }}</div>
-    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">Students</div>
+    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">{{ vocab.analytics.stat_students }}</div>
   </div>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 text-center">
     <div class="text-3xl font-bold text-indigo-700">{{ active_subjects }}</div>
-    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">Subjects</div>
+    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">{{ vocab.analytics.stat_subjects }}</div>
   </div>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 text-center">
     <div class="text-3xl font-bold {% if avg_grade is not none %}{% if avg_grade >= 75 %}text-green-600{% elif avg_grade >= 50 %}text-amber-600{% else %}text-red-600{% endif %}{% else %}text-slate-400{% endif %}">
       {% if avg_grade is not none %}{{ avg_grade }}{% else %}—{% endif %}
     </div>
-    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">Avg Grade</div>
+    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">{{ vocab.analytics.stat_avg_grade }}</div>
   </div>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 text-center">
     <div class="text-3xl font-bold {% if pass_rate is not none %}{% if pass_rate >= 75 %}text-green-600{% elif pass_rate >= 50 %}text-amber-600{% else %}text-red-600{% endif %}{% else %}text-slate-400{% endif %}">
       {% if pass_rate is not none %}{{ pass_rate }}%{% else %}—{% endif %}
     </div>
-    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">Pass Rate</div>
+    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">{{ vocab.analytics.stat_pass_rate }}</div>
   </div>
   <div class="bg-white rounded-xl border border-red-100 shadow-sm p-5 text-center">
     <div class="text-3xl font-bold {% if quiz_failures_count > 0 %}text-red-600{% else %}text-slate-400{% endif %}">
       {{ quiz_failures_count }}
     </div>
-    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">Quiz Failures</div>
+    <div class="text-xs text-slate-400 mt-1 font-medium uppercase tracking-wide">{{ vocab.analytics.stat_quiz_failures }}</div>
   </div>
 </div>
 
 {# --- Grade distribution chart --- #}
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-8">
-  <h2 class="text-base font-semibold text-slate-900 mb-4">Grade Distribution</h2>
+  <h2 class="text-base font-semibold text-slate-900 mb-4">{{ vocab.analytics.grade_distribution }}</h2>
   <div style="height: 220px;">
     <canvas id="gradeDistChart"></canvas>
   </div>
@@ -69,18 +69,18 @@
 {# --- Per-subject stats --- #}
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm mb-8">
   <div class="px-6 py-4 border-b border-slate-100">
-    <h2 class="text-base font-semibold text-slate-900">Performance by Subject</h2>
+    <h2 class="text-base font-semibold text-slate-900">{{ vocab.analytics.performance_by_subject }}</h2>
   </div>
   <div class="overflow-x-auto">
     {% if subject_stats %}
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
-          <th class="px-6 py-3 font-medium">Subject</th>
-          <th class="px-4 py-3 font-medium text-center">Enrolled</th>
-          <th class="px-4 py-3 font-medium text-center">Graded</th>
-          <th class="px-4 py-3 font-medium text-center">Avg Grade</th>
-          <th class="px-4 py-3 font-medium text-center">Assignments</th>
+          <th class="px-6 py-3 font-medium">{{ vocab.analytics.col_subject }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_enrolled }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_graded }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_avg_grade }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_assignments }}</th>
           <th class="px-4 py-3"></th>
         </tr>
       </thead>
@@ -112,7 +112,7 @@
       </tbody>
     </table>
     {% else %}
-    <div class="px-6 py-10 text-center text-slate-400 text-sm">No subjects found.</div>
+    <div class="px-6 py-10 text-center text-slate-400 text-sm">{{ vocab.analytics.no_subjects }}</div>
     {% endif %}
   </div>
 </div>
@@ -121,8 +121,8 @@
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
   <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
     <div>
-      <h2 class="text-base font-semibold text-slate-900">Assignment Difficulty</h2>
-      <p class="text-xs text-slate-400 mt-0.5">Sorted from hardest to easiest by average grade</p>
+      <h2 class="text-base font-semibold text-slate-900">{{ vocab.analytics.assignment_difficulty_title }}</h2>
+      <p class="text-xs text-slate-400 mt-0.5">{{ vocab.analytics.assignment_difficulty_subtitle }}</p>
     </div>
   </div>
   <div class="overflow-x-auto">
@@ -130,13 +130,13 @@
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
-          <th class="px-6 py-3 font-medium">Assignment</th>
-          <th class="px-4 py-3 font-medium">Subject</th>
-          <th class="px-4 py-3 font-medium text-center">Enrolled</th>
-          <th class="px-4 py-3 font-medium text-center">Submitted</th>
-          <th class="px-4 py-3 font-medium text-center">Avg Grade</th>
-          <th class="px-4 py-3 font-medium">Range</th>
-          <th class="px-4 py-3 font-medium w-32">Difficulty</th>
+          <th class="px-6 py-3 font-medium">{{ vocab.analytics.col_assignment }}</th>
+          <th class="px-4 py-3 font-medium">{{ vocab.analytics.col_subject }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_enrolled }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_submitted }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_avg_grade }}</th>
+          <th class="px-4 py-3 font-medium">{{ vocab.analytics.col_range }}</th>
+          <th class="px-4 py-3 font-medium w-32">{{ vocab.analytics.col_difficulty }}</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-50">
@@ -172,7 +172,7 @@
       </tbody>
     </table>
     {% else %}
-    <div class="px-6 py-10 text-center text-slate-400 text-sm">No assignments found.</div>
+    <div class="px-6 py-10 text-center text-slate-400 text-sm">{{ vocab.analytics.no_assignments }}</div>
     {% endif %}
   </div>
 </div>
@@ -226,8 +226,8 @@
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-8">
   <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
     <div>
-      <h2 class="text-base font-semibold text-slate-900">Quiz Failures</h2>
-      <p class="text-xs text-slate-400 mt-0.5">Students who used all allowed attempts without passing</p>
+      <h2 class="text-base font-semibold text-slate-900">{{ vocab.analytics.quiz_failures_title }}</h2>
+      <p class="text-xs text-slate-400 mt-0.5">{{ vocab.analytics.quiz_failures_subtitle }}</p>
     </div>
     <span class="text-xs font-medium bg-red-50 text-red-600 px-2.5 py-1 rounded-full">
       {{ quiz_failures_count }} student{{ 's' if quiz_failures_count != 1 else '' }}
@@ -237,11 +237,11 @@
     <table class="w-full text-sm">
       <thead>
         <tr class="bg-slate-50 border-b border-slate-200">
-          <th class="text-left px-5 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">Student</th>
-          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">Assignment</th>
-          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden sm:table-cell">Subject</th>
-          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">Attempts</th>
-          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden md:table-cell">Last Attempt</th>
+          <th class="text-left px-5 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.analytics.col_student }}</th>
+          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.analytics.col_assignment }}</th>
+          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden sm:table-cell">{{ vocab.analytics.col_subject }}</th>
+          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.analytics.col_attempts }}</th>
+          <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden md:table-cell">{{ vocab.analytics.col_last_attempt }}</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">

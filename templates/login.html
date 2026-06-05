@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 
-{% block title %}Sign in{% endblock %}
+{% block title %}{{ vocab.auth.page_title_login }}{% endblock %}
 
 {% block content %}
 <div class="min-h-[70vh] flex items-center justify-center">
   <div class="w-full max-w-sm">
 
     <div class="text-center mb-8">
-      <h1 class="text-2xl font-bold text-slate-900">Sign in to EduTrack</h1>
-      <p class="text-slate-500 text-sm mt-1">Enter your credentials to continue</p>
+      <h1 class="text-2xl font-bold text-slate-900">{{ vocab.auth.sign_in_to_edutrack }}</h1>
+      <p class="text-slate-500 text-sm mt-1">{{ vocab.auth.enter_credentials }}</p>
     </div>
 
     {% if error %}
@@ -22,7 +22,7 @@
 
     <form method="POST" action="/auth/login" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
       <div>
-        <label for="username" class="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
+        <label for="username" class="block text-sm font-medium text-slate-700 mb-1.5">{{ vocab.auth.username }}</label>
         <input
           type="text"
           id="username"
@@ -30,14 +30,14 @@
           autocomplete="username"
           required
           autofocus
-          placeholder="your username"
+          placeholder="{{ vocab.auth.username_placeholder }}"
           class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400
                  focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
         />
       </div>
 
       <div>
-        <label for="password" class="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+        <label for="password" class="block text-sm font-medium text-slate-700 mb-1.5">{{ vocab.auth.password }}</label>
         <input
           type="password"
           id="password"
@@ -55,16 +55,16 @@
         class="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-medium
                py-2.5 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
       >
-        Sign in
+        {{ vocab.auth.sign_in_button }}
       </button>
     </form>
 
     <div class="text-center mt-5">
       <p class="text-xs text-slate-400">
-        Demo accounts — teacher&nbsp;/&nbsp;teacher123 &nbsp;·&nbsp; ivan&nbsp;/&nbsp;student123
+        {{ vocab.auth.demo_accounts }}
       </p>
       <a href="/auth/forgot-password" class="text-xs text-indigo-500 hover:underline mt-2 inline-block">
-        Forgot your password?
+        {{ vocab.auth.forgot_password }}
       </a>
     </div>
 

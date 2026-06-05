@@ -6,7 +6,6 @@ import secrets
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 from jose import JWTError
 from sqlalchemy import select
 
@@ -25,11 +24,11 @@ from submissions_checker.db.models.password_reset import PasswordResetToken
 from submissions_checker.db.models.user import User
 from submissions_checker.db.models.user_login import UserLogin
 from submissions_checker.db.models.student import Student
+from submissions_checker.core.templates import render
 from submissions_checker.services.notifications.dispatcher import build_dispatcher
 from submissions_checker.services.notifications.templates import password_reset_template
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-templates = Jinja2Templates(directory="templates")
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -57,11 +56,7 @@ async def login_page(request: Request) -> HTMLResponse:
             return RedirectResponse(url=_redirect_by_role(role), status_code=302)  # type: ignore[return-value]
         except (JWTError, KeyError, ValueError):
             pass
-    return templates.TemplateResponse(
-        request=request,
-        name="login.html",
-        context={"current_user": None, "error": None},
-    )
+    return render(request, "login.html", {"current_user": None, "error": None})
 
 
 @router.post("/login")
@@ -77,12 +72,7 @@ async def login(
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(password, user.password_hash):
-        return templates.TemplateResponse(
-            request=request,
-            name="login.html",
-            context={"current_user": None, "error": "Invalid username or password"},
-            status_code=status.HTTP_401_UNAUTHORIZED,
-        )
+        return render(request, "login.html", {"current_user": None, "error": "Invalid username or password"}, status_code=status.HTTP_401_UNAUTHORIZED)
 
     db.add(UserLogin(user_id=user.id))
     await db.commit()
@@ -103,11 +93,7 @@ async def logout() -> RedirectResponse:
 
 @router.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request=request,
-        name="forgot_password.html",
-        context={"current_user": None, "sent": False, "error": None},
-    )
+    return render(request, "forgot_password.html", {"current_user": None, "sent": False, "error": None})
 
 
 @router.post("/forgot-password", response_class=HTMLResponse)
@@ -144,11 +130,7 @@ async def forgot_password(
             if dispatcher._channels:
                 await dispatcher.notify(email, subj, body)
 
-    return templates.TemplateResponse(
-        request=request,
-        name="forgot_password.html",
-        context={"current_user": None, "sent": True, "error": None},
-    )
+    return render(request, "forgot_password.html", {"current_user": None, "sent": True, "error": None})
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
@@ -162,11 +144,7 @@ async def reset_password_page(
     )
     prt = result.scalar_one_or_none()
     valid = prt is not None and prt.is_valid()
-    return templates.TemplateResponse(
-        request=request,
-        name="reset_password.html",
-        context={"current_user": None, "token": token, "valid": valid, "error": None, "success": False},
-    )
+    return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": valid, "error": None, "success": False})
 
 
 @router.post("/reset-password", response_class=HTMLResponse)
@@ -178,32 +156,17 @@ async def reset_password(
     confirm_password: str = Form(...),
 ) -> HTMLResponse:
     if new_password != confirm_password:
-        return templates.TemplateResponse(
-            request=request,
-            name="reset_password.html",
-            context={"current_user": None, "token": token, "valid": True, "error": "Passwords do not match.", "success": False},
-            status_code=422,
-        )
+        return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": True, "error": "Passwords do not match.", "success": False}, status_code=422)
 
     if len(new_password) < 8:
-        return templates.TemplateResponse(
-            request=request,
-            name="reset_password.html",
-            context={"current_user": None, "token": token, "valid": True, "error": "Password must be at least 8 characters.", "success": False},
-            status_code=422,
-        )
+        return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": True, "error": "Password must be at least 8 characters.", "success": False}, status_code=422)
 
     result = await db.execute(
         select(PasswordResetToken).where(PasswordResetToken.token == token)
     )
     prt = result.scalar_one_or_none()
     if prt is None or not prt.is_valid():
-        return templates.TemplateResponse(
-            request=request,
-            name="reset_password.html",
-            context={"current_user": None, "token": token, "valid": False, "error": None, "success": False},
-            status_code=400,
-        )
+        return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": False, "error": None, "success": False}, status_code=400)
 
     user = await db.get(User, prt.user_id)
     if user is None:
@@ -213,8 +176,4 @@ async def reset_password(
     prt.used = True
     await db.commit()
 
-    return templates.TemplateResponse(
-        request=request,
-        name="reset_password.html",
-        context={"current_user": None, "token": token, "valid": True, "error": None, "success": True},
-    )
+    return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": True, "error": None, "success": True})

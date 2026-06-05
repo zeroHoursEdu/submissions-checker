@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Quiz{% endblock %}
+{% block title %}{{ vocab.quiz.page_title }}{% endblock %}
 
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">Portal</a>
+  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.student.portal_tab }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Quiz</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.quiz.breadcrumb }}</span>
 {% endblock %}
 
 {% block extra_head %}
@@ -30,17 +30,17 @@
 <!-- Timer -->
 <div id="timer"
      class="fixed top-14 right-4 z-30 bg-amber-50 border border-amber-300 rounded-xl px-4 py-2 shadow-md font-mono font-bold text-amber-800 text-lg min-w-[80px] text-center">
-  <div class="text-xs font-normal text-amber-600 mb-0.5">Time left</div>
+  <div class="text-xs font-normal text-amber-600 mb-0.5">{{ vocab.quiz.time_left }}</div>
   <span id="timer-display">--:--</span>
 </div>
 {% endif %}
 
 <!-- Header -->
 <div class="mb-6">
-  <h1 class="text-2xl font-bold text-slate-900 mb-1">Quiz</h1>
-  <p class="text-sm text-slate-500">Answer all questions and click Submit when done.</p>
+  <h1 class="text-2xl font-bold text-slate-900 mb-1">{{ vocab.quiz.page_title }}</h1>
+  <p class="text-sm text-slate-500">{{ vocab.quiz.answer_all }}</p>
   {% if attempt.config_snapshot.get('time_limit_minutes') %}
-  <p class="text-sm text-amber-600 mt-1">Time limit: {{ attempt.config_snapshot.time_limit_minutes }} minutes</p>
+  <p class="text-sm text-amber-600 mt-1">{{ vocab.quiz.time_limit }} {{ attempt.config_snapshot.time_limit_minutes }} {{ vocab.quiz.minutes }}</p>
   {% endif %}
 </div>
 
@@ -58,7 +58,7 @@
         {{ loop.index }} / {{ questions|length }}
       </span>
       <p class="text-sm font-medium text-slate-800 leading-relaxed">{{ q.text }}</p>
-      <span class="shrink-0 ml-auto text-xs text-slate-400">{{ q.points }} pt{% if q.points != 1 %}s{% endif %}</span>
+      <span class="shrink-0 ml-auto text-xs text-slate-400">{{ q.points }} {{ vocab.quiz.pts }}</span>
     </div>
 
     <!-- ── SINGLE CHOICE ── -->
@@ -76,7 +76,7 @@
 
     <!-- ── MULTIPLE CHOICE ── -->
     {% elif q.type == "MULTIPLE_CHOICE" %}
-    <p class="text-xs text-slate-400 mb-2">Select all that apply.</p>
+    <p class="text-xs text-slate-400 mb-2">{{ vocab.quiz.multiple_choice_hint }}</p>
     <div class="space-y-2">
       {% for opt in q.config.get("options", []) %}
       <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
@@ -90,7 +90,7 @@
 
     <!-- ── ORDERING ── -->
     {% elif q.type == "ORDERING" %}
-    <p class="text-xs text-slate-400 mb-2">Drag items into the correct order.</p>
+    <p class="text-xs text-slate-400 mb-2">{{ vocab.quiz.ordering_hint }}</p>
     {% set items = q.config.get("items", []) %}
     {% if existing and existing.get('order') %}
       {% set display_order = existing.get('order') %}
@@ -119,13 +119,13 @@
                     {% if existing and existing.get('value') == true %}border-indigo-400 bg-indigo-50{% endif %}">
         <input type="radio" name="answer_{{ q_id }}" value="true" class="shrink-0"
                {% if existing and existing.get('value') == true %}checked{% endif %}>
-        <span class="text-sm font-medium text-slate-700">True</span>
+        <span class="text-sm font-medium text-slate-700">{{ vocab.common.true }}</span>
       </label>
       <label class="flex-1 flex items-center gap-3 p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
                     {% if existing and existing.get('value') == false %}border-indigo-400 bg-indigo-50{% endif %}">
         <input type="radio" name="answer_{{ q_id }}" value="false" class="shrink-0"
                {% if existing and existing.get('value') == false %}checked{% endif %}>
-        <span class="text-sm font-medium text-slate-700">False</span>
+        <span class="text-sm font-medium text-slate-700">{{ vocab.common.false }}</span>
       </label>
     </div>
 
@@ -133,10 +133,10 @@
     {% elif q.type == "SHORT_ANSWER" %}
     <div>
       <textarea name="answer_{{ q_id }}" rows="4"
-                placeholder="Write your answer here…"
+                placeholder="{{ vocab.quiz.short_answer_placeholder }}"
                 class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400
                        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-y">{{ existing.get('text', '') if existing else '' }}</textarea>
-      <p class="text-xs text-slate-400 mt-1">This answer will be graded manually by your teacher.</p>
+      <p class="text-xs text-slate-400 mt-1">{{ vocab.quiz.short_answer_hint }}</p>
     </div>
     {% endif %}
   </div>
@@ -148,7 +148,7 @@
   <div class="mt-6 flex justify-end">
     <button type="submit"
             class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
-      Submit Quiz
+      {{ vocab.quiz.submit_quiz }}
     </button>
   </div>
 </form>
@@ -241,19 +241,16 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
     } catch (_) {}
   }
 
-  // Tab switch (visibilitychange)
   if (hasRule('tab_switch')) {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) report('tab_switch');
     });
   }
 
-  // Window blur (alt-tab, clicking another app)
   if (hasRule('window_blur')) {
     window.addEventListener('blur', () => report('window_blur'));
   }
 
-  // Significant resize (>= 150px)
   if (hasRule('resize')) {
     let lw = innerWidth, lh = innerHeight;
     window.addEventListener('resize', function() {
@@ -263,7 +260,6 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
     });
   }
 
-  // Copy attempt (also blocks copy if text_protection is on)
   if (ac.text_protection || hasRule('copy_attempt')) {
     document.addEventListener('copy', e => {
       e.preventDefault();
@@ -273,7 +269,6 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
     document.addEventListener('selectstart', e => { if (ac.text_protection) e.preventDefault(); });
   }
 
-  // Right-click
   if (ac.disable_right_click || hasRule('right_click')) {
     document.addEventListener('contextmenu', e => {
       e.preventDefault();
@@ -281,7 +276,6 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
     });
   }
 
-  // Keyboard shortcuts (Ctrl+C/A/S/P, F12, PrintScreen)
   if (hasRule('keyboard_shortcut')) {
     document.addEventListener('keydown', e => {
       const sus = (e.ctrlKey && 'casp'.includes((e.key || '').toLowerCase())) ||
@@ -290,7 +284,6 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
     });
   }
 
-  // Fullscreen
   if (ac.require_fullscreen) {
     const enterFS = () => document.documentElement.requestFullscreen().catch(() => {});
     enterFS();

@@ -1,0 +1,521 @@
+_meta:
+  label: Українська
+  code: uk
+
+nav:
+  brand: EduTrack
+  role_teacher: Викладач
+  role_admin: Адмін
+  role_student: Студент
+  notifications: Сповіщення
+  admin_link: Адмін
+  notification_prefs_link: Сповіщення
+  sign_out: Вийти
+  sign_in: Увійти
+
+common:
+  status_completed: Виконано
+  status_failed: Не виконано
+  status_quiz_pending: Тест надіслано
+  status_in_review: На перевірці
+  status_not_submitted: Не здано
+  status_submitted: Здано
+  status_processing: Обробляється
+  status_checking: Перевіряється…
+  status_check_failed: Помилка перевірки
+  status_awaiting_review: Очікує перевірки
+  status_quiz_sent: Тест надіслано
+  status_under_review: На перевірці
+  status_waiting_teacher: Очікує перевірки
+  overdue: Прострочено
+  no_deadline: Без дедлайну
+  deadline: Дедлайн
+  grade: Оцінка
+  subject: Предмет
+  assignment: Завдання
+  student: Студент
+  cancel: Скасувати
+  save_changes: Зберегти зміни
+  delete: Видалити
+  edit: Редагувати
+  back: Назад
+  dashboard: Панель управління
+  summary: Зведення
+  progress: Прогрес
+  true: Правда
+  false: Хибність
+  view: Переглянути
+  export_csv: Експорт CSV
+  danger_zone: Небезпечна зона
+  cannot_be_undone: Цю дію неможливо скасувати.
+  yes_delete: Так, видалити
+  submit: Надіслати
+
+auth:
+  page_title_login: Увійти
+  page_title_forgot: Забули пароль
+  page_title_reset: Скинути пароль
+  sign_in_to_edutrack: Увійти до EduTrack
+  enter_credentials: Введіть дані для входу
+  username: Ім'я користувача
+  username_placeholder: ваш логін
+  password: Пароль
+  sign_in_button: Увійти
+  demo_accounts: Демо-акаунти — teacher / teacher123 · ivan / student123
+  forgot_password: Забули пароль?
+  forgot_page_heading: Забули пароль?
+  forgot_page_subtitle: Введіть ім'я користувача, і ми надішлемо посилання для скидання на вашу електронну пошту.
+  reset_link_sent: Якщо знайдено відповідний обліковий запис, надіслано лист із посиланням для скидання. Перевірте вхідні.
+  back_to_sign_in: Назад до входу
+  send_reset_link: Надіслати посилання для скидання
+  reset_page_heading: Скинути пароль
+  reset_link_invalid: Це посилання для скидання недійсне або застаріло. Будь ласка, запросіть нове.
+  request_new_link: Запросити нове посилання
+  choose_new_password: Оберіть новий пароль для свого облікового запису.
+  new_password: Новий пароль
+  confirm_password: Підтвердіть пароль
+  set_new_password: Встановити новий пароль
+  password_changed: Пароль змінено. Тепер ви можете увійти з новим паролем.
+
+student:
+  page_select_title: Вибір студента
+  who_are_you: Хто ви?
+  pick_name: Виберіть ваше ім'я для доступу до завдань.
+  students_label: "студент(ів)"
+  no_students: Студентів не знайдено
+  no_students_hint: Попросіть викладача додати вас до системи.
+  summary_title: Моє зведення
+  summary_tab: Зведення
+  portal_tab: Портал
+  my_progress: Мій прогрес
+  stat_graded: Оцінено
+  stat_total_assignments: Усього завдань
+  stat_avg_grade: Середня оцінка
+  stat_overdue: Прострочено
+  upcoming_deadlines: Дедлайни протягом 7 днів
+  all_assignments: Усі завдання
+  col_subject: Предмет
+  col_assignment: Завдання
+  col_deadline: Дедлайн
+  col_status: Статус
+  col_grade: Оцінка
+  subjects_enrolled: "предмет(ів) зараховано"
+  no_subjects: Предметів ще немає
+  no_subjects_hint: Зверніться до викладача, щоб записатися на предмети.
+  my_summary: Моє зведення
+  assignments_done: виконано завдань
+  hello: Привіт,
+  no_assignments: Завдань ще немає
+  no_assignments_hint: Викладач ще не додав завдань для цього предмету.
+  total: Всього
+  submitted: Здано
+  graded: Оцінено
+  col_assignment_list: Завдання
+  col_deadline_list: Дедлайн
+  col_grade_list: Оцінка
+  col_status_list: Статус
+  assignment_task_description: Опис завдання
+  assignment_files: Файли завдання
+  latest_submission: Остання здача
+  resubmit: Здати повторно
+  submit_work: Здати роботу
+  submit_zip_hint: Завантажте архів .zip із файлами вашого рішення.
+  new_submission_hint: Це створить нову здачу.
+  zip_only: Тільки ZIP-файли
+  upload_zip: Завантажити ZIP
+  uploading: Завантаження…
+  quiz_attempts: "Спроб тесту:"
+  start_quiz: Почати тест
+  retry_quiz: Спробувати ще
+  retry_quiz_left: "ліворуч)"
+  all_attempts_used_prefix: Використано всі
+  all_attempts_used_suffix: спроб тесту — завдання не виконано.
+  view_last_attempt: Переглянути результат останньої спроби
+  view_quiz_result: Переглянути результат тесту
+  assignments_page: Завдання
+  subjects_page: Предмети
+
+quiz:
+  page_title: Тест
+  breadcrumb: Тест
+  time_left: Часу залишилось
+  time_limit: "Ліміт часу:"
+  minutes: хвилин
+  answer_all: Дайте відповіді на всі запитання та натисніть «Надіслати».
+  multiple_choice_hint: Виберіть усі правильні відповіді.
+  ordering_hint: Перетягніть елементи у правильному порядку.
+  short_answer_placeholder: Напишіть відповідь тут…
+  short_answer_hint: Цю відповідь буде перевірено вручну викладачем.
+  submit_quiz: Надіслати тест
+  pts: бал(ів)
+  result_breadcrumb: Результат тесту
+  result_passed: Зараховано!
+  result_times_up: Час вичерпано
+  result_terminated: Тест скасовано
+  result_not_passed: Не зараховано
+  result_great_job: Чудово — ви відповіли достатньо правильно.
+  result_time_out_msg: Час закінчився до того, як ви встигли надіслати.
+  result_violation_msg: Ваш тест автоматично не зараховано. Викладача повідомлено.
+  result_retry_msg: Ви можете повторити тест, якщо залишились спроби, або зверніться до викладача.
+  pass_threshold: "Поріг зарахування:"
+  question_breakdown: Розбір запитань
+  your_answer: "Ваша відповідь:"
+  correct_answer: "Правильна відповідь:"
+  back_to_assignment: Назад до завдання
+  resubmit_for_new_quiz: Надішліть роботу повторно для нової спроби тесту.
+  violation_terminated: Ця спроба була автоматично завершена через порушення антишахрайської політики.
+  none_answer: немає
+
+teacher:
+  dashboard_title: Панель управління
+  no_subjects_configured: Предмети не налаштовано
+  no_subjects_configured_hint: Додайте предмети до бази даних для початку роботи.
+  analytics: Аналітика
+  students: Студенти
+  new_subject: Новий предмет
+  subject_count_singular: "предмет"
+  subject_count_plural: "предметів"
+  view_feedback: Переглянути відгуки
+  request_feedback: Запросити відгук
+  feedback_sent_badge: Відгук надіслано
+  no_active_semester_hint: Запит відгуку без активного семестру
+  feedback_sent_msg: Запити відгуку надіслано всім записаним студентам.
+  feedback_already_sent: Запит відгуку вже надіслано за цей семестр.
+  feedback_no_active_semester: Запити відгуку можна надсилати лише під час активного семестру (вер–січ або лют–чер).
+  edit: Редагувати
+  export_csv: Експорт CSV
+  enrolled_students: Записані студенти
+  no_students_enrolled: Студентів не записано
+  assignments: Завдання
+  add: Додати
+  no_assignments_yet: Завдань ще немає
+  grade_range: "Діапазон оцінок:"
+  deadline_label: "Дедлайн:"
+  no_deadline: Без дедлайну
+  manage_quiz: Керувати тестом
+  edit_assignment: Редагувати завдання
+  export_grades: Експорт оцінок
+  stat_enrolled: Записано
+  stat_submitted: Здано
+  stat_graded: Оцінено
+  col_student: Студент
+  col_github: GitHub
+  col_status: Статус
+  col_grade: Оцінка
+  col_submitted: Здано
+  col_similarity: Схожість
+  col_flags: Прапорці
+  review_action: Перевірити →
+  auto_failed: Авто-провал
+  events: подій
+  no_students_in_subject: Студентів не записано до цього предмету
+  review_submission_title: Перевірка здачі
+  review_subtitle: "Схвалити або відхилити цю здачу для"
+  student_card_label: Студент
+  submitted_file_label: Надісланий файл
+  original_name: Оригінальна назва
+  submitted_at: Надіслано
+  check_output: Вивід перевірки
+  decision_label: Рішення
+  approve: Схвалити
+  reject: Відхилити
+  rejection_reason: Причина відхилення
+  rejection_reason_placeholder: "Поясніть, чому здача відхиляється…"
+  confirm_rejection: Підтвердити відхилення
+  back_to_assignment: ← Назад до завдання
+  subject_form_title_edit: Редагувати предмет
+  subject_form_title_create: Новий предмет
+  subject_form_heading_edit: Редагувати предмет
+  subject_form_heading_create: Створити предмет
+  subject_name_label: "Назва предмету *"
+  subject_description_label: Опис
+  subject_github_label: URL репозиторію GitHub
+  subject_save: Зберегти зміни
+  subject_create: Створити предмет
+  subject_delete: Видалити предмет
+  subject_delete_warning: Видалення предмету видаляє всі його завдання та записи реєстрації.
+  assignment_form_title_edit: Редагувати завдання
+  assignment_form_title_create: Нове завдання
+  assignment_form_heading_edit: Редагувати завдання
+  assignment_form_heading_create: Створити завдання
+  assignment_title_label: "Назва *"
+  assignment_description_label: Опис
+  assignment_min_grade_label: Мін. оцінка
+  assignment_max_grade_label: Макс. оцінка
+  assignment_deadline_label: Дедлайн (необов'язково)
+  assignment_review_mode_label: Режим перевірки
+  assignment_review_none: Без перевірки (авто-завершення)
+  assignment_review_quiz: Тест
+  assignment_review_teacher: Перевірка викладачем
+  assignment_late_policy_label: Пізні здачі
+  assignment_late_block: Блокувати (жорсткий дедлайн)
+  assignment_late_allow: Дозволити (м'який дедлайн)
+  assignment_max_submissions_label: Макс. кількість здач (необов'язково)
+  assignment_max_submissions_placeholder: Необмежено
+  assignment_save: Зберегти зміни
+  assignment_create: Створити завдання
+  assignment_delete: Видалити завдання
+  assignment_delete_warning: Видалення завдання видаляє всі здачі та оцінки до нього.
+  students_title: Реєстрація студентів
+  students_subtitle: Реєструйте студентів, завантажуючи заповнений CSV-файл.
+  import_result_registered: "нових студентів зареєстровано."
+  import_result_skipped_prefix: "вже мали обліковий запис і"
+  import_result_skipped_suffix: "пропущено."
+  import_no_new: Нових студентів не імпортовано.
+  import_already_registered_prefix: "студент(ів) вже зареєстровано."
+  how_to_register: Як реєструвати студентів
+  how_to_step1: 'Завантажте <a href="/teacher/students/sample.csv" class="text-indigo-600 font-medium hover:underline">зразок CSV-шаблону</a> нижче.'
+  how_to_step2: Поділіться порожнім CSV зі студентами у групі або поштою.
+  how_to_step3: "Кожен студент заповнює свій рядок: назва групи, ім'я, прізвище та електронна адреса."
+  how_to_step4: Зберіть заповнений CSV і завантажте його за допомогою форми нижче. Система створить облікові записи та автоматично надішле кожному студенту дані для входу.
+  import_tips_title: Поради
+  import_tip1: Кожного студента ідентифікують за email — завантажувати один CSV двічі безпечно, дублікати пропускаються.
+  import_tip2: Студентські акаунти отримують лист із даними для входу автоматично після налаштування поштового провайдера.
+  import_tip3: Назва групи в CSV створюється автоматично, якщо ще не існує.
+  upload_csv_title: Завантажити CSV студентів
+  download_sample_csv: Завантажити зразок CSV
+  import_students_button: Імпортувати студентів
+  csv_accepted: "Прийнято: .csv · UTF-8 · макс. 1 МБ"
+  csv_required_columns: "Обов'язкові стовпці:"
+  registered_students: Зареєстровані студенти
+  total_count_label: всього
+  col_name: Ім'я
+  col_group: Група
+  col_email: Email
+  col_username: Логін
+  col_email_status: Статус email
+  col_first_login: Перший вхід
+  email_sent: Надіслано
+  email_pending: Очікує
+  email_error: Помилка
+  never_logged_in: Ніколи не входив
+  no_students_yet: Студентів ще не зареєстровано.
+  no_students_yet_hint: Завантажте зразок CSV вище та виконайте кроки для початку.
+  add_student_title: Додати студента
+  add_student_heading: Додати студента
+  first_name_label: "Ім'я *"
+  last_name_label: "Прізвище *"
+  email_label: "Email *"
+  group_label: "Група *"
+  github_username_label: Логін GitHub (необов'язково)
+  add_student_button: Додати студента
+  feedback_view_title: Відгуки студентів
+  feedback_no_campaign: Кампанія зворотного зв'язку ще не розпочата для цього предмету.
+  feedback_go_to_subject: Перейти на сторінку предмету для запиту відгуку
+  avg_rating: Середня оцінка
+  responses: Відповідей
+  feedback_waiting: Запит відгуку надіслано. Очікуємо відповідей студентів.
+  what_went_well: Що пройшло добре
+  what_didnt_go_well: Що пройшло погано
+  what_to_change: Що змінити наступного семестру
+  quiz_editor_title: Редактор тесту
+  quiz_settings: Налаштування тесту
+  quiz_export_json: Експорт JSON
+  quiz_import_json: Імпорт JSON
+  questions_per_quiz_label: Питань у тесті
+  questions_per_quiz_hint: Пусто = всі запитання
+  time_limit_label: "Ліміт часу (хвилин)"
+  time_limit_hint: Пусто = без ліміту
+  pass_threshold_label: Поріг прийому (0–1)
+  pass_threshold_hint: "наприклад, 0.6 = 60%"
+  max_attempts_label: Макс. кількість спроб
+  max_attempts_hint: "Пусто = необмежено. Після використання без прийому завдання позначається як не виконане."
+  shuffle_questions: Перемішати порядок запитань
+  shuffle_options: Перемішати варіанти відповідей
+  show_correct_after: Показати правильні відповіді після здачі
+  create_quiz: Створити тест
+  update_settings: Оновити налаштування
+  anticheat_title: Антишахрайство
+  anticheat_subtitle: Налаштуйте поведінковий моніторинг та автоматичні штрафи для тесту.
+  anticheat_text_protection: Вимкнути виділення тексту та копіювання
+  anticheat_disable_rc: Вимкнути контекстне меню правої кнопки
+  anticheat_fullscreen: Потрібний повноекранний режим
+  anticheat_fullscreen_hint: "(Fullscreen API — не підтримується всіма браузерами/мобільними)"
+  anticheat_presets: "Швидкі пресети:"
+  anticheat_preset_none: Немає
+  anticheat_preset_soft: М'який моніторинг
+  anticheat_preset_strict: Суворий
+  anticheat_rules_title: Правила
+  anticheat_add_rule: "+ Додати правило"
+  anticheat_col_event: Подія
+  anticheat_col_threshold: Поріг
+  anticheat_col_action: Дія
+  anticheat_col_penalty: "Штраф (с)"
+  anticheat_col_message: Повідомлення студенту
+  anticheat_save: Зберегти налаштування антишахрайства
+  anticheat_template_hint: "Шаблони повідомлень: використовуйте {count}, {threshold}, {penalty_seconds}, {fail_threshold} для динамічних значень."
+  anticheat_no_rules: 'Правил ще немає. Натисніть "+ Додати правило" щоб додати.'
+  questions_section_title: Запитання
+  no_questions: Немає запитань. Додайте перше запитання нижче.
+  required_badge: Обов'язкове
+  edit_question: Редагувати
+  delete_question: Видалити
+  question_type_label: Тип
+  question_text_label: Текст запитання
+  question_points_label: Бали
+  question_sort_order_label: Порядок сортування
+  question_required_label: Завжди включати (обов'язкове)
+  question_config_label: Конфіг відповіді (JSON)
+  question_save: Зберегти
+  question_cancel: Скасувати
+  add_question_title: Додати запитання
+  type_single_choice: Одиночний вибір
+  type_multiple_choice: Множинний вибір
+  type_ordering: Впорядкування
+  type_true_false: Правда / Хибність
+  type_short_answer: Коротка відповідь (ручна перевірка)
+  add_question_button: Додати запитання
+  sc_options_label: "Варіанти — виберіть правильний"
+  mc_options_label: "Варіанти — відмітьте всі правильні"
+  ordering_items_label: Елементи у правильному порядку
+  ordering_items_hint: Студенти бачать їх перемішаними та мають правильно впорядкувати.
+  tf_correct_label: Правильна відповідь
+  add_option: "+ Додати варіант"
+  add_item: "+ Додати елемент"
+  no_quiz_settings: Спочатку налаштуйте тест для початку додавання запитань.
+
+admin:
+  dashboard_title: Панель адміністратора
+  system_overview: Огляд системи та управління
+  users: Користувачі
+  audit_log: Журнал аудиту
+  add_teacher: Додати викладача
+  stat_outbox_pending: Черга відправки
+  recent_activity: Остання активність
+  col_time: Час
+  col_actor: Ініціатор
+  col_action: Дія
+  col_target: Ціль
+  col_detail: Деталі
+  no_activity: Діяльності ще немає.
+  users_title: Користувачі
+  col_username: Логін
+  col_role: Роль
+  col_status: Статус
+  col_created: Створено
+  col_actions: Дії
+  status_active: Активний
+  status_inactive: Неактивний
+  deactivate: Деактивувати
+  activate: Активувати
+  you_label: Ви
+  create_teacher_title: Додати акаунт викладача
+  create_teacher_heading: Додати акаунт викладача
+  username_label: "Логін *"
+  password_label: "Пароль *"
+  password_hint: Мінімум 8 символів
+  create_teacher_button: Створити викладача
+  audit_title: Журнал аудиту
+  no_audit_records: Записів аудиту ще немає.
+
+analytics:
+  title: Аналітика
+  platform_overview: Огляд платформи
+  fraud_detection: Виявлення шахрайства
+  stat_students: Студенти
+  stat_subjects: Предмети
+  stat_avg_grade: Середня оцінка
+  stat_pass_rate: Відсоток успішних
+  stat_quiz_failures: Провали тестів
+  grade_distribution: Розподіл оцінок
+  performance_by_subject: Успішність за предметом
+  col_subject: Предмет
+  col_enrolled: Записано
+  col_graded: Оцінено
+  col_avg_grade: Середня оцінка
+  col_assignments: Завдань
+  no_subjects: Предметів не знайдено.
+  assignment_difficulty_title: Складність завдань
+  assignment_difficulty_subtitle: Відсортовано від найважчого до найлегшого за середньою оцінкою
+  col_assignment: Завдання
+  col_submitted: Здано
+  col_range: Діапазон
+  col_difficulty: Складність
+  no_assignments: Завдань не знайдено.
+  quiz_failures_title: Провали тестів
+  quiz_failures_subtitle: Студенти, які використали всі дозволені спроби без зарахування
+  col_student: Студент
+  col_last_attempt: Остання спроба
+  col_attempts: Спроби
+  fraud_title: Виявлення шахрайства
+  fraud_subtitle: Підозрілі закономірності на основі активності входу та часу здачі. Це сигнали — не докази — і вимагають суджень викладача.
+  back_to_analytics: Назад до аналітики
+  late_login_title: Пізній перший вхід + висока оцінка
+  late_login_subtitle: "Перший вхід у межах 24 год до дедлайну · оцінка ≥ 80% від максимуму"
+  few_logins_title: Мало входів + висока оцінка
+  few_logins_subtitle_prefix: "Менше"
+  few_logins_subtitle_middle: "входів усього · середня оцінка ≥"
+  single_day_title: Одноденна серія здач
+  single_day_subtitle: "3+ здачі, надіслані в той самий календарний день"
+  login_activity_title: Огляд активності входів
+  login_activity_subtitle: Всі студенти, відсортовані за кількістю входів — спочатку найменш активні
+  col_logins: Входи
+  col_first_login: Перший вхід
+  col_last_login: Останній вхід
+  col_risk_score: Рівень ризику
+  col_group: Група
+  col_day: День
+  col_submissions: Здач
+  no_flags: Порушень не виявлено.
+  no_students: Студентів не знайдено.
+  never_logged_in: Ніколи не входив
+  risk_low: Низький
+  risk_medium: Середній
+  risk_high: Високий
+  flag_count_singular: "позначка"
+  flag_count_plural: "позначок"
+  flags_label: позначок
+  back: Назад
+  grade_timeline: Хронологія оцінок
+  chart_grade: Оцінка
+  chart_min: Мін
+  chart_max: Макс
+  all_assignments: Усі завдання
+  col_deadline: Дедлайн
+  col_max: Макс
+  col_pass: Зараховано?
+  graded_label: "/ завдань оцінено"
+  submission_label: "здач"
+  never: Ніколи
+  first_label: "Перший:"
+  last_label: "Останній:"
+  logins_count_label: вхід(ів)
+  assignments_graded_label: "завдань оцінено"
+  submissions_label: "здач"
+
+feedback:
+  end_of_semester: Відгук кінця семестру
+  your_responses_help: Ваші відповіді допомагають покращити курс для майбутніх студентів.
+  overall_rating: "Загальна оцінка"
+  rating_scale: "1 = дуже погано, 5 = відмінно"
+  went_well_label: Що пройшло добре цього семестру?
+  went_well_placeholder: "Поділіться тим, що ви вважали цінним, добре організованим або приємним…"
+  went_bad_label: Що пройшло погано?
+  went_bad_placeholder: "Поділіться тим, що здавалося заплутаним, неефективним або могло бути кращим…"
+  to_change_label: Що б ви змінили на наступний семестр?
+  to_change_placeholder: "Запропонуйте конкретні покращення — теми, темп, завдання, інструменти…"
+  submit_feedback: Надіслати відгук
+  personal_link_note: Це посилання особисте і може бути використане лише один раз.
+  thank_you_heading: Дякуємо за ваш відгук!
+  thank_you_body: Вашу відповідь записано. Ваш внесок допомагає покращити курс для майбутніх студентів.
+  not_found_heading: Посилання не знайдено
+  not_found_body: Це посилання для відгуку недійсне або застаріло. Перевірте свою електронну пошту для правильного посилання.
+  already_submitted_heading: Вже надіслано
+  already_submitted_body: Ви вже надіслали відгук за цим посиланням. Кожне посилання можна використати лише один раз.
+
+notifications:
+  page_title: Сповіщення
+  breadcrumb: Сповіщення
+  mark_all_read: Позначити всі як прочитані
+  mark_read: Позначити як прочитане
+  view_link: Переглянути →
+  no_notifications: Сповіщень ще немає
+  no_notifications_hint: Ви будете сповіщені про перевірки здач, результати тестів та дедлайни.
+  prefs_title: Налаштування сповіщень
+  prefs_subtitle: "Виберіть, коли і як ви хочете отримувати сповіщення."
+  email_method_hint: Отримуйте email, коли відбувається ця подія.
+  enabled: Увімкнено
+  disabled: Вимкнено
+
+lang:
+  select_language: Мова

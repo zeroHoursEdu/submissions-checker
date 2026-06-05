@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}Quiz Editor — {{ assignment.title }}{% endblock %}
+{% block title %}{{ vocab.teacher.quiz_editor_title }} — {{ assignment.title }}{% endblock %}
 
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">Dashboard</a>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.teacher.dashboard_title }}</a>
   <span class="text-indigo-400 mx-1">/</span>
   <a href="/teacher/subjects/{{ subject_id }}" class="text-indigo-200 hover:text-white text-sm transition truncate max-w-[100px]">{{ assignment.subject.name }}</a>
   <span class="text-indigo-400 mx-1">/</span>
   <a href="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}" class="text-indigo-200 hover:text-white text-sm transition truncate max-w-[120px]">{{ assignment.title }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Quiz</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.teacher.quiz_editor_title }}</span>
 {% endblock %}
 
 {% block content %}
@@ -18,7 +18,7 @@
 <!-- Header -->
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
-    <h1 class="text-2xl font-bold text-slate-900">Quiz Editor</h1>
+    <h1 class="text-2xl font-bold text-slate-900">{{ vocab.teacher.quiz_editor_title }}</h1>
     <p class="text-sm text-slate-500 mt-0.5">{{ assignment.title }}</p>
   </div>
   {% if template %}
@@ -28,7 +28,7 @@
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
       </svg>
-      Export JSON
+      {{ vocab.teacher.quiz_export_json }}
     </a>
     <form id="import-form" method="POST" enctype="multipart/form-data"
           action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/import">
@@ -36,7 +36,7 @@
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
         </svg>
-        Import JSON
+        {{ vocab.teacher.quiz_import_json }}
         <input type="file" name="file" accept=".json" class="hidden" onchange="document.getElementById('import-form').submit()">
       </label>
     </form>
@@ -47,7 +47,7 @@
 <!-- Quiz Config Card -->
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-5">
   <div class="flex items-center justify-between mb-4">
-    <h2 class="font-semibold text-slate-900">Quiz Settings</h2>
+    <h2 class="font-semibold text-slate-900">{{ vocab.teacher.quiz_settings }}</h2>
     {% if template %}
     <span class="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">v{{ template.version }}</span>
     {% endif %}
@@ -56,57 +56,57 @@
   <form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/config">
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
       <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">Questions per quiz</label>
+        <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.questions_per_quiz_label }}</label>
         <input type="number" name="total_questions" min="1"
                value="{{ template.config.get('total_questions', '') if template else '' }}"
                placeholder="All"
                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-slate-400 mt-1">Blank = all questions</p>
+        <p class="text-xs text-slate-400 mt-1">{{ vocab.teacher.questions_per_quiz_hint }}</p>
       </div>
       <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">Time limit (minutes)</label>
+        <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.time_limit_label }}</label>
         <input type="number" name="time_limit_minutes" min="1"
                value="{{ template.config.get('time_limit_minutes', '') if template else '' }}"
                placeholder="No limit"
                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-slate-400 mt-1">Blank = no time limit</p>
+        <p class="text-xs text-slate-400 mt-1">{{ vocab.teacher.time_limit_hint }}</p>
       </div>
       <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">Pass threshold (0–1)</label>
+        <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.pass_threshold_label }}</label>
         <input type="number" name="pass_threshold_pct" min="0" max="1" step="0.05"
                value="{{ template.config.get('pass_threshold_pct', 0.6) if template else 0.6 }}"
                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-slate-400 mt-1">e.g. 0.6 = 60%</p>
+        <p class="text-xs text-slate-400 mt-1">{{ vocab.teacher.pass_threshold_hint }}</p>
       </div>
       <div>
-        <label class="block text-xs font-medium text-slate-600 mb-1">Max quiz attempts</label>
+        <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.max_attempts_label }}</label>
         <input type="number" name="max_quiz_attempts" min="1"
                value="{{ template.config.get('max_quiz_attempts', '') if template else '' }}"
                placeholder="Unlimited"
                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        <p class="text-xs text-slate-400 mt-1">Blank = unlimited. Once used up without passing, the assignment is marked as not passed.</p>
+        <p class="text-xs text-slate-400 mt-1">{{ vocab.teacher.max_attempts_hint }}</p>
       </div>
     </div>
     <div class="flex flex-wrap gap-5 mb-5">
       <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
         <input type="checkbox" name="shuffle_questions" class="rounded"
                {% if not template or template.config.get('shuffle_questions', True) %}checked{% endif %}>
-        Shuffle question order
+        {{ vocab.teacher.shuffle_questions }}
       </label>
       <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
         <input type="checkbox" name="shuffle_options" class="rounded"
                {% if not template or template.config.get('shuffle_options', True) %}checked{% endif %}>
-        Shuffle answer options
+        {{ vocab.teacher.shuffle_options }}
       </label>
       <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
         <input type="checkbox" name="show_correct_answers_after" class="rounded"
                {% if template and template.config.get('show_correct_answers_after', False) %}checked{% endif %}>
-        Show correct answers after submission
+        {{ vocab.teacher.show_correct_after }}
       </label>
     </div>
     <button type="submit"
             class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-      {% if template %}Update Settings{% else %}Create Quiz{% endif %}
+      {% if template %}{{ vocab.teacher.update_settings }}{% else %}{{ vocab.teacher.create_quiz }}{% endif %}
     </button>
   </form>
 </div>
@@ -119,9 +119,9 @@
     <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
     </svg>
-    Anti-Cheat Settings
+    {{ vocab.teacher.anticheat_title }}
   </h2>
-  <p class="text-xs text-slate-400 mb-4">Configure behavioral monitoring and automatic penalties for the quiz. Students are warned on each violation.</p>
+  <p class="text-xs text-slate-400 mb-4">{{ vocab.teacher.anticheat_subtitle }}</p>
 
   <form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/config"
         onsubmit="buildAntiCheatJson(this)">
@@ -140,45 +140,45 @@
     <div class="flex flex-wrap gap-5 mb-5">
       <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
         <input type="checkbox" id="ac-text-protection" class="rounded" {% if ac.get('text_protection') %}checked{% endif %}>
-        Disable text selection & copy
+        {{ vocab.teacher.anticheat_text_protection }}
       </label>
       <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
         <input type="checkbox" id="ac-disable-rc" class="rounded" {% if ac.get('disable_right_click') %}checked{% endif %}>
-        Disable right-click context menu
+        {{ vocab.teacher.anticheat_disable_rc }}
       </label>
       <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
         <input type="checkbox" id="ac-fullscreen" class="rounded" {% if ac.get('require_fullscreen') %}checked{% endif %}>
-        Require fullscreen
-        <span class="text-xs text-slate-400">(Fullscreen API — not supported on all browsers/mobile)</span>
+        {{ vocab.teacher.anticheat_fullscreen }}
+        <span class="text-xs text-slate-400">{{ vocab.teacher.anticheat_fullscreen_hint }}</span>
       </label>
     </div>
 
     <!-- Presets -->
     <div class="flex gap-2 mb-4">
-      <span class="text-xs text-slate-500 self-center mr-1">Quick presets:</span>
+      <span class="text-xs text-slate-500 self-center mr-1">{{ vocab.teacher.anticheat_presets }}</span>
       <button type="button" onclick="applyPreset('none')"
-              class="text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 px-2.5 py-1 rounded-lg transition-colors">None</button>
+              class="text-xs border border-slate-300 text-slate-600 hover:bg-slate-50 px-2.5 py-1 rounded-lg transition-colors">{{ vocab.teacher.anticheat_preset_none }}</button>
       <button type="button" onclick="applyPreset('soft')"
-              class="text-xs border border-amber-300 text-amber-700 hover:bg-amber-50 px-2.5 py-1 rounded-lg transition-colors">Soft monitoring</button>
+              class="text-xs border border-amber-300 text-amber-700 hover:bg-amber-50 px-2.5 py-1 rounded-lg transition-colors">{{ vocab.teacher.anticheat_preset_soft }}</button>
       <button type="button" onclick="applyPreset('strict')"
-              class="text-xs border border-red-300 text-red-700 hover:bg-red-50 px-2.5 py-1 rounded-lg transition-colors">Strict</button>
+              class="text-xs border border-red-300 text-red-700 hover:bg-red-50 px-2.5 py-1 rounded-lg transition-colors">{{ vocab.teacher.anticheat_preset_strict }}</button>
     </div>
 
     <!-- Rules table -->
     <div class="border border-slate-200 rounded-xl overflow-hidden mb-4">
       <div class="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between">
-        <span class="text-xs font-medium text-slate-600 uppercase tracking-wide">Rules</span>
+        <span class="text-xs font-medium text-slate-600 uppercase tracking-wide">{{ vocab.teacher.anticheat_rules_title }}</span>
         <button type="button" onclick="addRuleRow()"
-                class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add rule</button>
+                class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">{{ vocab.teacher.anticheat_add_rule }}</button>
       </div>
       <table class="w-full text-sm" id="rules-table">
         <thead>
           <tr class="border-b border-slate-100">
-            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">Event</th>
-            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium w-20">Threshold</th>
-            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">Action</th>
-            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium w-28">Penalty (s)</th>
-            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">Message shown to student</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">{{ vocab.teacher.anticheat_col_event }}</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium w-20">{{ vocab.teacher.anticheat_col_threshold }}</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">{{ vocab.teacher.anticheat_col_action }}</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium w-28">{{ vocab.teacher.anticheat_col_penalty }}</th>
+            <th class="text-left px-3 py-2 text-xs text-slate-500 font-medium">{{ vocab.teacher.anticheat_col_message }}</th>
             <th class="px-2 py-2 w-8"></th>
           </tr>
         </thead>
@@ -228,7 +228,7 @@
         </tbody>
       </table>
       {% if not ac.get('rules') %}
-      <p id="no-rules-msg" class="text-center py-4 text-xs text-slate-400">No rules yet. Click "+ Add rule" to add one.</p>
+      <p id="no-rules-msg" class="text-center py-4 text-xs text-slate-400">{{ vocab.teacher.anticheat_no_rules }}</p>
       {% endif %}
     </div>
 
@@ -241,7 +241,7 @@
 
     <button type="submit"
             class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-      Save Anti-Cheat Settings
+      {{ vocab.teacher.anticheat_save }}
     </button>
   </form>
 </div>
@@ -250,7 +250,7 @@
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-5">
   <div class="px-5 py-4 border-b border-slate-100">
     <h2 class="font-semibold text-slate-900">
-      Questions
+      {{ vocab.teacher.questions_section_title }}
       <span class="ml-1.5 text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{{ questions|length }}</span>
     </h2>
   </div>
@@ -276,7 +276,7 @@
           <p class="text-sm text-slate-800 font-medium">{{ q.text }}</p>
           <div class="flex gap-3 mt-1 text-xs text-slate-400">
             <span>{{ q.points }} pt{% if q.points != 1 %}s{% endif %}</span>
-            {% if q.is_required %}<span class="text-amber-600 font-medium">Required</span>{% endif %}
+            {% if q.is_required %}<span class="text-amber-600 font-medium">{{ vocab.teacher.required_badge }}</span>{% endif %}
           </div>
           <!-- Config preview -->
           {% if q.type.value in ["SINGLE_CHOICE", "MULTIPLE_CHOICE"] %}
@@ -304,12 +304,12 @@
         <div class="flex gap-2 shrink-0">
           <button type="button" onclick="toggleEdit({{ q.id }})"
                   class="text-xs text-indigo-600 hover:text-indigo-800 font-medium border border-indigo-200 hover:border-indigo-400 px-2.5 py-1 rounded-lg transition-colors">
-            Edit
+            {{ vocab.teacher.edit_question }}
           </button>
           <form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz/questions/{{ q.id }}/delete"
                 onsubmit="return confirm('Delete this question?')">
             <button type="submit" class="text-xs text-red-600 hover:text-red-800 font-medium border border-red-200 hover:border-red-400 px-2.5 py-1 rounded-lg transition-colors">
-              Delete
+              {{ vocab.teacher.delete_question }}
             </button>
           </form>
         </div>
@@ -323,34 +323,34 @@
           <input type="hidden" name="config" class="config-field">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div class="sm:col-span-2">
-              <label class="block text-xs font-medium text-slate-600 mb-1">Type</label>
+              <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_type_label }}</label>
               <select name="type" id="edit-type-{{ q.id }}" onchange="onEditTypeChange({{ q.id }})"
                       class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <option value="SINGLE_CHOICE" {% if q.type.value == "SINGLE_CHOICE" %}selected{% endif %}>Single Choice</option>
-                <option value="MULTIPLE_CHOICE" {% if q.type.value == "MULTIPLE_CHOICE" %}selected{% endif %}>Multiple Choice</option>
-                <option value="ORDERING" {% if q.type.value == "ORDERING" %}selected{% endif %}>Ordering</option>
-                <option value="TRUE_FALSE" {% if q.type.value == "TRUE_FALSE" %}selected{% endif %}>True / False</option>
+                <option value="SINGLE_CHOICE" {% if q.type.value == "SINGLE_CHOICE" %}selected{% endif %}>{{ vocab.teacher.type_single_choice }}</option>
+                <option value="MULTIPLE_CHOICE" {% if q.type.value == "MULTIPLE_CHOICE" %}selected{% endif %}>{{ vocab.teacher.type_multiple_choice }}</option>
+                <option value="ORDERING" {% if q.type.value == "ORDERING" %}selected{% endif %}>{{ vocab.teacher.type_ordering }}</option>
+                <option value="TRUE_FALSE" {% if q.type.value == "TRUE_FALSE" %}selected{% endif %}>{{ vocab.teacher.type_true_false }}</option>
               </select>
             </div>
             <div class="sm:col-span-2">
-              <label class="block text-xs font-medium text-slate-600 mb-1">Question text</label>
+              <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_text_label }}</label>
               <textarea name="text" rows="2" required
                         class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">{{ q.text }}</textarea>
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1">Points</label>
+              <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_points_label }}</label>
               <input type="number" name="points" value="{{ q.points }}" min="0"
                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1">Sort order</label>
+              <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_sort_order_label }}</label>
               <input type="number" name="sort_order" value="{{ q.sort_order }}" min="0"
                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <div class="sm:col-span-2">
               <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
                 <input type="checkbox" name="is_required" class="rounded" {% if q.is_required %}checked{% endif %}>
-                Always include (required)
+                {{ vocab.teacher.question_required_label }}
               </label>
             </div>
           </div>
@@ -358,7 +358,7 @@
           <!-- Config editor: JSON textarea for reliability -->
           <div class="mb-4">
             <label class="block text-xs font-medium text-slate-600 mb-1">
-              Answer config (JSON)
+              {{ vocab.teacher.question_config_label }}
               <span class="text-slate-400 font-normal ml-1" id="edit-hint-{{ q.id }}"></span>
             </label>
             <textarea id="edit-config-json-{{ q.id }}" rows="4"
@@ -368,11 +368,11 @@
           <div class="flex gap-2">
             <button type="submit"
                     class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors">
-              Save
+              {{ vocab.teacher.question_save }}
             </button>
             <button type="button" onclick="toggleEdit({{ q.id }})"
                     class="text-sm text-slate-600 hover:text-slate-900 border border-slate-300 px-3 py-1.5 rounded-lg transition-colors">
-              Cancel
+              {{ vocab.teacher.question_cancel }}
             </button>
           </div>
         </form>
@@ -381,7 +381,7 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="py-12 text-center text-slate-400 text-sm">No questions yet. Add your first question below.</div>
+  <div class="py-12 text-center text-slate-400 text-sm">{{ vocab.teacher.no_questions }}</div>
   {% endif %}
 </div>
 
@@ -392,7 +392,7 @@
       <svg class="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
       </svg>
-      Add Question
+      {{ vocab.teacher.add_question_title }}
     </summary>
     <div class="p-5 border-t border-slate-100">
       <form method="POST"
@@ -401,42 +401,42 @@
         <input type="hidden" name="config" class="config-field">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div class="sm:col-span-2">
-            <label class="block text-xs font-medium text-slate-600 mb-1">Type</label>
+            <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_type_label }}</label>
             <select name="type" id="add-type-select" onchange="onAddTypeChange()"
                     class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="SINGLE_CHOICE">Single Choice</option>
-              <option value="MULTIPLE_CHOICE">Multiple Choice</option>
-              <option value="ORDERING">Ordering</option>
-              <option value="TRUE_FALSE">True / False</option>
-              <option value="SHORT_ANSWER">Short Answer (manual grading)</option>
+              <option value="SINGLE_CHOICE">{{ vocab.teacher.type_single_choice }}</option>
+              <option value="MULTIPLE_CHOICE">{{ vocab.teacher.type_multiple_choice }}</option>
+              <option value="ORDERING">{{ vocab.teacher.type_ordering }}</option>
+              <option value="TRUE_FALSE">{{ vocab.teacher.type_true_false }}</option>
+              <option value="SHORT_ANSWER">{{ vocab.teacher.type_short_answer }}</option>
             </select>
           </div>
           <div class="sm:col-span-2">
-            <label class="block text-xs font-medium text-slate-600 mb-1">Question text</label>
+            <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_text_label }}</label>
             <textarea name="text" rows="2" required
                       class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">Points</label>
+            <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_points_label }}</label>
             <input type="number" name="points" value="1" min="0"
                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">Sort order</label>
+            <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.question_sort_order_label }}</label>
             <input type="number" name="sort_order" value="{{ questions|length }}" min="0"
                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
           </div>
           <div class="sm:col-span-2">
             <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
               <input type="checkbox" name="is_required" class="rounded">
-              Always include (required)
+              {{ vocab.teacher.question_required_label }}
             </label>
           </div>
         </div>
 
         <!-- Single Choice -->
         <div id="add-sc" class="mb-4">
-          <label class="block text-xs font-medium text-slate-600 mb-2">Options — select the correct one</label>
+          <label class="block text-xs font-medium text-slate-600 mb-2">{{ vocab.teacher.sc_options_label }}</label>
           <div id="add-sc-list" class="space-y-2 mb-2">
             <div class="flex gap-2 items-center">
               <input type="radio" name="add_sc_correct" value="0" checked class="shrink-0">
@@ -449,12 +449,12 @@
               <button type="button" onclick="rmOpt('add-sc-list','add_sc_correct')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
             </div>
           </div>
-          <button type="button" onclick="addOpt('add-sc-list','add_sc_correct','sc-opt')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add option</button>
+          <button type="button" onclick="addOpt('add-sc-list','add_sc_correct','sc-opt')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">{{ vocab.teacher.add_option }}</button>
         </div>
 
         <!-- Multiple Choice -->
         <div id="add-mc" class="mb-4 hidden">
-          <label class="block text-xs font-medium text-slate-600 mb-2">Options — check all correct answers</label>
+          <label class="block text-xs font-medium text-slate-600 mb-2">{{ vocab.teacher.mc_options_label }}</label>
           <div id="add-mc-list" class="space-y-2 mb-2">
             <div class="flex gap-2 items-center">
               <input type="checkbox" name="add_mc_correct" value="0" class="shrink-0">
@@ -467,13 +467,13 @@
               <button type="button" onclick="rmOpt('add-mc-list','add_mc_correct')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
             </div>
           </div>
-          <button type="button" onclick="addOpt('add-mc-list','add_mc_correct','mc-opt')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add option</button>
+          <button type="button" onclick="addOpt('add-mc-list','add_mc_correct','mc-opt')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">{{ vocab.teacher.add_option }}</button>
         </div>
 
         <!-- Ordering -->
         <div id="add-ord" class="mb-4 hidden">
-          <label class="block text-xs font-medium text-slate-600 mb-1">Items in correct order</label>
-          <p class="text-xs text-slate-400 mb-2">Students see them shuffled and must reorder correctly.</p>
+          <label class="block text-xs font-medium text-slate-600 mb-1">{{ vocab.teacher.ordering_items_label }}</label>
+          <p class="text-xs text-slate-400 mb-2">{{ vocab.teacher.ordering_items_hint }}</p>
           <div id="add-ord-list" class="space-y-2 mb-2">
             <div class="flex gap-2 items-center">
               <span class="text-xs text-slate-400 w-5 text-center shrink-0">1</span>
@@ -486,12 +486,12 @@
               <button type="button" onclick="rmOrd('add-ord-list')" class="text-red-400 hover:text-red-600 text-xs">✕</button>
             </div>
           </div>
-          <button type="button" onclick="addOrd('add-ord-list')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add item</button>
+          <button type="button" onclick="addOrd('add-ord-list')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">{{ vocab.teacher.add_item }}</button>
         </div>
 
         <!-- True/False -->
         <div id="add-tf" class="mb-4 hidden">
-          <label class="block text-xs font-medium text-slate-600 mb-2">Correct answer</label>
+          <label class="block text-xs font-medium text-slate-600 mb-2">{{ vocab.teacher.tf_correct_label }}</label>
           <div class="flex gap-4">
             <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700">
               <input type="radio" name="add_tf_correct" value="true" checked> True
@@ -504,7 +504,7 @@
 
         <button type="submit"
                 class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-          Add Question
+          {{ vocab.teacher.add_question_button }}
         </button>
       </form>
     </div>
@@ -514,7 +514,7 @@
 {% else %}
 <div class="text-center py-12 bg-white rounded-xl border border-slate-200 shadow-sm">
   <div class="text-4xl mb-3">📝</div>
-  <p class="text-slate-600 font-medium">Configure quiz settings first to start adding questions.</p>
+  <p class="text-slate-600 font-medium">{{ vocab.teacher.no_quiz_settings }}</p>
 </div>
 {% endif %}
 

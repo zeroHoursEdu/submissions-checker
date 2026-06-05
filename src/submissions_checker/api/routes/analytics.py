@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, select, text
 
 from submissions_checker.api.dependencies import DBSession, TeacherUser
 from submissions_checker.db.models import (
+from submissions_checker.core.templates import render
     Group,
     Student,
     StudentAssignment,
@@ -21,7 +21,6 @@ from submissions_checker.db.models import (
 )
 
 router = APIRouter(prefix="/teacher/analytics", tags=["analytics"])
-templates = Jinja2Templates(directory="templates")
 
 _LOW_LOGIN_THRESHOLD = 3
 _HIGH_GRADE_THRESHOLD = 75
@@ -171,10 +170,7 @@ async def analytics_dashboard(
     quiz_failures = [dict(row._mapping) for row in quiz_failures_result]
     quiz_failures_count = len(quiz_failures)
 
-    return templates.TemplateResponse(
-        request=request,
-        name="analytics_dashboard.html",
-        context={
+    return render(request, "analytics_dashboard.html", {
             "current_user": current_user,
             "total_students": total_students,
             "active_subjects": active_subjects,
@@ -186,8 +182,7 @@ async def analytics_dashboard(
             "grade_dist_data": grade_dist_data,
             "quiz_failures": quiz_failures,
             "quiz_failures_count": quiz_failures_count,
-        },
-    )
+        })
 
 
 @router.get("/fraud", response_class=HTMLResponse)
@@ -323,10 +318,7 @@ async def analytics_fraud(
     for row in single_day_flags:
         risk_scores[row["student_id"]] = risk_scores.get(row["student_id"], 0) + 2
 
-    return templates.TemplateResponse(
-        request=request,
-        name="analytics_fraud.html",
-        context={
+    return render(request, "analytics_fraud.html", {
             "current_user": current_user,
             "late_login_flags": late_login_flags,
             "few_logins_flags": few_logins_flags,
@@ -335,8 +327,7 @@ async def analytics_fraud(
             "risk_scores": risk_scores,
             "low_login_threshold": _LOW_LOGIN_THRESHOLD,
             "high_grade_threshold": _HIGH_GRADE_THRESHOLD,
-        },
-    )
+        })
 
 
 @router.get("/students/{student_id}", response_class=HTMLResponse)
@@ -450,10 +441,7 @@ async def analytics_student(
     timeline_min = [r["min_grade"] for r in grade_timeline]
     timeline_max = [r["max_grade"] for r in grade_timeline]
 
-    return templates.TemplateResponse(
-        request=request,
-        name="analytics_student.html",
-        context={
+    return render(request, "analytics_student.html", {
             "current_user": current_user,
             "student": student,
             "group_name": group_name,
@@ -464,5 +452,4 @@ async def analytics_student(
             "timeline_grades": timeline_grades,
             "timeline_min": timeline_min,
             "timeline_max": timeline_max,
-        },
-    )
+        })

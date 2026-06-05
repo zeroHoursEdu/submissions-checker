@@ -6,14 +6,13 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from submissions_checker.api.dependencies import CurrentUser, DBSession
 from submissions_checker.db.models.notification import Notification
+from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
-templates = Jinja2Templates(directory="templates")
 
 
 @router.get("", response_class=HTMLResponse)
@@ -29,11 +28,7 @@ async def notifications_list(
         .limit(50)
     )
     notifications = result.scalars().all()
-    return templates.TemplateResponse(
-        request=request,
-        name="notifications.html",
-        context={"current_user": current_user, "notifications": notifications},
-    )
+    return render(request, "notifications.html", {"current_user": current_user, "notifications": notifications})
 
 
 @router.post("/{notification_id}/read")

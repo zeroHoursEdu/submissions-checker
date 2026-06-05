@@ -10,9 +10,10 @@ from fastapi.staticfiles import StaticFiles
 
 from pathlib import Path
 
-from submissions_checker.api.routes import admin, analytics, auth, feedback, health, notifications, student_portal, student_quiz, teacher_portal, users, webhooks
+from submissions_checker.api.routes import admin, analytics, auth, feedback, health, i18n, notifications, student_portal, student_quiz, teacher_portal, users, webhooks
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.database import close_db, init_db
+from submissions_checker.core.i18n import load_vocabularies
 from submissions_checker.core.logging import configure_logging, get_logger
 from submissions_checker.core.migrations import run_migrations
 from submissions_checker.core.scheduler import (
@@ -42,6 +43,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Startup
     logger.info("application_starting")
+
+    # 0. Load i18n vocabularies
+    load_vocabularies(Path("i18n"))
+    logger.info("i18n_loaded")
 
     # 1. Run database migrations
     logger.info("running_database_migrations")
@@ -116,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router)
     app.include_router(admin.router)
     app.include_router(notifications.router)
+    app.include_router(i18n.router)
 
     # Serve static assets
     app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Select Student{% endblock %}
+{% block title %}{{ vocab.student.page_select_title }}{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl mx-auto">
@@ -10,8 +10,8 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
       </svg>
     </div>
-    <h1 class="text-2xl font-bold text-slate-900">Who are you?</h1>
-    <p class="text-slate-500 mt-1 text-sm">Pick your name to access your assignments.</p>
+    <h1 class="text-2xl font-bold text-slate-900">{{ vocab.student.who_are_you }}</h1>
+    <p class="text-slate-500 mt-1 text-sm">{{ vocab.student.pick_name }}</p>
   </div>
 
   {% if students_by_group %}
@@ -20,7 +20,7 @@
       <div class="flex items-center gap-3 mb-3">
         <span class="text-xs font-semibold uppercase tracking-widest text-slate-400">{{ group_name }}</span>
         <div class="flex-1 h-px bg-slate-200"></div>
-        <span class="text-xs text-slate-400">{{ group_students | length }} students</span>
+        <span class="text-xs text-slate-400">{{ group_students | length }} {{ vocab.student.students_label }}</span>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {% for student in group_students %}
@@ -38,8 +38,8 @@
     {% endfor %}
   {% else %}
     <div class="text-center py-16 text-slate-400">
-      <p class="text-lg font-medium">No students found</p>
-      <p class="text-sm mt-1">Ask your instructor to add you to the system.</p>
+      <p class="text-lg font-medium">{{ vocab.student.no_students }}</p>
+      <p class="text-sm mt-1">{{ vocab.student.no_students_hint }}</p>
     </div>
   {% endif %}
 </div>

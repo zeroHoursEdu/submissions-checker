@@ -8,7 +8,6 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -24,9 +23,9 @@ from submissions_checker.db.models import (
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, QuizAttemptStatus
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/portal", tags=["student-quiz"])
-templates = Jinja2Templates(directory="templates")
 
 _TERMINAL_STATUSES = (
     QuizAttemptStatus.COMPLETED,
@@ -410,18 +409,14 @@ async def show_quiz(
     seconds_remaining = _seconds_remaining(attempt)
     anti_cheat_config = attempt.config_snapshot.get("anti_cheat", {})
 
-    return templates.TemplateResponse(
-        request=request,
-        name="student_quiz.html",
-        context={
+    return render(request, "student_quiz.html", {
             "current_user": current_user,
             "attempt": attempt,
             "questions": attempt.questions_snapshot,
             "existing_answers": existing_answers,
             "seconds_remaining": seconds_remaining,
             "anti_cheat_config": anti_cheat_config,
-        },
-    )
+        })
 
 
 @router.post("/quiz/{attempt_id}/event")
@@ -641,15 +636,11 @@ async def quiz_result(
     sa_full = sa_full_result.scalar_one()
     subject_id = sa_full.subjects_assignment.subject_id
 
-    return templates.TemplateResponse(
-        request=request,
-        name="student_quiz_result.html",
-        context={
+    return render(request, "student_quiz_result.html", {
             "current_user": current_user,
             "attempt": attempt,
             "question_results": question_results,
             "show_correct": show_correct,
             "subject_id": subject_id,
             "student_assignment_id": sa.id,
-        },
-    )
+        })

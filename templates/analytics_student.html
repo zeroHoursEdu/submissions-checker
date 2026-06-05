@@ -8,11 +8,11 @@
 
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/teacher" class="text-indigo-200 text-sm hover:text-white transition">Dashboard</a>
+  <a href="/teacher" class="text-indigo-200 text-sm hover:text-white transition">{{ vocab.teacher.dashboard_title }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/teacher/analytics" class="text-indigo-200 text-sm hover:text-white transition">Analytics</a>
+  <a href="/teacher/analytics" class="text-indigo-200 text-sm hover:text-white transition">{{ vocab.analytics.title }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/teacher/analytics/fraud" class="text-indigo-200 text-sm hover:text-white transition">Fraud Detection</a>
+  <a href="/teacher/analytics/fraud" class="text-indigo-200 text-sm hover:text-white transition">{{ vocab.analytics.fraud_detection }}</a>
   <span class="text-indigo-400 mx-1">/</span>
   <span class="text-indigo-100 text-sm font-medium">{{ student.full_name }}</span>
 {% endblock %}
@@ -41,13 +41,13 @@
     </div>
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-slate-400">
       {% if login_stats.login_count == 0 %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Never logged in</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">{{ vocab.analytics.never_logged_in }}</span>
       {% else %}
         <span>{{ login_stats.login_count }} login{{ 's' if login_stats.login_count != 1 else '' }}</span>
         <span class="text-slate-300">·</span>
-        <span>First: {{ login_stats.first_login.strftime('%b %d, %Y') }}</span>
+        <span>{{ vocab.analytics.first_label }} {{ login_stats.first_login.strftime('%b %d, %Y') }}</span>
         <span class="text-slate-300">·</span>
-        <span>Last: {{ login_stats.last_login.strftime('%b %d, %Y') }}</span>
+        <span>{{ vocab.analytics.last_label }} {{ login_stats.last_login.strftime('%b %d, %Y') }}</span>
       {% endif %}
     </div>
   </div>
@@ -55,7 +55,7 @@
     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
     </svg>
-    Back
+    {{ vocab.analytics.back }}
   </a>
 </div>
 
@@ -94,14 +94,14 @@
 {# --- Grade Timeline chart --- #}
 {% if timeline_labels %}
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-8">
-  <h2 class="text-base font-semibold text-slate-900 mb-4">Grade Timeline</h2>
+  <h2 class="text-base font-semibold text-slate-900 mb-4">{{ vocab.analytics.grade_timeline }}</h2>
   <div style="height: 260px;">
     <canvas id="gradeTimeline"></canvas>
   </div>
   <div class="flex items-center gap-6 mt-3 justify-center text-xs text-slate-500">
-    <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-indigo-500 rounded"></span> Grade</span>
-    <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-px border-t-2 border-dashed border-red-400"></span> Min</span>
-    <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-px border-t-2 border-dashed border-slate-300"></span> Max</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-indigo-500 rounded"></span> {{ vocab.analytics.chart_grade }}</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-px border-t-2 border-dashed border-red-400"></span> {{ vocab.analytics.chart_min }}</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-px border-t-2 border-dashed border-slate-300"></span> {{ vocab.analytics.chart_max }}</span>
   </div>
 </div>
 {% endif %}
@@ -109,19 +109,19 @@
 {# --- All Assignments table --- #}
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
   <div class="px-6 py-4 border-b border-slate-100">
-    <h2 class="text-base font-semibold text-slate-900">All Assignments</h2>
+    <h2 class="text-base font-semibold text-slate-900">{{ vocab.analytics.all_assignments }}</h2>
   </div>
   <div class="overflow-x-auto">
     {% if all_assignments %}
     <table class="w-full text-sm">
       <thead>
         <tr class="text-left text-xs text-slate-400 uppercase tracking-wide border-b border-slate-100">
-          <th class="px-6 py-3 font-medium">Assignment</th>
-          <th class="px-4 py-3 font-medium">Subject</th>
-          <th class="px-4 py-3 font-medium">Deadline</th>
-          <th class="px-4 py-3 font-medium text-center">Grade</th>
-          <th class="px-4 py-3 font-medium text-center">Max</th>
-          <th class="px-4 py-3 font-medium text-center">Pass?</th>
+          <th class="px-6 py-3 font-medium">{{ vocab.analytics.col_assignment }}</th>
+          <th class="px-4 py-3 font-medium">{{ vocab.analytics.col_subject }}</th>
+          <th class="px-4 py-3 font-medium">{{ vocab.analytics.col_deadline }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_grade }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_max }}</th>
+          <th class="px-4 py-3 font-medium text-center">{{ vocab.analytics.col_pass }}</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-50">
@@ -156,7 +156,7 @@
       </tbody>
     </table>
     {% else %}
-    <div class="px-6 py-10 text-center text-slate-400 text-sm">No assignments found.</div>
+    <div class="px-6 py-10 text-center text-slate-400 text-sm">{{ vocab.analytics.no_assignments }}</div>
     {% endif %}
   </div>
 </div>

@@ -1,17 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Users — Admin{% endblock %}
+{% block title %}{{ vocab.admin.users_title }} — Admin{% endblock %}
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
-  <a href="/admin" class="text-indigo-200 hover:text-white text-sm transition">Admin</a>
+  <a href="/admin" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.nav.admin_link }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-indigo-100 text-sm font-medium">Users</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.admin.users }}</span>
 {% endblock %}
 {% block content %}
 <div class="flex items-center justify-between mb-6">
-  <h1 class="text-2xl font-bold text-slate-900">Users</h1>
+  <h1 class="text-2xl font-bold text-slate-900">{{ vocab.admin.users_title }}</h1>
   <a href="/admin/teachers/create"
      class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
-    Add Teacher
+    {{ vocab.admin.add_teacher }}
   </a>
 </div>
 
@@ -20,11 +20,11 @@
     <table class="w-full text-sm">
       <thead>
         <tr class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
-          <th class="px-5 py-3 text-left font-medium">Username</th>
-          <th class="px-5 py-3 text-left font-medium">Role</th>
-          <th class="px-5 py-3 text-left font-medium">Status</th>
-          <th class="px-5 py-3 text-left font-medium">Created</th>
-          <th class="px-5 py-3 text-left font-medium">Actions</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_username }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_role }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_status }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_created }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.col_actions }}</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
@@ -41,9 +41,9 @@
           </td>
           <td class="px-5 py-3">
             {% if user.is_active %}
-              <span class="text-green-600 text-xs font-medium">Active</span>
+              <span class="text-green-600 text-xs font-medium">{{ vocab.admin.status_active }}</span>
             {% else %}
-              <span class="text-red-500 text-xs font-medium">Inactive</span>
+              <span class="text-red-500 text-xs font-medium">{{ vocab.admin.status_inactive }}</span>
             {% endif %}
           </td>
           <td class="px-5 py-3 text-slate-400 text-xs">{{ user.created_at.strftime("%Y-%m-%d") }}</td>
@@ -52,11 +52,11 @@
             <form method="POST" action="/admin/users/{{ user.id }}/toggle-active" class="inline">
               <button type="submit"
                       class="text-xs text-slate-500 hover:text-slate-800 hover:underline">
-                {% if user.is_active %}Deactivate{% else %}Activate{% endif %}
+                {% if user.is_active %}{{ vocab.admin.deactivate }}{% else %}{{ vocab.admin.activate }}{% endif %}
               </button>
             </form>
             {% else %}
-            <span class="text-xs text-slate-300">You</span>
+            <span class="text-xs text-slate-300">{{ vocab.admin.you_label }}</span>
             {% endif %}
           </td>
         </tr>
