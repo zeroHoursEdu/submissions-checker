@@ -2,6 +2,8 @@
 
 from submissions_checker.db.models.audit_log import AuditLog
 from submissions_checker.db.models.enums import (
+    NotificationCase,
+    NotificationMethod,
     OutboxEventType,
     OutboxMessageState,
     QuizAttemptStatus,
@@ -12,6 +14,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.group import Group
 from submissions_checker.db.models.notification import Notification
+from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.models.password_reset import PasswordResetToken
 from submissions_checker.db.models.quiz_template import QuizAnswer, QuizAttempt
@@ -27,6 +30,9 @@ from submissions_checker.db.models.user_login import UserLogin
 __all__ = [
     "AuditLog",
     "Notification",
+    "NotificationCase",
+    "NotificationMethod",
+    "NotificationPreference",
     "OutboxEventType",
     "OutboxMessageState",
     "PasswordResetToken",

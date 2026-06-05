@@ -33,7 +33,8 @@ from submissions_checker.db.models import (
     SubmissionStatus,
 )
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, QuizAttemptStatus
+from submissions_checker.db.models.enums import NotificationCase, NotificationMethod, OutboxEventType, OutboxMessageState, QuizAttemptStatus
+from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.services.audit import audit
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import compare_zip_files
@@ -524,3 +525,67 @@ async def student_summary(
             "overdue": overdue,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Notification preferences
+# ---------------------------------------------------------------------------
+
+_ALL_CASES: list[tuple[NotificationCase, str]] = [
+    (NotificationCase.SUBMISSION_CHECKED, "Submission Checked"),
+]
+_ALL_METHODS: list[tuple[NotificationMethod, str]] = [
+    (NotificationMethod.EMAIL, "Email"),
+]
+
+
+@router.get("/notification-preferences", response_class=HTMLResponse)
+async def notification_preferences_page(
+    request: Request,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+) -> HTMLResponse:
+    result = await db.execute(
+        select(NotificationPreference).where(NotificationPreference.student_id == student_id)
+    )
+    prefs_rows = result.scalars().all()
+    prefs_map = {(r.case, r.method): r.enabled for r in prefs_rows}
+
+    preferences = []
+    for case, case_label in _ALL_CASES:
+        methods = []
+        for method, method_label in _ALL_METHODS:
+            enabled = prefs_map.get((case, method), True)
+            methods.append({"method": method, "method_label": method_label, "enabled": enabled})
+        preferences.append({"case": case, "case_label": case_label, "methods": methods})
+
+    return templates.TemplateResponse(
+        request=request,
+        name="student_notification_preferences.html",
+        context={"current_user": current_user, "preferences": preferences},
+    )
+
+
+@router.post("/notification-preferences/{case}/{method}/toggle")
+async def toggle_notification_preference(
+    case: str,
+    method: str,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+) -> RedirectResponse:
+    result = await db.execute(
+        select(NotificationPreference).where(
+            NotificationPreference.student_id == student_id,
+            NotificationPreference.case == case,
+            NotificationPreference.method == method,
+        )
+    )
+    pref = result.scalar_one_or_none()
+    if pref is None:
+        db.add(NotificationPreference(student_id=student_id, case=case, method=method, enabled=False))
+    else:
+        pref.enabled = not pref.enabled
+    await db.commit()
+    return RedirectResponse(url="/portal/notification-preferences", status_code=303)

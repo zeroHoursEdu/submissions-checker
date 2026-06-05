@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
+from submissions_checker.db.models.enums import NotificationCase, NotificationMethod
+from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
@@ -22,6 +24,22 @@ from submissions_checker.services.notifications.templates import (
 )
 
 logger = get_logger(__name__)
+
+
+async def _is_email_enabled(db: AsyncSession, student_id: int, case: NotificationCase) -> bool:
+    """Return True if the student has email notifications enabled for the given case.
+
+    Missing row is treated as enabled (opt-out model).
+    """
+    result = await db.execute(
+        select(NotificationPreference).where(
+            NotificationPreference.student_id == student_id,
+            NotificationPreference.case == case,
+            NotificationPreference.method == NotificationMethod.EMAIL,
+        )
+    )
+    pref = result.scalar_one_or_none()
+    return pref is None or pref.enabled
 
 
 async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> None:
@@ -65,6 +83,14 @@ async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> N
         reason=reason,
         portal_url=portal_url,
     )
+
+    if not await _is_email_enabled(db, student.id, NotificationCase.SUBMISSION_CHECKED):
+        logger.info(
+            "submission_reviewed_email_suppressed",
+            submission_id=submission_id,
+            student_id=student.id,
+        )
+        return
 
     dispatcher = build_dispatcher(settings)
     if not dispatcher._channels:

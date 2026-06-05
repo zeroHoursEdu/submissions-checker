@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Notification Preferences{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition-colors">Portal</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-white text-sm font-medium">Notification Preferences</span>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <div class="mb-6">
+    <h1 class="text-2xl font-bold text-slate-900">Notification Preferences</h1>
+    <p class="text-slate-500 mt-1 text-sm">Choose when and how you'd like to be notified.</p>
+  </div>
+
+  <div class="space-y-4">
+    {% for pref in preferences %}
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-100">
+        <h2 class="text-base font-semibold text-slate-800">{{ pref.case_label }}</h2>
+      </div>
+      <div class="px-5 py-3 space-y-3">
+        {% for m in pref.methods %}
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm font-medium text-slate-700">{{ m.method_label }}</span>
+            <p class="text-xs text-slate-400 mt-0.5">
+              {% if m.method == "EMAIL" %}Receive an email when this event occurs.{% endif %}
+            </p>
+          </div>
+          <form method="POST"
+                action="/portal/notification-preferences/{{ pref.case }}/{{ m.method }}/toggle">
+            <button type="submit"
+                    class="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors
+                           {% if m.enabled %}
+                             bg-indigo-600 text-white hover:bg-indigo-700
+                           {% else %}
+                             bg-slate-100 text-slate-600 hover:bg-slate-200
+                           {% endif %}">
+              {% if m.enabled %}
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Enabled
+              {% else %}
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Disabled
+              {% endif %}
+            </button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

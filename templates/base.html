@@ -53,6 +53,12 @@
             Admin
           </a>
           {% endif %}
+          {% if current_user.role == "STUDENT" %}
+          <a href="/portal/notification-preferences"
+             class="text-xs font-medium text-indigo-200 hover:text-white transition-colors hidden sm:block">
+            Notifications
+          </a>
+          {% endif %}
           <form action="/auth/logout" method="POST">
             <button type="submit"
                     class="text-xs font-medium text-indigo-100 hover:text-white border border-indigo-500

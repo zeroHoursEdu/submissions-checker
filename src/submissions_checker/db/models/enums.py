@@ -90,3 +90,17 @@ class QuizAttemptStatus(enum.StrEnum):
 
     def __str__(self) -> str:
         return self.value
+
+
+class NotificationCase(enum.StrEnum):
+    SUBMISSION_CHECKED = "SUBMISSION_CHECKED"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class NotificationMethod(enum.StrEnum):
+    EMAIL = "EMAIL"
+
+    def __str__(self) -> str:
+        return self.value
