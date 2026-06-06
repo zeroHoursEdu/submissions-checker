@@ -297,6 +297,18 @@ async def submit_assignment(
                     detail="The submission deadline has passed. Late submissions are not accepted.",
                 )
 
+    # Block re-submission once the assignment is already passed
+    completed_result = await db.execute(
+        select(func.count(Submission.id)).where(
+            and_(
+                Submission.students_assignment_id == sa_id,
+                Submission.status == SubmissionStatus.COMPLETED,
+            )
+        )
+    )
+    if (completed_result.scalar_one() or 0) > 0:
+        raise HTTPException(status_code=403, detail="Assignment already passed. No further submissions accepted.")
+
     # Re-submission limit
     max_submissions = subjects_assignment.config.get("max_submissions")
     if max_submissions is not None:

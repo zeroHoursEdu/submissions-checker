@@ -17,6 +17,7 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
+    op.execute("ALTER TYPE outbox_event_type ADD VALUE IF NOT EXISTS 'FEEDBACK_REQUEST_SENT'")
     op.create_table(
         "feedback_requests",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),

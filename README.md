@@ -390,6 +390,62 @@ This is the foundational infrastructure phase. The following are implemented:
 - Update tests and documentation
 - Ensure all quality checks pass
 
+## Running E2E Tests
+
+End-to-end tests use Playwright + pytest-bdd (Gherkin/BDD). They spin up an isolated Docker stack (separate DB, app, S3) so they never touch your dev environment.
+
+### Prerequisites
+
+```bash
+# Install e2e dependencies
+uv pip install -e ".[e2e]"
+
+# Install Playwright browsers
+playwright install chromium
+```
+
+### Quick start
+
+```bash
+make e2e                   # headless (CI-friendly)
+make e2e-headed            # browser visible (debug mode)
+```
+
+### Options
+
+| Option | Example | Effect |
+|--------|---------|--------|
+| `TAGS` | `make e2e TAGS=@smoke` | Run only scenarios with that tag |
+| `SCENARIO` | `make e2e SCENARIO="teacher login"` | Run scenarios matching name substring |
+| `FILE` | `make e2e FILE=tests/e2e/features/teacher_auth.feature` | Run a single feature file |
+
+**Example: run only the auth feature in headed mode**
+```bash
+make e2e-headed FILE=tests/e2e/features/teacher_auth.feature
+```
+
+### Stack management
+
+```bash
+make e2e-up      # start stack without running tests
+make e2e-down    # tear down the stack
+make e2e-logs    # tail app logs
+```
+
+### Architecture
+
+- App runs on `http://localhost:8001`
+- Isolated Postgres on port `5435` (DB: `submissions_checker_e2e`)
+- LocalStack S3 on port `4567`
+- All state is ephemeral — `make e2e-down` destroys it
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `E2E_APP_URL` | `http://localhost:8001` | App base URL |
+| `E2E_DB_URL` | `postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e` | Direct DB connection for fixtures |
+
 ## License
 
 See [LICENSE](LICENSE) file for details.

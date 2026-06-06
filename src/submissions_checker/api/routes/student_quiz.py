@@ -78,9 +78,23 @@ def _seconds_remaining_from_violations(attempt: QuizAttempt, violations: dict[st
 
 
 def _build_question_config(q_type: str, q: dict[str, Any]) -> dict[str, Any]:
-    if q_type == "SINGLE_CHOICE":
-        return {"options": q.get("options", []), "correct": int(q.get("correct", 0))}
-    if q_type == "MULTIPLE_CHOICE":
+    if q_type in ("SINGLE_CHOICE", "MULTIPLE_CHOICE"):
+        # Support both formats:
+        #   A) options: ["text1", ...], correct: 0  (or correct: [0,1] for multi)
+        #   B) choices: [{"text": "...", "is_correct": true/false}, ...]
+        if "choices" in q:
+            raw_choices = q["choices"]
+            options = [c.get("text", str(c)) for c in raw_choices]
+            if q_type == "SINGLE_CHOICE":
+                correct_idx = next(
+                    (i for i, c in enumerate(raw_choices) if c.get("is_correct")), 0
+                )
+                return {"options": options, "correct": correct_idx}
+            else:
+                correct_idxs = [i for i, c in enumerate(raw_choices) if c.get("is_correct")]
+                return {"options": options, "correct": correct_idxs}
+        if q_type == "SINGLE_CHOICE":
+            return {"options": q.get("options", []), "correct": int(q.get("correct", 0))}
         return {"options": q.get("options", []), "correct": [int(x) for x in q.get("correct", [])]}
     if q_type == "ORDERING":
         return {"items": q.get("items", []), "correct_order": [int(x) for x in q.get("correct_order", [])]}

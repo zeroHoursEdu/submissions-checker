@@ -54,7 +54,6 @@ class DockerSandbox:
                 f"--memory={memory}",
                 f"--cpus={cpus}",
                 "--pids-limit=100",
-                "--no-new-privileges",
                 "--read-only",
                 "--tmpfs", "/tmp:rw,size=64m",
                 "-v", f"{student_files_dir}:/submission:ro",

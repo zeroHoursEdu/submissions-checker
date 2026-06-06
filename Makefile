@@ -77,6 +77,41 @@ clean: ## Clean up generated files
 	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name ".coverage" -delete
 
+e2e: ## Run E2E tests (headless). Options: TAGS=@tag SCENARIO="name" FILE=features/foo.feature
+	@echo "Starting E2E stack..."
+	docker compose -f docker-compose.e2e.yml up -d --build --wait
+	@echo "Running E2E tests..."
+	E2E_APP_URL=http://localhost:8001 \
+	E2E_DB_URL=postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e \
+	pytest -c pytest-e2e.ini tests/e2e/ -v \
+		$(if $(TAGS),-m "$(TAGS)",) \
+		$(if $(SCENARIO),-k "$(SCENARIO)",) \
+		$(if $(FILE),$(FILE),) \
+		|| (docker compose -f docker-compose.e2e.yml down; exit 1)
+	docker compose -f docker-compose.e2e.yml down
+
+e2e-headed: ## Run E2E tests with browser visible (for debugging)
+	@echo "Starting E2E stack..."
+	docker compose -f docker-compose.e2e.yml up -d --build --wait
+	@echo "Running E2E tests (headed)..."
+	E2E_APP_URL=http://localhost:8001 \
+	E2E_DB_URL=postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e \
+	pytest -c pytest-e2e.ini tests/e2e/ -v --headed \
+		$(if $(TAGS),-m "$(TAGS)",) \
+		$(if $(SCENARIO),-k "$(SCENARIO)",) \
+		$(if $(FILE),$(FILE),) \
+		|| (docker compose -f docker-compose.e2e.yml down; exit 1)
+	docker compose -f docker-compose.e2e.yml down
+
+e2e-up: ## Start E2E Docker stack without running tests
+	docker compose -f docker-compose.e2e.yml up -d --build --wait
+
+e2e-down: ## Stop E2E Docker stack
+	docker compose -f docker-compose.e2e.yml down
+
+e2e-logs: ## View E2E app logs
+	docker compose -f docker-compose.e2e.yml logs -f app-e2e
+
 setup: ## Run development environment setup
 	./scripts/dev_setup.sh
 
