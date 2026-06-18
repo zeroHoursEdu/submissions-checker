@@ -25,6 +25,7 @@ from submissions_checker.db.models import (
 )
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
 from submissions_checker.services.docker_sandbox import DockerSandbox, SandboxResult
+from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 
 logger = get_logger(__name__)
 
@@ -122,9 +123,13 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         extract_path = Path(extract_dir)
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(extract_path)
+                safe_extract(zf, extract_path)
         except (zipfile.BadZipFile, OSError) as exc:
             _fail_validation(submission, f"Could not open submitted ZIP: {exc}")
+            return
+        except UnsafeArchiveError as exc:
+            logger.error("check_task_unsafe_archive", submission_id=submission_id, error=str(exc))
+            _fail_validation(submission, f"Submitted ZIP archive is unsafe: {exc}")
             return
 
         env: dict[str, str] = {}

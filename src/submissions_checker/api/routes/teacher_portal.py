@@ -15,7 +15,9 @@ from sqlalchemy import and_, false, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import AppSettings, DBSession, TeacherUser
+from submissions_checker.core.config import get_settings
 from submissions_checker.core.security import COOKIE_NAME, create_access_token
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
@@ -233,7 +235,7 @@ async def enter_as_test_student(
         value=token,
         httponly=True,
         samesite="strict",
-        secure=False,
+        secure=get_settings().cookie_secure,
         max_age=8 * 3600,
     )
     return response
@@ -243,9 +245,7 @@ async def enter_as_test_student(
 async def teacher_subject(
     request: Request, subject_id: int, db: DBSession, current_user: TeacherUser
 ) -> HTMLResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    subject = await require_subject_access(db, subject_id, current_user)
 
     students_result = await db.execute(
         select(Student, Group.name.label("group_name"))
@@ -317,6 +317,8 @@ async def teacher_assignment(
     db: DBSession,
     current_user: TeacherUser,
 ) -> HTMLResponse:
+    await require_subject_access(db, subject_id, current_user)
+
     assignment_result = await db.execute(
         select(SubjectsAssignment)
         .where(
@@ -426,9 +428,7 @@ async def download_subject_enrollment_template(
     Columns: student_group, student_name, student_surname, email
     + one variant_{assignment.code} column per assignment with variants_required=true.
     """
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    await require_subject_access(db, subject_id, current_user)
 
     assignments_result = await db.execute(
         select(SubjectsAssignment)
@@ -481,9 +481,7 @@ async def import_subject_students(
 
     Creates/enrolls students and sets per-assignment variants from variant_ columns.
     """
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    await require_subject_access(db, subject_id, current_user)
 
     if file.size and file.size > 1_048_576:
         raise HTTPException(status_code=413, detail="File too large (max 1 MB)")
@@ -791,6 +789,10 @@ async def teacher_review_submission(
     sa = submission.students_assignment
     subjects_assignment = sa.subjects_assignment
 
+    subject = subjects_assignment.subject
+    if current_user.role != UserRole.ADMIN and subject.owner_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this subject")
+
     return render(request, "teacher_submission_review.html", {
             "current_user": current_user,
             "submission": submission,
@@ -828,6 +830,8 @@ async def teacher_review_submission_action(
 
     sa = submission.students_assignment
     subjects_assignment = sa.subjects_assignment
+
+    await require_subject_access(db, subjects_assignment.subject_id, current_user)
 
     clean_reason = reason.strip()
     if action == "approve":
@@ -892,9 +896,7 @@ async def enroll_student(
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404)
+    await require_subject_access(db, subject_id, current_user)
     existing = await db.execute(
         select(SubjectsStudents).where(
             SubjectsStudents.subject_id == subject_id,
@@ -932,6 +934,7 @@ async def unenroll_student(
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
+    await require_subject_access(db, subject_id, current_user)
     result = await db.execute(
         select(SubjectsStudents).where(
             SubjectsStudents.subject_id == subject_id,
@@ -960,9 +963,7 @@ async def export_grades_csv(
     current_user: TeacherUser,
 ) -> StreamingResponse:
     """Download all grades for a subject as CSV."""
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    subject = await require_subject_access(db, subject_id, current_user)
 
     result = await db.execute(
         select(
@@ -1130,9 +1131,7 @@ async def request_feedback(
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    await require_subject_access(db, subject_id, current_user)
 
     semester_result = await db.execute(_current_semester_query())
     semester = semester_result.scalar_one_or_none()
@@ -1196,9 +1195,7 @@ async def view_feedback(
     db: DBSession,
     current_user: TeacherUser,
 ) -> HTMLResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    subject = await require_subject_access(db, subject_id, current_user)
 
     semester_result = await db.execute(_current_semester_query())
     current_semester = semester_result.scalar_one_or_none()
@@ -1248,9 +1245,7 @@ async def export_feedback_csv(
     db: DBSession,
     current_user: TeacherUser,
 ) -> StreamingResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    await require_subject_access(db, subject_id, current_user)
 
     rows_result = await db.execute(
         select(FeedbackResponse, Student)

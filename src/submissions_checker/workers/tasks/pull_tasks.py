@@ -78,6 +78,19 @@ async def execute_pull_task(db: AsyncSession, pull_data: dict) -> None:
         logger.error("execute_pull_task_missing_fields", missing_fields=missing)
         raise ValueError(f"Missing required fields in payload: {missing}")
 
+    # Security (belt-and-suspenders with the webhook check): only clone trusted
+    # GitHub https URLs. Reject anything else before it reaches git.
+    if not isinstance(fork_clone_url, str) or not fork_clone_url.startswith(
+        "https://github.com/"
+    ):
+        logger.error(
+            "execute_pull_task_invalid_clone_url",
+            pr_number=pr_number,
+            fork_repo=fork_full_name,
+            clone_url=fork_clone_url,
+        )
+        raise ValueError(f"Refusing to clone untrusted URL: {fork_clone_url}")
+
     try:
         # Get workspace directory from settings
         settings = get_settings()

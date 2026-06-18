@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn
+from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     github_api_base_url: str = "https://api.github.com"
 
     # Backend base URL (used to build callback URLs for external services)
-    base_url: str = "https://ba36-85-114-192-246.ngrok-free.app"
+    base_url: str = "http://localhost:8000"
 
     # AI Provider
     ai_provider: str = "openai"
@@ -92,6 +92,27 @@ class Settings(BaseSettings):
     aws_access_key_id: str = "test"
     aws_secret_access_key: str = "test"
     aws_region: str = "us-east-1"
+
+    @field_validator("secret_key")
+    @classmethod
+    def _reject_placeholder_secret_key(cls, value: str) -> str:
+        """Reject known placeholder/weak secret keys in any environment."""
+        denylist = {
+            "your-secret-key-here-change-in-production",
+            "changeme",
+            "secret",
+        }
+        if value.lower() in denylist or "your-secret-key" in value.lower():
+            raise ValueError(
+                "SECRET_KEY is set to a known placeholder/weak value. "
+                "Set a strong random key, e.g. `openssl rand -hex 32`."
+            )
+        return value
+
+    @property
+    def cookie_secure(self) -> bool:
+        """Whether auth cookies should set the Secure flag (production only)."""
+        return self.is_production
 
     @property
     def is_development(self) -> bool:

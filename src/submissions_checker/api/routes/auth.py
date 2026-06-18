@@ -37,7 +37,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,
         samesite="strict",
-        secure=False,
+        secure=get_settings().cookie_secure,
         max_age=JWT_EXPIRY_HOURS * 3600,
     )
 

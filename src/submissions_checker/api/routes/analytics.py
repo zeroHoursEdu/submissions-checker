@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import and_, func, select, text
 
-from submissions_checker.api.dependencies import DBSession, TeacherUser
+from submissions_checker.api.dependencies import AdminUser, DBSession, TeacherUser
+from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models import (
     Group,
     Student,
@@ -30,7 +31,9 @@ _HIGH_GRADE_THRESHOLD = 75
 async def analytics_dashboard(
     request: Request,
     db: DBSession,
-    current_user: TeacherUser,
+    # TODO security: this dashboard aggregates across ALL teachers' subjects.
+    # Gated to ADMIN until queries are scoped to subjects owned by the teacher.
+    current_user: AdminUser,
 ) -> HTMLResponse:
     # --- Platform overview scalars ---
     total_students_result = await db.execute(
@@ -189,7 +192,9 @@ async def analytics_dashboard(
 async def analytics_fraud(
     request: Request,
     db: DBSession,
-    current_user: TeacherUser,
+    # TODO security: this report aggregates across ALL teachers' subjects/students.
+    # Gated to ADMIN until queries are scoped to subjects owned by the teacher.
+    current_user: AdminUser,
 ) -> HTMLResponse:
     # Reusable subquery: login stats per user
     login_stats_sq = (
@@ -348,6 +353,21 @@ async def analytics_student(
         raise HTTPException(status_code=404, detail="Student not found")
     student = row.Student
     group_name = row.group_name
+
+    # Object-level authz: a non-admin teacher may only view a student who is
+    # enrolled in at least one subject they own.
+    if current_user.role != UserRole.ADMIN:
+        owned_enrollment = await db.execute(
+            select(SubjectsStudents.student_id)
+            .join(Subject, Subject.id == SubjectsStudents.subject_id)
+            .where(
+                SubjectsStudents.student_id == student_id,
+                Subject.owner_id == current_user.user_id,
+            )
+            .limit(1)
+        )
+        if owned_enrollment.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="Not authorized for this student")
 
     # Per-subject breakdown for this student
     subject_profile_result = await db.execute(

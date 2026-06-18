@@ -28,18 +28,31 @@ class CurrentUserData:
 
 async def _get_current_user(
     access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    db: AsyncSession = Depends(get_db),
 ) -> CurrentUserData:
-    """Extract and validate JWT from HTTP-only cookie. Raises 401 if absent or invalid."""
+    """Extract and validate JWT from HTTP-only cookie, then verify the user against the DB.
+
+    Raises 401 if the cookie is absent/invalid, or if the user no longer exists or is inactive.
+    """
     if access_token is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         payload = decode_access_token(access_token)
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token") from exc
+
+    user_id = int(payload["sub"])
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive")
+
     return CurrentUserData(
-        user_id=int(payload["sub"]),
-        username=payload["username"],
-        role=UserRole(payload["role"]),
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
     )
 
 

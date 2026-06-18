@@ -10,6 +10,17 @@ router = APIRouter()
 _YEAR_SECONDS = 365 * 24 * 3600
 
 
+def _safe_redirect_target(referer: str | None) -> str:
+    """Only allow same-site relative paths; reject open-redirect targets.
+
+    A valid target must start with a single "/" and must not be a
+    protocol-relative URL ("//host"). Anything else falls back to "/".
+    """
+    if referer and referer.startswith("/") and not referer.startswith("//"):
+        return referer
+    return "/"
+
+
 @router.post("/set-language")
 async def set_language(
     request: Request,
@@ -19,7 +30,7 @@ async def set_language(
     if lang not in registered_codes:
         return Response(status_code=400, content="Unknown language code")
 
-    redirect_to = request.headers.get("referer") or "/"
+    redirect_to = _safe_redirect_target(request.headers.get("referer"))
     response = RedirectResponse(url=redirect_to, status_code=302)
     response.set_cookie(
         key="lang",

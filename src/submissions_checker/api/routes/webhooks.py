@@ -1,9 +1,10 @@
 """GitHub webhook endpoints."""
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 
 from submissions_checker.api.dependencies import DBSession
 from submissions_checker.core.logging import get_logger
+from submissions_checker.core.security import verify_github_signature
 from submissions_checker.db.models.enums import OutboxEventType
 from submissions_checker.db.models.outbox import OutboxMessage
 
@@ -27,6 +28,10 @@ async def handle_github_webhook(
 
     body = await request.body()
 
+    if not verify_github_signature(body, x_hub_signature_256 or ""):
+        logger.warning("github_webhook_invalid_signature")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
     if x_github_event != "pull_request":
         logger.info("github_webhook_ignored", event_type=x_github_event)
         return {"status": "ignored", "message": f"Event type '{x_github_event}' not processed"}
@@ -46,10 +51,20 @@ async def handle_github_webhook(
 
     if not head_repo:
         logger.error("github_webhook_missing_head_repo", pr_number=pr_number)
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Missing head repository in payload")
 
     fork_clone_url = head_repo.get("clone_url")
+
+    if not isinstance(fork_clone_url, str) or not fork_clone_url.startswith(
+        ("https://github.com/", "https://www.github.com/")
+    ):
+        logger.error(
+            "github_webhook_invalid_clone_url",
+            pr_number=pr_number,
+            clone_url=fork_clone_url,
+        )
+        raise HTTPException(status_code=400, detail="Invalid clone URL")
+
     fork_full_name = head_repo.get("full_name")
     head_ref = head.get("ref")
     head_sha = head.get("sha")

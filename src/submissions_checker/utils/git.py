@@ -45,11 +45,24 @@ async def clone_repository(
         depth=depth,
     )
 
+    # Security: only allow https:// URLs. Reject ext::/fd::/file:/git:/ssh, etc.
+    if not repo_url.startswith("https://"):
+        raise ValueError(f"Refusing to clone non-https URL: {repo_url}")
+
     # Ensure target directory parent exists
     target_dir.parent.mkdir(parents=True, exist_ok=True)
 
-    # Build git clone command
-    cmd = ["git", "clone"]
+    # Build git clone command. Disable dangerous transports (ext/fd/git) that
+    # allow arbitrary command execution; permit only https.
+    cmd = [
+        "git",
+        "-c", "protocol.ext.allow=never",
+        "-c", "protocol.fd.allow=never",
+        "-c", "protocol.allow=never",
+        "-c", "protocol.https.allow=always",
+        "-c", "protocol.git.allow=never",
+        "clone",
+    ]
 
     if depth is not None:
         cmd.extend(["--depth", str(depth)])

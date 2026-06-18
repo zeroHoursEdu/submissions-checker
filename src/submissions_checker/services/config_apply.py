@@ -26,6 +26,7 @@ from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 
 if TYPE_CHECKING:
     from submissions_checker.services.storage import StorageService
@@ -84,7 +85,10 @@ class ConfigApplyService:
         with tempfile.TemporaryDirectory() as tmp_str:
             tmp_dir = Path(tmp_str)
             with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-                zf.extractall(tmp_dir)
+                try:
+                    safe_extract(zf, tmp_dir)
+                except UnsafeArchiveError as exc:
+                    raise ValueError(f"Uploaded ZIP archive is unsafe: {exc}") from exc
 
             config_path = tmp_dir / "config.yml"
             if not config_path.exists():
@@ -111,7 +115,10 @@ class ConfigApplyService:
         with tempfile.TemporaryDirectory() as tmp_str:
             tmp_dir = Path(tmp_str)
             with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-                zf.extractall(tmp_dir)
+                try:
+                    safe_extract(zf, tmp_dir)
+                except UnsafeArchiveError as exc:
+                    raise ValueError(f"Uploaded ZIP archive is unsafe: {exc}") from exc
 
             plan = self._compute_plan(new_cfg, prev_cfg, subject, tmp_dir)
 
