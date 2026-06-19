@@ -23,6 +23,7 @@ from submissions_checker.db.models.notification_preference import NotificationPr
 from submissions_checker.db.models.semester import Semester
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.models.password_reset import PasswordResetToken
+from submissions_checker.db.models.quiz_attempt_snapshot import QuizAttemptSnapshot
 from submissions_checker.db.models.quiz_template import QuizAnswer, QuizAttempt
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
@@ -50,6 +51,7 @@ __all__ = [
     "QuizAttemptStatus",
     "QuizAnswer",
     "QuizAttempt",
+    "QuizAttemptSnapshot",
     "QuizQuestionType",
     "SubmissionSourceType",
     "SubmissionStatus",

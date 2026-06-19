@@ -22,6 +22,7 @@ from submissions_checker.db.models.base import Base, TimestampMixin
 from submissions_checker.db.models.enums import QuizAttemptStatus
 
 if TYPE_CHECKING:
+    from submissions_checker.db.models.quiz_attempt_snapshot import QuizAttemptSnapshot
     from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
     from submissions_checker.db.models.submission import Submission
 
@@ -65,6 +66,9 @@ class QuizAttempt(Base, TimestampMixin):
     plugin_config: Mapped[SubjectPluginConfig | None] = relationship("SubjectPluginConfig")
     answers: Mapped[list[QuizAnswer]] = relationship(
         "QuizAnswer", back_populates="attempt", cascade="all, delete-orphan"
+    )
+    snapshots: Mapped[list[QuizAttemptSnapshot]] = relationship(
+        "QuizAttemptSnapshot", back_populates="attempt", cascade="all, delete-orphan"
     )
 
     __table_args__ = (

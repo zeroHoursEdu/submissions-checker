@@ -6,16 +6,18 @@ import random
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from submissions_checker.api.dependencies import DBSession, StudentId, StudentUser
+from submissions_checker.api.dependencies import AppSettings, DBSession, StudentId, StudentUser
 from submissions_checker.db.models import (
     OutboxMessage,
     QuizAnswer,
     QuizAttempt,
+    QuizAttemptSnapshot,
+    Student,
     StudentAssignment,
     Submission,
     SubmissionStatus,
@@ -23,6 +25,7 @@ from submissions_checker.db.models import (
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, QuizAttemptStatus
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.services.storage import StorageService
 from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/portal", tags=["student-quiz"])
@@ -33,6 +36,10 @@ _TERMINAL_STATUSES = (
     QuizAttemptStatus.VIOLATION_FAIL,
 )
 
+# Proctoring snapshot upload limits
+_MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024  # 2 MB
+_ALLOWED_SNAPSHOT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,6 +47,14 @@ _TERMINAL_STATUSES = (
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _needs_consent(db: Any, student_id: int) -> bool:
+    """True if the student has not yet acknowledged the proctoring recording notice."""
+    consented = await db.scalar(
+        select(Student.recording_consent_at).where(Student.id == student_id)
+    )
+    return consented is None
 
 
 def _elapsed_seconds(attempt: QuizAttempt) -> float:
@@ -296,6 +311,9 @@ async def start_or_resume_quiz(
     student_id: StudentId,
 ) -> RedirectResponse:
     """Create or resume a QuizAttempt, drawing questions from the pinned plugin config."""
+    if await _needs_consent(db, student_id):
+        return RedirectResponse(url="/portal/consent", status_code=303)
+
     sa_result = await db.execute(
         select(StudentAssignment)
         .where(StudentAssignment.id == sa_id, StudentAssignment.student_id == student_id)
@@ -391,6 +409,9 @@ async def show_quiz(
     current_user: StudentUser,
     student_id: StudentId,
 ) -> HTMLResponse | RedirectResponse:
+    if await _needs_consent(db, student_id):
+        return RedirectResponse(url="/portal/consent", status_code=303)
+
     attempt = await db.get(
         QuizAttempt,
         attempt_id,
@@ -422,6 +443,7 @@ async def show_quiz(
     existing_answers = {a.question_id: a.answer for a in attempt.answers}
     seconds_remaining = _seconds_remaining(attempt)
     anti_cheat_config = attempt.config_snapshot.get("anti_cheat", {})
+    proctoring_config = anti_cheat_config.get("camera", {})
 
     return render(request, "student_quiz.html", {
             "current_user": current_user,
@@ -430,6 +452,7 @@ async def show_quiz(
             "existing_answers": existing_answers,
             "seconds_remaining": seconds_remaining,
             "anti_cheat_config": anti_cheat_config,
+            "proctoring_config": proctoring_config,
         })
 
 
@@ -524,6 +547,72 @@ async def report_violation(
         "message": message,
         "violation_count": count,
     })
+
+
+@router.post("/quiz/{attempt_id}/snapshot")
+async def upload_snapshot(
+    attempt_id: int,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+    settings: AppSettings,
+    event_type: str,
+    frame: UploadFile = File(...),
+) -> JSONResponse:
+    """Store a webcam evidence frame captured client-side on a flagged proctoring event."""
+    attempt = await db.get(QuizAttempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status_code=404)
+
+    sub_result = await db.execute(
+        select(Submission)
+        .where(Submission.id == attempt.submission_id)
+        .options(selectinload(Submission.students_assignment))
+    )
+    submission = sub_result.scalar_one_or_none()
+    if submission is None or submission.students_assignment.student_id != student_id:
+        raise HTTPException(status_code=403)
+
+    if attempt.status != QuizAttemptStatus.IN_PROGRESS:
+        raise HTTPException(status_code=409, detail="Attempt is not in progress")
+
+    camera = attempt.config_snapshot.get("anti_cheat", {}).get("camera", {})
+    if not camera.get("capture_snapshots"):
+        raise HTTPException(status_code=403, detail="Snapshot capture is not enabled")
+
+    if frame.content_type not in _ALLOWED_SNAPSHOT_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported image type")
+
+    data = await frame.read()
+    if not data or len(data) > _MAX_SNAPSHOT_BYTES:
+        raise HTTPException(status_code=413, detail="Frame missing or too large")
+
+    storage = StorageService(settings) if settings.s3_endpoint_url else None
+    if storage is None:
+        # Storage not configured — accept silently so proctoring never blocks the quiz.
+        return JSONResponse({"stored": False})
+
+    ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[frame.content_type]
+    seq = await db.scalar(
+        select(func.count()).select_from(QuizAttemptSnapshot).where(
+            QuizAttemptSnapshot.attempt_id == attempt_id
+        )
+    )
+    safe_event = "".join(c for c in event_type if c.isalnum() or c in "_-")[:48] or "event"
+    key = f"proctoring/attempt-{attempt_id}/{(seq or 0) + 1}-{safe_event}.{ext}"
+    url = await storage.upload_bytes(data, key, frame.content_type)
+
+    snapshot = QuizAttemptSnapshot(
+        attempt_id=attempt_id,
+        event_type=safe_event,
+        s3_key=key,
+        s3_url=url,
+        captured_at=_utcnow(),
+    )
+    db.add(snapshot)
+    await db.commit()
+
+    return JSONResponse({"stored": True, "url": url})
 
 
 @router.post("/quiz/{attempt_id}/submit")

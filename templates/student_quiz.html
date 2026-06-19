@@ -26,6 +26,27 @@
      class="hidden fixed top-14 left-0 right-0 z-50 text-white text-sm font-medium px-4 py-3 text-center shadow-md">
 </div>
 
+{% if proctoring_config and proctoring_config.enabled %}
+<!-- ─── Proctoring: camera preview + recording notice ─── -->
+<div class="fixed bottom-4 right-4 z-30 w-44 rounded-xl overflow-hidden shadow-lg border border-slate-300 bg-black">
+  <video id="proctor-video" autoplay playsinline muted class="w-full h-32 object-cover bg-black"></video>
+  <canvas id="proctor-canvas" class="hidden"></canvas>
+  <div class="flex items-center gap-1.5 px-2 py-1 bg-red-600 text-white text-[11px] font-medium">
+    <span class="inline-block w-2 h-2 rounded-full bg-white animate-pulse"></span>
+    <span id="proctor-status">{{ vocab.quiz.proctor_recording }}</span>
+  </div>
+</div>
+
+<!-- Blocking overlay: shown while loading models or when the camera gate fails -->
+<div id="proctor-gate"
+     class="fixed inset-0 z-[60] bg-slate-900/95 flex items-center justify-center text-center px-6">
+  <div class="max-w-md">
+    <div id="proctor-gate-spinner" class="mx-auto mb-4 w-10 h-10 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+    <p id="proctor-gate-msg" class="text-slate-100 text-sm font-medium">{{ vocab.quiz.proctor_loading }}</p>
+  </div>
+</div>
+{% endif %}
+
 {% if seconds_remaining is not none %}
 <!-- Timer -->
 <div id="timer"
@@ -297,5 +318,196 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
 })();
 {% endif %}
 </script>
+
+{% if proctoring_config and proctoring_config.enabled %}
+<script type="module">
+// ─── Camera proctoring (client-side ML) ───────────────────────────
+// Emits camera_* events through the SAME /event endpoint + rule engine as the
+// passive anti-cheat above. Detection runs entirely in the browser; only events
+// (and, on flagged actions, evidence frames) leave the device.
+import { FilesetResolver, FaceLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+
+const cfg = {{ proctoring_config | tojson }};
+const attemptId = {{ attempt.id }};
+const det = cfg.detectors || {};
+
+const video = document.getElementById('proctor-video');
+const canvas = document.getElementById('proctor-canvas');
+const gate = document.getElementById('proctor-gate');
+const gateMsg = document.getElementById('proctor-gate-msg');
+const gateSpinner = document.getElementById('proctor-gate-spinner');
+const banner = document.getElementById('violation-banner');
+
+function showBanner(msg, level) {
+  if (!msg) return;
+  banner.textContent = msg;
+  banner.className = 'fixed top-14 left-0 right-0 z-50 text-white text-sm font-medium px-4 py-3 text-center shadow-md ' +
+                     (level === 'error' ? 'bg-red-600' : 'bg-amber-500');
+  banner.classList.remove('hidden');
+  if (level !== 'error') setTimeout(() => banner.classList.add('hidden'), 7000);
+}
+
+function failGate(msg) {
+  gateSpinner.classList.add('hidden');
+  gateMsg.textContent = msg;
+  gate.classList.remove('hidden');
+  const btn = document.querySelector('#quiz-form button[type=submit]');
+  if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+}
+function openGate() { gate.classList.add('hidden'); }
+
+// Capture a frame and upload as evidence (best-effort; never blocks the quiz).
+async function captureSnapshot(eventType) {
+  try {
+    if (!video.videoWidth) return;
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.7));
+    if (!blob) return;
+    const fd = new FormData();
+    fd.append('frame', blob, 'frame.jpg');
+    await fetch(`/portal/quiz/${attemptId}/snapshot?event_type=${encodeURIComponent(eventType)}`,
+               { method: 'POST', body: fd });
+  } catch (_) {}
+}
+
+// Report a camera event through the existing rule engine, then react to the action.
+async function report(type) {
+  try {
+    const res = await fetch(`/portal/quiz/${attemptId}/event`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({type}),
+    });
+    const d = await res.json();
+    const action = d.action || 'none';
+    if (cfg.capture_snapshots && (cfg.snapshot_on || []).includes(action)) captureSnapshot(type);
+    if (action === 'fail') {
+      showBanner(d.message || 'Your quiz has been automatically failed.', 'error');
+      setTimeout(() => document.getElementById('quiz-form').submit(), 2000);
+    } else if (action === 'reduce_time' && d.seconds_remaining !== null) {
+      window.remaining = d.seconds_remaining;
+      showBanner(d.message, 'warning');
+    } else if (action === 'warn') {
+      showBanner(d.message, 'warning');
+    }
+  } catch (_) {}
+}
+
+// Edge-triggered debounce: fire once after a condition holds for sustain_seconds,
+// then re-arm only after it clears.
+function makeGate(sustainSeconds) {
+  let since = null, fired = false;
+  return (active, now) => {
+    if (active) {
+      if (since === null) since = now;
+      if (!fired && now - since >= sustainSeconds * 1000) { fired = true; return true; }
+    } else { since = null; fired = false; }
+    return false;
+  };
+}
+
+// Head yaw/pitch (degrees) from MediaPipe's column-major 4x4 transform matrix.
+function headAngles(m) {
+  const d = m.data || m;
+  const r20 = d[2], r21 = d[6], r22 = d[10];
+  const pitch = Math.atan2(r21, r22) * 180 / Math.PI;
+  const yaw = Math.atan2(-r20, Math.hypot(r21, r22)) * 180 / Math.PI;
+  return { yaw, pitch };
+}
+
+async function start() {
+  // 1. Camera access + start gate.
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+  } catch (_) {
+    report('camera_blocked');
+    if (cfg.require_camera && cfg.on_no_camera === 'fail') {
+      failGate("{{ vocab.quiz.proctor_camera_denied }}");
+    } else if (cfg.require_camera) {
+      openGate(); showBanner("{{ vocab.quiz.proctor_camera_required }}", 'warning');
+    } else { openGate(); }
+    return;
+  }
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+
+  // 2. Load FaceLandmarker (face count + head pose).
+  let landmarker = null;
+  try {
+    const fileset = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    landmarker = await FaceLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
+      runningMode: "VIDEO",
+      numFaces: 2,
+      outputFacialTransformationMatrixes: true,
+    });
+  } catch (_) { /* fall through — gate still opens so the quiz is usable */ }
+
+  // 3. Optional phone/object detector (heavy, best-effort).
+  let objModel = null;
+  if (det.phone && det.phone.enabled) {
+    try {
+      await import("https://esm.sh/@tensorflow/tfjs@4.22.0");
+      const coco = await import("https://esm.sh/@tensorflow-models/coco-ssd@2.2.3");
+      objModel = await coco.load();
+    } catch (_) {}
+  }
+
+  openGate();
+
+  const faceAbsentGate   = makeGate((det.face_absent || {}).sustain_seconds || 3);
+  const multiFaceGate    = makeGate((det.multiple_faces || {}).sustain_seconds || 1);
+  const lookAwayGate     = makeGate((det.looking_away || {}).sustain_seconds || 3);
+  const yawDeg   = (det.looking_away || {}).yaw_deg || 25;
+  const pitchDeg = (det.looking_away || {}).pitch_deg || 20;
+
+  // Face/gaze loop — throttled to ~4 fps.
+  let lastTs = -1;
+  function faceLoop() {
+    const now = performance.now();
+    if (landmarker && video.readyState >= 2 && now - lastTs > 240) {
+      lastTs = now;
+      let res; try { res = landmarker.detectForVideo(video, now); } catch (_) { res = null; }
+      if (res) {
+        const faces = (res.faceLandmarks || []).length;
+        if (det.face_absent && det.face_absent.enabled && faceAbsentGate(faces === 0, now)) report('camera_face_absent');
+        if (det.multiple_faces && det.multiple_faces.enabled && multiFaceGate(faces > 1, now)) report('camera_multiple_faces');
+        if (det.looking_away && det.looking_away.enabled) {
+          let away = false;
+          const mats = res.facialTransformationMatrixes || [];
+          if (faces === 1 && mats.length) {
+            const { yaw, pitch } = headAngles(mats[0]);
+            away = Math.abs(yaw) > yawDeg || Math.abs(pitch) > pitchDeg;
+          }
+          if (lookAwayGate(away, now)) report('camera_looking_away');
+        }
+      }
+    }
+    requestAnimationFrame(faceLoop);
+  }
+  requestAnimationFrame(faceLoop);
+
+  // Phone loop — slow interval on a downscaled frame.
+  if (objModel) {
+    const minConf = (det.phone.min_confidence != null) ? det.phone.min_confidence : 0.5;
+    let wasPhone = false;
+    setInterval(async () => {
+      try {
+        const preds = await objModel.detect(video);
+        const hit = preds.some(p => (p.class === 'cell phone' || p.class === 'book') && p.score >= minConf);
+        if (hit && !wasPhone) report('camera_phone_detected');  // rising edge only
+        wasPhone = hit;
+      } catch (_) {}
+    }, ((det.phone.sample_seconds || 4) * 1000));
+  }
+}
+
+start();
+</script>
+{% endif %}
 
 {% endblock %}

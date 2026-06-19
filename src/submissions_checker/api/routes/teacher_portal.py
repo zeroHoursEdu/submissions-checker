@@ -27,6 +27,7 @@ from submissions_checker.db.models import (
     FeedbackToken,
     OutboxMessage,
     QuizAttempt,
+    QuizAttemptSnapshot,
     Semester,
     Student,
     StudentAssignment,
@@ -398,12 +399,33 @@ async def teacher_assignment(
             if sa_id_val not in violation_flags:
                 violation_flags[sa_id_val] = vr.violations or {}
 
+    # Load proctoring snapshot thumbnails grouped by student_assignment.
+    snapshot_flags: dict[int, list[dict]] = {}
+    if sa_id_list:
+        snap_result = await db.execute(
+            select(
+                Submission.students_assignment_id,
+                QuizAttemptSnapshot.event_type,
+                QuizAttemptSnapshot.s3_url,
+                QuizAttemptSnapshot.captured_at,
+            )
+            .join(QuizAttempt, QuizAttempt.id == QuizAttemptSnapshot.attempt_id)
+            .join(Submission, Submission.id == QuizAttempt.submission_id)
+            .where(Submission.students_assignment_id.in_(sa_id_list))
+            .order_by(QuizAttemptSnapshot.captured_at.desc())
+        )
+        for sr in snap_result:
+            snapshot_flags.setdefault(sr.students_assignment_id, []).append(
+                {"event_type": sr.event_type, "url": sr.s3_url}
+            )
+
     return render(request, "teacher_assignment.html", {
             "current_user": current_user,
             "assignment": assignment,
             "subject_id": subject_id,
             "rows": rows,
             "violation_flags": violation_flags,
+            "snapshot_flags": snapshot_flags,
         })
 
 

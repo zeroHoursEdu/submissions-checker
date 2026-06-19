@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import and_, func, nullslast, select
 from sqlalchemy.orm import selectinload
 
-from submissions_checker.api.dependencies import DBSession, StudentId, StudentUser
+from submissions_checker.api.dependencies import AppSettings, DBSession, StudentId, StudentUser
 from submissions_checker.api.schemas.student_portal import (
     AssignmentDetail,
     AssignmentRow,
@@ -45,13 +45,48 @@ UPLOADS_DIR = Path("uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 
-@router.get("", response_class=HTMLResponse)
-async def subjects_grid(
-    request: Request, db: DBSession, current_user: StudentUser, student_id: StudentId
-) -> HTMLResponse:
+async def student_needs_consent(db: DBSession, student_id: int) -> bool:
+    """True if the student has not yet acknowledged the proctoring recording notice."""
+    consented = await db.scalar(
+        select(Student.recording_consent_at).where(Student.id == student_id)
+    )
+    return consented is None
+
+
+@router.get("/consent", response_class=HTMLResponse, response_model=None)
+async def show_consent(
+    request: Request, db: DBSession, current_user: StudentUser, student_id: StudentId, settings: AppSettings
+) -> HTMLResponse | RedirectResponse:
+    if not await student_needs_consent(db, student_id):
+        return RedirectResponse(url="/portal", status_code=303)
+    return render(request, "student_consent.html", {
+        "current_user": current_user,
+        "notice": settings.recording_consent_notice,
+    })
+
+
+@router.post("/consent")
+async def accept_consent(
+    db: DBSession, current_user: StudentUser, student_id: StudentId
+) -> RedirectResponse:
     student = await db.get(Student, student_id)
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
+    if student.recording_consent_at is None:
+        student.recording_consent_at = datetime.now(UTC)
+        await db.commit()
+    return RedirectResponse(url="/portal", status_code=303)
+
+
+@router.get("", response_class=HTMLResponse, response_model=None)
+async def subjects_grid(
+    request: Request, db: DBSession, current_user: StudentUser, student_id: StudentId
+) -> HTMLResponse | RedirectResponse:
+    student = await db.get(Student, student_id)
+    if student is None:
+        raise HTTPException(status_code=404, detail="Student not found")
+    if student.recording_consent_at is None:
+        return RedirectResponse(url="/portal/consent", status_code=303)
 
     enrolled_result = await db.execute(
         select(Subject)

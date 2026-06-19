@@ -93,6 +93,17 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = "test"
     aws_region: str = "us-east-1"
 
+    # Proctoring recording-consent notice (configurable for jurisdiction)
+    recording_consent_notice: str = (
+        "Some quizzes in this course are proctored with your webcam. While a proctored "
+        "quiz is open, your camera is analysed in your browser to detect that you are "
+        "present and not using unauthorised help. If a possible violation is detected, a "
+        "still photo from your webcam may be captured and stored as evidence for your "
+        "teacher to review. Photos are kept only for exam-integrity purposes and removed "
+        "according to the course retention policy. You must agree to continue; if you do "
+        "not, contact your teacher to arrange an in-person exam."
+    )
+
     @field_validator("secret_key")
     @classmethod
     def _reject_placeholder_secret_key(cls, value: str) -> str:

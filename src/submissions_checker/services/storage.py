@@ -37,6 +37,20 @@ class StorageService:
         logger.info("file_uploaded", key=key, url=url)
         return url
 
+    async def upload_bytes(self, data: bytes, key: str, content_type: str = "application/octet-stream") -> str:
+        """Upload an in-memory byte payload to S3 and return its public URL."""
+        async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:
+            await s3.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=data,
+                ContentType=content_type,
+                ACL="public-read",
+            )
+        url = self._build_url(key)
+        logger.info("bytes_uploaded", key=key, url=url, size=len(data))
+        return url
+
     async def delete_file(self, key: str) -> None:
         """Delete an object from S3."""
         async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:

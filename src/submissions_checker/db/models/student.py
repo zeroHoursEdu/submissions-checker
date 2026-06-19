@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Index, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +33,10 @@ class Student(Base, TimestampMixin):
         nullable=False,
         default=EntityType.REAL,
         server_default="REAL",
+    )
+    # When the student acknowledged the proctoring recording notice; null = not yet consented.
+    recording_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     group: Mapped[Group] = relationship("Group", back_populates="students")
