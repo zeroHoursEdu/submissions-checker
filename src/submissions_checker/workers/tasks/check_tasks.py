@@ -1,8 +1,13 @@
-"""Submission checking tasks — runs student code against plugin tests in Docker sandbox."""
+"""Submission checking tasks — runs student code against plugin tests in Docker sandbox.
+
+The actual checking (sandbox-block resolution, running validate/check scripts, scoring) lives
+in the DB-free `services.check_core` so production and the standalone runner share one path.
+This task is the persistence wrapper: load from DB, call the core, map the result to state
+transitions and outbox messages.
+"""
 
 from __future__ import annotations
 
-import json
 import tempfile
 import zipfile
 from pathlib import Path
@@ -18,13 +23,13 @@ from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
     OutboxMessage,
     StudentAssignment,
-    SubjectsAssignment,
-    Subject,
-    Submission,
     SubjectPluginConfig,
+    SubjectsAssignment,
+    Submission,
 )
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
-from submissions_checker.services.docker_sandbox import DockerSandbox, SandboxResult
+from submissions_checker.services import check_core
+from submissions_checker.services.docker_sandbox import DockerSandbox
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 
 logger = get_logger(__name__)
@@ -66,49 +71,17 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         if config_record is None:
             raise RuntimeError(f"Pinned plugin_config_id={submission.plugin_config_id} not found")
 
-    assignments_config: dict[str, Any] = config_record.config.get("assignments", {})
     assignment_code = subjects_assignment.code
-    if not assignment_code or assignment_code not in assignments_config:
-        _fail_validation(submission, "Assignment is not configured in plugin. Contact your teacher.")
-        return
-
-    plugin_assignment: dict[str, Any] = assignments_config[assignment_code]
     variant = student_assignment.variant
+    plugin_assignment: dict[str, Any] = config_record.config.get("assignments", {}).get(
+        assignment_code, {}
+    )
 
-    # ── Resolve config structure (new common/variants vs old flat) ─────────────
-    common_cfg = plugin_assignment.get("common", {})
-    if common_cfg:
-        sandbox_cfg: dict[str, Any] = common_cfg.get("sandbox", {})
-        variant_entry = plugin_assignment.get("variants", {}).get(str(variant), {}) if variant else {}
-        variant_sandbox: dict[str, Any] = variant_entry.get("sandbox", {})
-        validate_command: str | None = variant_sandbox.get("validate_command") or sandbox_cfg.get("validate_command")
-        common_check: str | None = sandbox_cfg.get("check_command")
-        variant_check: str | None = variant_sandbox.get("check_command")
-    else:
-        sandbox_cfg = plugin_assignment.get("sandbox", {})
-        variant_overrides = plugin_assignment.get("variants", {}).get(str(variant), {}) if variant else {}
-        validate_command = variant_overrides.get("validate_command") or sandbox_cfg.get("validate_command")
-        common_check = None
-        variant_check = variant_overrides.get("check_command") or sandbox_cfg.get("check_command")
-
-    # Variant check — must happen before sandbox
-    if plugin_assignment.get("variants_required") and not variant:
-        _fail_validation(
-            submission,
-            "Your variant has not been assigned yet. Contact your teacher to have your variant set.",
-        )
+    # Resolve the check plan from config (DB-free core). Misconfiguration → validation fail.
+    plan = check_core.resolve_check_plan(config_record.config, assignment_code, variant)
+    if isinstance(plan, check_core.ConfigError):
+        _fail_validation(submission, plan.reason)
         return
-
-    if not common_check and not variant_check:
-        _fail_validation(submission, "No check_command configured for this assignment. Contact your teacher.")
-        return
-
-    image: str = sandbox_cfg.get("image", "python:3.12-slim")
-    tool: str = sandbox_cfg.get("tool", "python3")
-    memory: str = sandbox_cfg.get("memory", "256m")
-    cpus: float = float(sandbox_cfg.get("cpus", 0.5))
-    timeout: int = int(sandbox_cfg.get("timeout_seconds", 30))
-    min_pass_score: int = int(sandbox_cfg.get("min_pass_score", 100))
 
     settings = get_settings()
     plugin_dir = Path(settings.plugins_dir) / (config_record.config.get("subjectCode") or "")
@@ -132,102 +105,32 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
             _fail_validation(submission, f"Submitted ZIP archive is unsafe: {exc}")
             return
 
-        env: dict[str, str] = {}
-        if variant:
-            env["VARIANT"] = str(variant)
-
-        # ── Validation step ────────────────────────────────────────────────────
+        # ── Validation + testing run in the shared core ────────────────────────
         transition(submission, "start_validation")
+        outcome = await check_core.run_check(
+            plan=plan, submission_dir=extract_path, plugin_dir=plugin_dir, sandbox=_SANDBOX
+        )
 
-        if validate_command:
-            validate_result = await _SANDBOX.run(
-                image=image, tool=tool, script_path=validate_command,
-                student_files_dir=extract_path, plugin_dir=plugin_dir,
-                env=env, memory=memory, cpus=cpus, timeout=timeout,
-            )
-            if validate_result.exit_code != 0:
-                reason = (
-                    validate_result.output_files.get("validate_error.txt")
-                    or validate_result.stderr.strip()
-                    or "Validation failed: submitted files do not meet requirements."
-                )
-                _fail_validation(submission, reason.strip())
-                return
+        if outcome.status == "validation_failed":
+            submission.test_results = {"check_reason": outcome.reason}
+            transition(submission, "validation_failed")
+            return
 
         transition(submission, "validation_passed")
-
-        # ── Testing step — run common check then variant check, merge results ──
-        all_tests: list[dict[str, Any]] = []
-
-        if common_check:
-            common_result = await _run_check(
-                common_check, image, tool, extract_path, plugin_dir, env, memory, cpus, timeout
-            )
-            all_tests.extend(common_result)
-
-        if variant_check:
-            variant_result = await _run_check(
-                variant_check, image, tool, extract_path, plugin_dir, env, memory, cpus, timeout
-            )
-            all_tests.extend(variant_result)
-
-        # Recompute score from merged tests (script-provided totals are ignored)
-        total_score = sum(
-            t.get("points_earned", int(bool(t.get("passed")))) for t in all_tests
-        )
-        max_score_total = sum(t.get("max_points", 1) for t in all_tests)
-        passed = (
-            (total_score / max_score_total * 100) >= min_pass_score
-            if max_score_total > 0
-            else False
-        )
-
         submission.test_results = {
-            "passed": passed,
-            "score": total_score,
-            "max_score": max_score_total,
-            "tests": all_tests,
+            "passed": outcome.passed,
+            "score": outcome.score,
+            "max_score": outcome.max_score,
+            "tests": outcome.tests,
             "plugin_config_version": config_record.version,
         }
 
-        if not passed:
+        if not outcome.passed:
             transition(submission, "test_failed")
             return
 
         review_mode: str = plugin_assignment.get("review_mode", "tests_only")
         _advance_after_tests(db, submission, review_mode)
-
-
-async def _run_check(
-    script_path: str,
-    image: str,
-    tool: str,
-    student_files_dir: Path,
-    plugin_dir: Path,
-    env: dict[str, str],
-    memory: str,
-    cpus: float,
-    timeout: int,
-) -> list[dict[str, Any]]:
-    """Run one check script and return its test list. Raises RuntimeError on technical failure."""
-    result: SandboxResult = await _SANDBOX.run(
-        image=image, tool=tool, script_path=script_path,
-        student_files_dir=student_files_dir, plugin_dir=plugin_dir,
-        env=env, memory=memory, cpus=cpus, timeout=timeout,
-    )
-    if result.exit_code != 0:
-        raise RuntimeError(
-            f"Sandbox technical failure running {script_path} "
-            f"(exit {result.exit_code}): {result.stderr[:500]}"
-        )
-    result_raw = result.output_files.get("result.json")
-    if not result_raw:
-        raise RuntimeError(f"Check script {script_path} did not write /output/result.json")
-    try:
-        parsed: dict[str, Any] = json.loads(result_raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"result.json from {script_path} is not valid JSON: {exc}") from exc
-    return parsed.get("tests", [])
 
 
 async def _fetch_latest_config(db: AsyncSession, subject_id: int) -> SubjectPluginConfig | None:

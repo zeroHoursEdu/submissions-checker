@@ -7,16 +7,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.logging import get_logger
-from submissions_checker.db.models.subject import Subject
+from submissions_checker.db.models.student_assignment import StudentAssignment
+from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
-from submissions_checker.db.models.student_assignment import StudentAssignment
-from submissions_checker.db.models.subject import SubjectsStudents
+from submissions_checker.services.subject_config import parse_config
 
 if TYPE_CHECKING:
     from submissions_checker.services.storage import StorageService
@@ -52,7 +51,7 @@ class PluginLoader:
     ) -> None:
         raw = config_file.read_bytes()
         content_hash = hashlib.sha256(raw).hexdigest()
-        config: dict[str, Any] = yaml.safe_load(raw.decode("utf-8"))
+        config: dict[str, Any] = parse_config(raw)
 
         subject_code: str = config["subjectCode"]
 

@@ -27,6 +27,9 @@ dependencies = [
     "aioboto3>=13.0",
 ]
 
+[project.scripts]
+submissions-checker-runner = "submissions_checker.cli.runner:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0",

@@ -48,6 +48,10 @@ class DockerSandbox:
         /output      ← temp dir (writable); read back after container exits
         """
         with tempfile.TemporaryDirectory(prefix="sandbox_output_") as output_dir:
+            # Subject images drop to a non-root user (e.g. uid 10001), so the bind-mounted
+            # /output (a host temp dir, created 0700) must be writable by that user for the
+            # check to emit result.json. Widen perms on this ephemeral dir only.
+            os.chmod(output_dir, 0o777)
             cmd = [
                 "docker", "run", "--rm",
                 "--network", "none",

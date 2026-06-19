@@ -1,0 +1,135 @@
+"""Parity test: the production worker delegates to the shared check core and persists
+exactly what the core returns — proving there is one check code path (no drift).
+
+No real database or Docker: the DB is faked and check_core.run_check is replaced with a
+recorder that returns a canned outcome. We assert the resolved plan reaches the core and
+the core's outcome is what lands in submission.test_results.
+"""
+
+from __future__ import annotations
+
+import zipfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from submissions_checker.core.state_machine import InvalidTransitionError
+from submissions_checker.db.models.enums import SubmissionStatus
+from submissions_checker.services import check_core
+from submissions_checker.workers.tasks import check_tasks
+
+_CONFIG = {
+    "subjectCode": "demo",
+    "assignments": {
+        "lab1": {
+            "variants_required": True,
+            "review_mode": "tests_only",
+            "common": {"sandbox": {
+                "image": "demo-checker:local",
+                "check_command": "assignments/lab1/check_common.py",
+                "min_pass_score": 60,
+            }},
+            "variants": {"3": {"sandbox": {"check_command": "assignments/lab1/check.py"}}},
+        }
+    },
+}
+
+
+class _Result:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class _FakeDB:
+    def __init__(self, submission, config_record):
+        self._submission = submission
+        self._config_record = config_record
+        self.added: list = []
+
+    async def execute(self, _stmt):
+        return _Result(self._submission)
+
+    async def get(self, _model, _pk):
+        return self._config_record
+
+    def add(self, obj):
+        self.added.append(obj)
+
+
+async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
+    # A real ZIP the worker can extract.
+    zip_path = tmp_path / "s.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("solution.py", "print('hi')\n")
+
+    subject = SimpleNamespace(id=5)
+    subjects_assignment = SimpleNamespace(code="lab1", subject=subject)
+    student_assignment = SimpleNamespace(variant="3", subjects_assignment=subjects_assignment)
+    submission = SimpleNamespace(
+        id=1,
+        plugin_config_id=99,
+        source_metadata={"saved_as": "s.zip"},
+        status=SubmissionStatus.PENDING,
+        test_results=None,
+        students_assignment=student_assignment,
+    )
+    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
+    db = _FakeDB(submission, config_record)
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings",
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path)))
+
+    canned_tests = [{"name": "v1", "passed": True, "points_earned": 100, "max_points": 100}]
+    recorded: dict = {}
+
+    async def fake_run_check(*, plan, submission_dir, plugin_dir, sandbox):
+        recorded["plan"] = plan
+        recorded["submission_dir"] = submission_dir
+        recorded["plugin_dir"] = plugin_dir
+        return check_core.CheckOutcome("passed", 100, 100, canned_tests)
+
+    monkeypatch.setattr(check_tasks.check_core, "run_check", fake_run_check)
+
+    await check_tasks.execute_check_task(db, {"submission_id": 1})
+
+    # Core received the resolved plan (variant check_command from variant 3).
+    assert isinstance(recorded["plan"], check_core.CheckPlan)
+    assert recorded["plan"].variant_check == "assignments/lab1/check.py"
+    assert recorded["plugin_dir"] == Path(str(tmp_path)) / "demo"
+
+    # Worker persisted exactly the core's outcome, plus the pinned config version.
+    assert submission.test_results == {
+        "passed": True,
+        "score": 100,
+        "max_score": 100,
+        "tests": canned_tests,
+        "plugin_config_version": 2,
+    }
+    assert submission.status == SubmissionStatus.COMPLETED
+
+
+async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None:
+    subject = SimpleNamespace(id=5)
+    subjects_assignment = SimpleNamespace(code="missing", subject=subject)
+    student_assignment = SimpleNamespace(variant=None, subjects_assignment=subjects_assignment)
+    submission = SimpleNamespace(
+        id=1, plugin_config_id=99, source_metadata={"saved_as": "s.zip"},
+        status=SubmissionStatus.PENDING, test_results=None,
+        students_assignment=student_assignment,
+    )
+    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
+    db = _FakeDB(submission, config_record)
+    monkeypatch.setattr(check_tasks, "get_settings",
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path)))
+
+    # Pre-existing behavior preserved by the refactor: a config error calls _fail_validation
+    # while the submission is still PENDING, and `validation_failed` is not a legal transition
+    # from PENDING — so it raises. The teacher-facing reason is still recorded first.
+    with pytest.raises(InvalidTransitionError):
+        await check_tasks.execute_check_task(db, {"submission_id": 1})
+    assert "check_reason" in submission.test_results
