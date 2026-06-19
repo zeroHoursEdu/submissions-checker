@@ -14,6 +14,7 @@ from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import Submission
+from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
 logger = get_logger(__name__)
 
@@ -125,6 +126,7 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict) -> None:  # ty
 
     if next_step == "teacher":
         transition(submission, "ai_review_done_teacher")
+        await enqueue_teacher_review_notification(db, submission.id)
     else:
         transition(submission, "ai_review_done_completed")
 

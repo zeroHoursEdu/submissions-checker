@@ -30,6 +30,7 @@ from submissions_checker.db.models import (
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
 from submissions_checker.services import check_core
 from submissions_checker.services.docker_sandbox import DockerSandbox
+from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 
 logger = get_logger(__name__)
@@ -130,7 +131,7 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
             return
 
         review_mode: str = plugin_assignment.get("review_mode", "tests_only")
-        _advance_after_tests(db, submission, review_mode)
+        await _advance_after_tests(db, submission, review_mode)
 
 
 async def _fetch_latest_config(db: AsyncSession, subject_id: int) -> SubjectPluginConfig | None:
@@ -148,7 +149,7 @@ def _fail_validation(submission: Submission, reason: str) -> None:
     transition(submission, "validation_failed")
 
 
-def _advance_after_tests(db: AsyncSession, submission: Submission, review_mode: str) -> None:
+async def _advance_after_tests(db: AsyncSession, submission: Submission, review_mode: str) -> None:
     if review_mode == "tests_then_ai":
         transition(submission, "test_passed_ai")
         db.add(OutboxMessage(
@@ -158,6 +159,7 @@ def _advance_after_tests(db: AsyncSession, submission: Submission, review_mode: 
         ))
     elif review_mode == "tests_then_teacher":
         transition(submission, "test_passed_teacher")
+        await enqueue_teacher_review_notification(db, submission.id)
     elif review_mode in ("tests_then_ai_then_teacher", "tests_then_ai_teacher"):
         transition(submission, "test_passed_ai")
         db.add(OutboxMessage(

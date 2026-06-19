@@ -64,9 +64,7 @@ def test_settings(
     """
     return Settings(
         environment="test",
-        database_url=postgres_container.get_connection_url(driver="asyncpg").replace(
-            "postgresql+", "postgresql+asyncpg://"
-        ),
+        database_url=postgres_container.get_connection_url(driver="asyncpg"),
         redis_url=f"redis://{redis_container.get_container_host_ip()}:{redis_container.get_exposed_port(6379)}/0",
         secret_key="test-secret-key-minimum-32-chars-long",
         log_level="DEBUG",

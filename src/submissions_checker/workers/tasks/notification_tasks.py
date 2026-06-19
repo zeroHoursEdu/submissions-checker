@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.submission import Submission
+from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.db.models.user import User
 from submissions_checker.services.notifications.dispatcher import build_dispatcher
 from submissions_checker.db.models.feedback_token import FeedbackToken
@@ -280,60 +282,67 @@ async def execute_deadline_reminder_task(db: AsyncSession, payload: dict) -> Non
     logger.info("deadline_reminder_sent", student_email=student.email, sa_id=sa_id)
 
 
-async def execute_new_submission_task(db: AsyncSession, payload: dict) -> None:
-    """Notify teachers that a submission is awaiting manual review.
+async def _resolve_review_recipients(db: AsyncSession, submission_id: int) -> list[User]:
+    """Teachers to notify for a submission awaiting review.
 
-    Payload: submission_id
+    Primary recipient is the owner of the submission's subject. For ownerless
+    (startup-loaded) subjects, fall back to all active admin accounts so the
+    notification is not silently dropped.
     """
-    settings = get_settings()
-    submission_id: int = payload["submission_id"]
-
-    result = await db.execute(
-        select(Submission)
+    owner_result = await db.execute(
+        select(Subject.owner_id)
+        .select_from(Submission)
+        .join(StudentAssignment, Submission.students_assignment_id == StudentAssignment.id)
+        .join(SubjectsAssignment, StudentAssignment.subjects_assignment_id == SubjectsAssignment.id)
+        .join(Subject, SubjectsAssignment.subject_id == Subject.id)
         .where(Submission.id == submission_id)
-        .options(
-            selectinload(Submission.students_assignment)
-            .selectinload(StudentAssignment.student),
-            selectinload(Submission.students_assignment)
-            .selectinload(StudentAssignment.subjects_assignment),
+    )
+    owner_id = owner_result.scalar_one_or_none()
+
+    if owner_id is not None:
+        owner = await db.execute(
+            select(User).where(User.id == owner_id, User.is_active.is_(True))
         )
+        user = owner.scalar_one_or_none()
+        if user is not None:
+            return [user]
+
+    admins = await db.execute(
+        select(User).where(User.role == "ADMIN", User.is_active.is_(True))
     )
-    submission = result.scalar_one_or_none()
-    if submission is None:
-        logger.warning("new_submission_task_not_found", submission_id=submission_id)
+    return list(admins.scalars().all())
+
+
+async def enqueue_teacher_review_notification(db: AsyncSession, submission_id: int) -> None:
+    """Enqueue a pending teacher-review notification for each responsible teacher.
+
+    Idempotent per (teacher, submission) via ON CONFLICT DO NOTHING. Runs in the
+    caller's transaction so the enqueue is atomic with the status change.
+    """
+    recipients = await _resolve_review_recipients(db, submission_id)
+    if not recipients:
+        logger.warning("teacher_review_enqueue_no_recipients", submission_id=submission_id)
         return
 
-    sa = submission.students_assignment
-    student = sa.student
-    assignment = sa.subjects_assignment
+    for teacher in recipients:
+        await db.execute(
+            pg_insert(TeacherNotificationQueue)
+            .values(teacher_id=teacher.id, submission_id=submission_id)
+            .on_conflict_do_nothing(constraint="uq_teacher_notification_queue")
+        )
 
-    review_url = (
-        f"{settings.app_base_url.rstrip('/')}"
-        f"/teacher/submissions/{submission_id}/review"
+    logger.info(
+        "teacher_review_enqueued",
+        submission_id=submission_id,
+        teacher_count=len(recipients),
     )
 
-    email_subject, body = new_submission_template(
-        teacher_name="Teacher",
-        student_name=student.full_name,
-        assignment_title=assignment.title,
-        review_url=review_url,
-    )
 
-    # Find all teacher accounts and notify each
-    teachers_result = await db.execute(
-        select(User).where(User.role.in_(["TEACHER", "ADMIN"]), User.is_active.is_(True))
-    )
-    teachers = teachers_result.scalars().all()
+async def execute_new_submission_task(db: AsyncSession, payload: dict) -> None:
+    """DEPRECATED no-op handler.
 
-    dispatcher = build_dispatcher(settings)
-    if not dispatcher._channels:
-        logger.warning("new_submission_task_no_channel", submission_id=submission_id)
-        return
-
-    for teacher in teachers:
-        # Use username as fallback if teacher has no email — skip if no email-able field
-        # In practice teacher accounts may not have a separate email column;
-        # adapt this once teacher email storage is added.
-        pass  # TODO: once teacher email field exists, send email
-
-    logger.info("new_submission_task_done", submission_id=submission_id, teacher_count=len(teachers))
+    Teacher review notifications now go through enqueue_teacher_review_notification +
+    the teacher_digest_processor flush job. The NEW_SUBMISSION outbox event is no longer
+    emitted; this handler stays so the dispatch branch remains harmless for any stray row.
+    """
+    logger.info("new_submission_task_noop", payload=payload)

@@ -22,6 +22,8 @@ class User(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional contact email for teacher/admin notifications (students are emailed via Student.email)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         SQLEnum(UserRole, name="user_role", native_enum=True, values_callable=lambda x: [e.value for e in x]),
         nullable=False,

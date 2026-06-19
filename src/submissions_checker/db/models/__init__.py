@@ -32,6 +32,7 @@ from submissions_checker.db.models.subject_plugin_config import SubjectPluginCon
 from submissions_checker.db.models.subject_test_student import SubjectTestStudent
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.submission import Submission
+from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.db.models.user import User
 from submissions_checker.db.models.user_login import UserLogin
 
@@ -68,6 +69,7 @@ __all__ = [
     "SubjectsAssignment",
     "SubjectsStudents",
     "Submission",
+    "TeacherNotificationQueue",
     "User",
     "UserLogin",
 ]

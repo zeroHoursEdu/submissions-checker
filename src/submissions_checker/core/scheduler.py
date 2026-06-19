@@ -39,8 +39,13 @@ def init_scheduler() -> AsyncIOScheduler:
 
 def _register_jobs() -> None:
     """Register all scheduled jobs with the scheduler."""
+    from submissions_checker.core.config import get_settings
     from submissions_checker.workers.scheduled.outbox_processor import process_outbox_messages
+    from submissions_checker.workers.scheduled.teacher_digest_processor import (
+        flush_teacher_digests,
+    )
 
+    settings = get_settings()
     scheduler = get_scheduler()
 
     # Outbox processor - runs every 10 seconds
@@ -54,6 +59,19 @@ def _register_jobs() -> None:
     )
 
     logger.info("Registered outbox processor job (interval: 10s)")
+
+    # Teacher digest flusher - coalesces review-queue emails per teacher
+    flush_interval = settings.teacher_digest_flush_interval
+    scheduler.add_job(
+        flush_teacher_digests,
+        trigger=IntervalTrigger(seconds=flush_interval),
+        id="teacher_digest_processor",
+        name="Flush Teacher Review Digests",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    logger.info("Registered teacher digest job (interval: %ss)", flush_interval)
 
 
 async def start_scheduler() -> None:

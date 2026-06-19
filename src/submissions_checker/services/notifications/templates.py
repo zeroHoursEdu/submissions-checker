@@ -87,6 +87,34 @@ def new_submission_template(
     return subject, body
 
 
+def teacher_digest_template(
+    teacher_name: str,
+    items: list[tuple[str, str, str]],
+    dashboard_url: str,
+) -> tuple[str, str]:
+    """Return (subject, body) for a coalesced teacher review digest.
+
+    ``items`` is a list of (student_name, assignment_title, review_url). Renders
+    1..N pending works as a single email so a whole-group burst is one message.
+    """
+    count = len(items)
+    noun = "submission" if count == 1 else "submissions"
+    subject = f"{count} {noun} awaiting your review"
+
+    lines = [
+        f"- {student_name} — '{assignment_title}': {review_url}"
+        for student_name, assignment_title, review_url in items
+    ]
+    body = (
+        f"Hi {teacher_name},\n\n"
+        f"You have {count} {noun} awaiting review:\n\n"
+        + "\n".join(lines)
+        + f"\n\nOpen your dashboard: {dashboard_url}\n\n"
+        f"Best regards,\nEduTrack"
+    )
+    return subject, body
+
+
 def password_reset_template(full_name: str, reset_url: str) -> tuple[str, str]:
     """Return (subject, body) for a password reset email."""
     subject = "Reset your EduTrack password"

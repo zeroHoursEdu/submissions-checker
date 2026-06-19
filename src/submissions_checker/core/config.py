@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     # Scheduler
     scheduler_enabled: bool = True
 
+    # Teacher digest notifications — coalesce review-queue emails per teacher
+    teacher_digest_enabled: bool = True
+    teacher_digest_window_seconds: int = 120  # max wait since oldest pending entry before flushing
+    teacher_digest_max_batch: int = 25        # eager flush threshold (whole-group burst)
+    teacher_digest_flush_interval: int = 30   # scheduler poll interval for the flush job
+
     # Outbox
     outbox_batch_size: int = 1
     outbox_poll_interval: int = 10
