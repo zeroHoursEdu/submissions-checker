@@ -14,7 +14,6 @@ def _settings() -> Settings:
         environment="test",
         database_url="postgresql+asyncpg://u:p@localhost/db",
         secret_key="test-secret-key-minimum-32-chars-long",
-        github_webhook_secret="x",
         s3_endpoint_url="http://localstack:4566",
         s3_bucket_name="bucket",
     )

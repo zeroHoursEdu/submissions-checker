@@ -52,25 +52,6 @@ async def test_root_endpoint() -> None:
 
 
 @pytest.mark.asyncio
-async def test_webhook_endpoint_skeleton() -> None:
-    """Test GitHub webhook endpoint (skeleton)."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/webhooks/github",
-            json={"action": "opened"},
-            headers={"X-GitHub-Event": "pull_request"},
-        )
-
-    # Should return 200 (skeleton returns accepted)
-    assert response.status_code == 200
-    data = response.json()
-    assert "status" in data
-
-
-@pytest.mark.asyncio
 async def test_user_endpoint_skeleton() -> None:
     """Test user creation endpoint (skeleton)."""
     async with AsyncClient(

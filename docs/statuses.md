@@ -1,8 +1,15 @@
 # Statuses
 
+> **DEPRECATED / HISTORICAL.** The `pending → cloning → reviewing → completed` flow and
+> the `PULL`/`REVIEW`/`NOTIFY` outbox events below described the retired GitHub-PR ingest
+> pipeline. Submissions are now ZIP-uploaded and driven by the state machine in
+> `core/state_machine.py` (`VALIDATING → TESTING → {COMPLETED | AWAITING_AI_REVIEW |
+> AWAITING_TEACHER_REVIEW | QUIZ_SENT | …}`). See [student-journey.md](student-journey.md)
+> for the current lifecycle. This file is kept only for historical context.
+
 ## Submission status
 
-Tracks the lifecycle of a single student submission (one PR).
+Tracks the lifecycle of a single student submission.
 
 | Status | Set by | Meaning |
 |---|---|---|

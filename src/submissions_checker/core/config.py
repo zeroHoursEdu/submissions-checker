@@ -30,13 +30,6 @@ class Settings(BaseSettings):
     # Database
     database_url: PostgresDsn
 
-    # GitHub
-    github_webhook_secret: str
-    github_token: str | None = None
-    github_app_id: str | None = None
-    github_app_private_key_path: str | None = None
-    github_api_base_url: str = "https://api.github.com"
-
     # Backend base URL (used to build callback URLs for external services)
     base_url: str = "http://localhost:8000"
 
@@ -75,12 +68,6 @@ class Settings(BaseSettings):
     outbox_poll_interval: int = 10
     outbox_max_retries: int = 5
     outbox_retry_backoff_seconds: int = 60
-
-    # Repository workspace
-    workspace_dir: str = Field(
-        default="/tmp/repos",
-        description="Directory where cloned repositories are stored"
-    )
 
     # Subject plugins directory (gitignored; each subdirectory is a plugin with config.yml)
     plugins_dir: str = "plugins"

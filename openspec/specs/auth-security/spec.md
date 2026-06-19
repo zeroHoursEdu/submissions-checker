@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Defines startup secret enforcement, live session validation, secure cookie
-attributes, and webhook authentication for the application.
+Defines startup secret enforcement, live session validation, and secure cookie
+attributes for the application.
 
 ## Requirements
 
@@ -33,11 +33,3 @@ and `SameSite=Strict`.
 #### Scenario: Production cookie is secure
 - **WHEN** the app runs with `ENVIRONMENT=production` and sets the auth cookie
 - **THEN** the cookie has the `Secure` attribute
-
-### Requirement: GitHub webhook authentication
-The GitHub webhook endpoint SHALL reject requests whose HMAC-SHA256 signature
-does not match before processing the payload.
-
-#### Scenario: Forged webhook rejected
-- **WHEN** a webhook arrives with a missing or invalid `X-Hub-Signature-256`
-- **THEN** the endpoint returns 401 and enqueues no job

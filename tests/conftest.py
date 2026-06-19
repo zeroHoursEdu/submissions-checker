@@ -69,7 +69,6 @@ def test_settings(
         ),
         redis_url=f"redis://{redis_container.get_container_host_ip()}:{redis_container.get_exposed_port(6379)}/0",
         secret_key="test-secret-key-minimum-32-chars-long",
-        github_webhook_secret="test-webhook-secret",
         log_level="DEBUG",
     )
 

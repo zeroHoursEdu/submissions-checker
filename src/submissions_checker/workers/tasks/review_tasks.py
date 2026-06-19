@@ -13,10 +13,7 @@ from openai import AsyncOpenAI
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
-from submissions_checker.db.models import (
-    Submission,
-    SubmissionStatus,
-)
+from submissions_checker.db.models import Submission
 
 logger = get_logger(__name__)
 
@@ -67,78 +64,6 @@ async def collect_lab_data(path: str) -> tuple[str, str]:
         return task_text, code_text
 
     return await asyncio.to_thread(_walk)
-
-
-async def execute_review_task(db: AsyncSession, review_data: dict) -> None:  # type: ignore[type-arg]
-    """Perform AI code review using OpenAI.
-
-    All DB writes occur without an intermediate commit — the outbox processor
-    commits the entire unit of work atomically after this function returns.
-    After review, submission ends in REVIEWING status (teacher grades manually
-    for PR-based submissions without a quiz template).
-    """
-    submission_id = review_data.get("submission_id")
-    logger.info("execute_review_task_started", submission_id=submission_id)
-    settings = get_settings()
-
-    result = await db.execute(select(Submission).where(Submission.id == submission_id))
-    submission = result.scalar_one()
-
-    submission.status = SubmissionStatus.REVIEWING
-
-    repo_path = submission.repository_path
-    lab_id = extract_lab_id(submission)
-
-    task_text, code_text = await collect_lab_data(repo_path or "")
-
-    if not code_text:
-        logger.warning("no_code_found", submission_id=submission_id)
-        code_text = "# Код відсутній"
-
-    theory = "Теорія відсутня."
-
-    prompt = f"""
-    Ти викладач Python. Перевір лабораторну роботу №{lab_id}.
-
-    Ось затверджена теорія з лекції саме для цієї теми:
-    {theory}
-
-    Умова: {task_text}
-    Код студента: {code_text}
-    """
-
-    client = AsyncOpenAI(api_key=settings.openai_api_key, timeout=60.0)
-
-    logger.info("calling_openai", submission_id=submission_id)
-    response = await client.chat.completions.create(
-        model=settings.openai_model,
-        max_tokens=settings.ai_max_tokens,
-        messages=[
-            {
-                "role": "system",
-                "content": "Надай стислий огляд коду студента у форматі JSON: {\"review\": \"...\"}",
-            },
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    ai_response_text = response.choices[0].message.content or ""
-    ai_response_text = ai_response_text.strip()
-    if ai_response_text.startswith("```"):
-        ai_response_text = ai_response_text.split("```")[1]
-        if ai_response_text.startswith("json"):
-            ai_response_text = ai_response_text[4:]
-        ai_response_text = ai_response_text.strip()
-
-    if not ai_response_text:
-        raise ValueError(
-            f"OpenAI returned empty content (finish_reason={response.choices[0].finish_reason})"
-        )
-
-    parsed_review = json.loads(ai_response_text)
-    submission.ai_review = parsed_review
-
-    logger.info("execute_review_task_completed", submission_id=submission_id)
 
 
 async def execute_ai_review_task(db: AsyncSession, payload: dict) -> None:  # type: ignore[type-arg]

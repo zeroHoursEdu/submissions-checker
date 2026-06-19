@@ -29,6 +29,9 @@ class SubmissionStatus(enum.StrEnum):
 
 
 class SubmissionSourceType(enum.StrEnum):
+    # DEPRECATED: the GitHub PR / GitLab MR ingest paths were retired. These members
+    # are retained to avoid a destructive PostgreSQL enum migration on historical rows;
+    # no code produces them. ZIP_UPLOAD is the only supported ingest source.
     GITHUB_PR = "GITHUB_PR"
     GITLAB_MR = "GITLAB_MR"
     ZIP_UPLOAD = "ZIP_UPLOAD"
@@ -47,6 +50,9 @@ class OutboxMessageState(enum.StrEnum):
 
 
 class OutboxEventType(enum.StrEnum):
+    # DEPRECATED: PULL/REVIEW/NOTIFY drove the retired GitHub PR ingest pipeline.
+    # Retained to avoid a destructive PostgreSQL enum migration; no code dispatches
+    # them and the outbox processor will error on any stray legacy row.
     PULL = "PULL"
     REVIEW = "REVIEW"
     NOTIFY = "NOTIFY"

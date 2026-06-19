@@ -1,7 +1,5 @@
-"""Security utilities: webhook validation, password hashing, and JWT auth."""
+"""Security utilities: password hashing and JWT auth."""
 
-import hashlib
-import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -45,36 +43,3 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
 def decode_access_token(token: str) -> dict[str, Any]:
     """Decode and validate JWT. Raises jose.JWTError on failure."""
     return jwt.decode(token, get_settings().secret_key, algorithms=[JWT_ALGORITHM])  # type: ignore[no-any-return]
-
-
-# ── GitHub webhook validation ─────────────────────────────────────────────────
-
-def verify_github_signature(payload: bytes, signature_header: str) -> bool:
-    """Verify GitHub webhook HMAC-SHA256 signature."""
-    settings = get_settings()
-
-    if not signature_header:
-        logger.warning("github_webhook_missing_signature")
-        return False
-
-    if not signature_header.startswith("sha256="):
-        logger.warning("github_webhook_invalid_signature_format")
-        return False
-
-    expected_signature = signature_header[7:]
-    secret = settings.github_webhook_secret.encode("utf-8")
-    computed_signature = hmac.new(secret, payload, hashlib.sha256).hexdigest()
-
-    is_valid = hmac.compare_digest(computed_signature, expected_signature)
-    if not is_valid:
-        logger.warning("github_webhook_signature_mismatch")
-
-    return is_valid
-
-
-def create_webhook_signature(payload: bytes) -> str:
-    """Create GitHub-style webhook signature for testing."""
-    settings = get_settings()
-    secret = settings.github_webhook_secret.encode("utf-8")
-    signature = hmac.new(secret, payload, hashlib.sha256).hexdigest()
-    return f"sha256={signature}"

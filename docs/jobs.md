@@ -1,6 +1,14 @@
 # Jobs
 
-The system processes student submissions through a pipeline of five job types, all driven by the transactional outbox pattern. A background scheduler polls the `outbox_messages` table every 10 seconds and dispatches each pending message to the appropriate handler.
+> **DEPRECATED / HISTORICAL.** The GitHub-PR + Google-Forms pipeline described below
+> (`GitHub webhook → PULL → REVIEW → GENERATE_QUIZ → NOTIFY → NOTIFY_QUIZ_RESULT`) has
+> been **retired**. Submissions are now ingested **only via ZIP upload** through the
+> student portal, checked by the plugin pipeline (`RUN_CHECKS` → `check_tasks`), with
+> optional `RUN_AI_REVIEW` / teacher review / in-app quiz. See
+> [student-journey.md](student-journey.md) and [statuses.md](statuses.md) for the
+> current flow. This file is kept only for historical context.
+
+The system processes student submissions through a pipeline of job types, all driven by the transactional outbox pattern. A background scheduler polls the `outbox_messages` table every 10 seconds and dispatches each pending message to the appropriate handler.
 
 ## How the outbox works
 

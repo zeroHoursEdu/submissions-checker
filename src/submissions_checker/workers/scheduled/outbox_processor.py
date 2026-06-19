@@ -19,9 +19,7 @@ from submissions_checker.workers.tasks.notification_tasks import (
     execute_quiz_result_task,
     execute_submission_reviewed_task,
 )
-from submissions_checker.workers.tasks.pull_tasks import execute_pull_task
-from submissions_checker.workers.tasks.review_tasks import execute_review_task, execute_ai_review_task
-from submissions_checker.workers.tasks.notify_tasks import execute_notify_task
+from submissions_checker.workers.tasks.review_tasks import execute_ai_review_task
 from submissions_checker.workers.tasks.send_credentials_tasks import execute_send_credentials_task
 
 logger = get_logger(__name__)
@@ -161,16 +159,9 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     # Route messages to appropriate tasks based on event type
     # Using await (not asyncio.create_task) to ensure transactional consistency
-    if message.event_type == OutboxEventType.PULL:
-        await execute_pull_task(db, message.payload)
-
-    elif message.event_type == OutboxEventType.REVIEW:
-        await execute_review_task(db, message.payload)
-
-    elif message.event_type == OutboxEventType.NOTIFY:
-        await execute_notify_task(db, message.payload)
-
-    elif message.event_type == OutboxEventType.SEND_CREDENTIALS:
+    # Note: the legacy GitHub PR ingest events (PULL/REVIEW/NOTIFY) were retired;
+    # any stray legacy row falls through to the unknown-event branch and errors.
+    if message.event_type == OutboxEventType.SEND_CREDENTIALS:
         await execute_send_credentials_task(db, message.payload)
 
     elif message.event_type == OutboxEventType.SUBMISSION_REVIEWED:
