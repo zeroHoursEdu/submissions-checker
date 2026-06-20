@@ -1015,6 +1015,7 @@ async def export_grades_csv(
                 Submission.students_assignment_id == StudentAssignment.id,
                 Submission.created_at == select(func.max(Submission.created_at))
                 .where(Submission.students_assignment_id == StudentAssignment.id)
+                .correlate(StudentAssignment)
                 .scalar_subquery(),
             ),
         )

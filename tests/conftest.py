@@ -10,6 +10,10 @@ from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
 
 from submissions_checker.core.config import Settings
+
+# Importing the models package ensures every table (not just the subset wired
+# into db.base) is registered on Base.metadata before create_all runs.
+import submissions_checker.db.models  # noqa: F401
 from submissions_checker.db.base import Base
 
 
@@ -71,10 +75,15 @@ def test_settings(
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def test_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, None]:
     """
-    Create a test database engine.
+    Create a test database engine bound to the running test's event loop.
+
+    This is intentionally function-scoped. A session-scoped engine is created on
+    a different event loop than the per-test loop, and reusing its asyncpg
+    connection across loops raises "another operation is in progress". A fresh
+    engine + fresh schema per test keeps each test isolated and loop-safe.
 
     Args:
         test_settings: Test settings with database URL
@@ -82,7 +91,7 @@ async def test_engine(test_settings: Settings) -> AsyncGenerator[AsyncEngine, No
     Yields:
         Async database engine
     """
-    engine = create_async_engine(str(test_settings.database_url), echo=True)
+    engine = create_async_engine(str(test_settings.database_url))
 
     # Create all tables
     async with engine.begin() as conn:
@@ -111,7 +120,7 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
     Yields:
         Database session
     """
-    async with AsyncSession(test_engine) as session:
+    async with AsyncSession(test_engine, expire_on_commit=False) as session:
         yield session
         await session.rollback()
 

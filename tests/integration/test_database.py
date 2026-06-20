@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
 from submissions_checker.db.models.outbox import OutboxMessage
 
 
@@ -16,11 +17,9 @@ async def test_database_connection(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_create_outbox_message(db_session: AsyncSession) -> None:
-    """Test creating an outbox message."""
+    """Test creating an outbox message defaults to PENDING state."""
     message = OutboxMessage(
-        aggregate_type="test_aggregate",
-        aggregate_id="test-123",
-        event_type="test_event",
+        event_type=OutboxEventType.NEW_SUBMISSION,
         payload={"key": "value"},
     )
 
@@ -29,89 +28,103 @@ async def test_create_outbox_message(db_session: AsyncSession) -> None:
     await db_session.refresh(message)
 
     assert message.id is not None
-    assert message.aggregate_type == "test_aggregate"
-    assert message.aggregate_id == "test-123"
-    assert message.event_type == "test_event"
+    assert message.event_type == OutboxEventType.NEW_SUBMISSION
     assert message.payload == {"key": "value"}
-    assert message.processed is False
+    assert message.state == OutboxMessageState.PENDING
     assert message.retry_count == 0
+    assert message.finished_at is None
+    assert message.error_message is None
 
 
 @pytest.mark.asyncio
-async def test_outbox_message_mark_processed(db_session: AsyncSession) -> None:
-    """Test marking an outbox message as processed."""
+async def test_outbox_message_mark_finished(db_session: AsyncSession) -> None:
+    """Test marking an outbox message as finished."""
     message = OutboxMessage(
-        aggregate_type="test_aggregate",
-        aggregate_id="test-456",
-        event_type="test_event",
+        event_type=OutboxEventType.NEW_SUBMISSION,
         payload={},
     )
 
     db_session.add(message)
     await db_session.commit()
 
-    # Mark as processed
-    message.mark_processed()
+    message.mark_finished()
     await db_session.commit()
     await db_session.refresh(message)
 
-    assert message.processed is True
-    assert message.processed_at is not None
+    assert message.state == OutboxMessageState.FINISHED
+    assert message.finished_at is not None
 
 
 @pytest.mark.asyncio
-async def test_outbox_message_mark_failed(db_session: AsyncSession) -> None:
-    """Test marking an outbox message as failed."""
+async def test_outbox_message_mark_error(db_session: AsyncSession) -> None:
+    """Test marking an outbox message as errored increments retry count."""
     message = OutboxMessage(
-        aggregate_type="test_aggregate",
-        aggregate_id="test-789",
-        event_type="test_event",
+        event_type=OutboxEventType.NEW_SUBMISSION,
         payload={},
     )
 
     db_session.add(message)
     await db_session.commit()
 
-    # Mark as failed
     error_msg = "Test error message"
-    message.mark_failed(error_msg)
+    message.mark_error(error_msg)
     await db_session.commit()
     await db_session.refresh(message)
 
+    assert message.state == OutboxMessageState.ERROR
     assert message.retry_count == 1
     assert message.error_message == error_msg
-    assert message.processed is False
+    assert message.finished_at is None
 
 
 @pytest.mark.asyncio
-async def test_query_unprocessed_outbox_messages(db_session: AsyncSession) -> None:
-    """Test querying unprocessed outbox messages."""
-    # Create processed message
-    processed_msg = OutboxMessage(
-        aggregate_type="test",
-        aggregate_id="processed",
-        event_type="test",
+async def test_outbox_message_mark_error_accumulates_retries(
+    db_session: AsyncSession,
+) -> None:
+    """Test repeated errors keep incrementing retry_count."""
+    message = OutboxMessage(
+        event_type=OutboxEventType.NEW_SUBMISSION,
         payload={},
     )
-    processed_msg.mark_processed()
-    db_session.add(processed_msg)
+    db_session.add(message)
+    await db_session.commit()
 
-    # Create unprocessed message
-    unprocessed_msg = OutboxMessage(
-        aggregate_type="test",
-        aggregate_id="unprocessed",
-        event_type="test",
-        payload={},
+    message.mark_error("first")
+    message.mark_error("second")
+    await db_session.commit()
+    await db_session.refresh(message)
+
+    assert message.retry_count == 2
+    assert message.error_message == "second"
+    assert message.state == OutboxMessageState.ERROR
+
+
+@pytest.mark.asyncio
+async def test_query_pending_outbox_messages(db_session: AsyncSession) -> None:
+    """Test querying pending (unprocessed) outbox messages."""
+    # Finished message
+    finished_msg = OutboxMessage(
+        event_type=OutboxEventType.NEW_SUBMISSION,
+        payload={"which": "finished"},
     )
-    db_session.add(unprocessed_msg)
+    finished_msg.mark_finished()
+    db_session.add(finished_msg)
+
+    # Pending message (default state)
+    pending_msg = OutboxMessage(
+        event_type=OutboxEventType.NEW_SUBMISSION,
+        payload={"which": "pending"},
+    )
+    db_session.add(pending_msg)
 
     await db_session.commit()
 
-    # Query unprocessed messages
     result = await db_session.execute(
-        select(OutboxMessage).where(OutboxMessage.processed == False)  # noqa: E712
+        select(OutboxMessage).where(
+            OutboxMessage.state == OutboxMessageState.PENDING
+        )
     )
     messages = result.scalars().all()
 
     assert len(messages) == 1
-    assert messages[0].aggregate_id == "unprocessed"
+    assert messages[0].payload == {"which": "pending"}

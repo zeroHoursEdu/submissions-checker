@@ -83,10 +83,15 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# E2E (browser/pytest-bdd) tests run via their own config (pytest-e2e.ini); they
+# require the live e2e Docker stack and a Playwright browser, and their conftest
+# declares `pytest_plugins` (only valid at a collection root), so exclude them
+# from the default unit/integration/functional run.
 addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
+    "--ignore=tests/e2e",
     "--cov=submissions_checker",
     "--cov-report=term-missing:skip-covered",
     "--cov-report=html",

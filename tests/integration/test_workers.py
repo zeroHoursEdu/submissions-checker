@@ -1,38 +1,130 @@
-"""Worker integration tests (skeleton)."""
+"""Worker integration tests."""
+
+from contextlib import asynccontextmanager
 
 import pytest
+import redis.asyncio as aioredis
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
+from submissions_checker.db.models.outbox import OutboxMessage
+from submissions_checker.workers.scheduled import outbox_processor
 
 
 @pytest.mark.asyncio
-async def test_worker_redis_connectivity() -> None:
-    """
-    Test Arq worker Redis connectivity (skeleton).
+async def test_worker_redis_connectivity(redis_container) -> None:
+    """The Redis test container is reachable and round-trips a value."""
+    host = redis_container.get_container_host_ip()
+    port = redis_container.get_exposed_port(6379)
+    client = aioredis.from_url(f"redis://{host}:{port}/0")
+    try:
+        assert await client.ping() is True
+        await client.set("worker:probe", "ok")
+        assert await client.get("worker:probe") == b"ok"
+    finally:
+        await client.aclose()
 
-    TODO: Implement worker connectivity test:
-    - Create Redis connection using test settings
-    - Verify connection is established
-    - Test enqueueing a job
-    - Verify job can be retrieved
-    """
-    # TODO: Implement test
-    # from arq import create_pool
-    # redis = await create_pool(RedisSettings(host=..., port=...))
-    # job = await redis.enqueue_job("test_task", arg1="value")
-    # assert job is not None
-    # await redis.close()
-    pass
+
+def _patch_processor_session(monkeypatch, db_session: AsyncSession) -> None:
+    """Route the processor's get_session() at the test's session."""
+
+    @asynccontextmanager
+    async def fake_get_session():
+        yield db_session
+
+    monkeypatch.setattr(outbox_processor, "get_session", fake_get_session)
 
 
 @pytest.mark.asyncio
-async def test_outbox_processor_scheduled_job() -> None:
-    """
-    Test outbox processor scheduled job (skeleton).
+async def test_outbox_processor_marks_message_finished(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """A dispatchable message is marked FINISHED after processing."""
+    dispatched: list[int] = []
 
-    TODO: Implement outbox processor test:
-    - Create unprocessed outbox messages in database
-    - Run process_outbox_messages function
-    - Verify messages are marked as processed
-    - Verify appropriate tasks were queued
+    async def fake_dispatch(db, message):
+        dispatched.append(message.id)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.NEW_SUBMISSION,
+        payload={"submission_id": 1},
+    )
+    db_session.add(message)
+    await db_session.commit()
+    await db_session.refresh(message)
+
+    _patch_processor_session(monkeypatch, db_session)
+    monkeypatch.setattr(outbox_processor, "dispatch_outbox_message", fake_dispatch)
+
+    await outbox_processor.process_outbox_messages()
+
+    await db_session.refresh(message)
+    assert dispatched == [message.id]
+    assert message.state == OutboxMessageState.FINISHED
+    assert message.finished_at is not None
+
+    # No PENDING messages remain.
+    pending = (
+        await db_session.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.state == OutboxMessageState.PENDING
+            )
+        )
+    ).scalars().all()
+    assert pending == []
+
+
+@pytest.mark.asyncio
+async def test_outbox_processor_marks_message_error_on_failure(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """A failing dispatch marks the message ERROR and records the error."""
+
+    async def failing_dispatch(db, message):
+        raise ValueError("boom")
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.NEW_SUBMISSION,
+        payload={"submission_id": 2},
+    )
+    db_session.add(message)
+    await db_session.commit()
+    await db_session.refresh(message)
+
+    _patch_processor_session(monkeypatch, db_session)
+    monkeypatch.setattr(outbox_processor, "dispatch_outbox_message", failing_dispatch)
+
+    await outbox_processor.process_outbox_messages()
+
+    await db_session.refresh(message)
+    assert message.state == OutboxMessageState.ERROR
+    assert message.retry_count == 1
+    assert message.error_message == "boom"
+
+
+@pytest.mark.asyncio
+async def test_outbox_processor_errors_on_unknown_event_type(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """A retired/legacy event type falls through to the error branch.
+
+    This exercises the real dispatch routing table (no dispatch monkeypatch):
+    the deprecated PULL event has no handler and must be marked ERROR.
     """
-    # TODO: Implement test
-    pass
+    message = OutboxMessage(
+        event_type=OutboxEventType.PULL,
+        payload={},
+    )
+    db_session.add(message)
+    await db_session.commit()
+    await db_session.refresh(message)
+
+    _patch_processor_session(monkeypatch, db_session)
+
+    await outbox_processor.process_outbox_messages()
+
+    await db_session.refresh(message)
+    assert message.state == OutboxMessageState.ERROR
+    assert message.retry_count == 1
+    assert "Unknown event type" in (message.error_message or "")
