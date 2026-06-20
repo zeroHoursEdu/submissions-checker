@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import Integer, and_, cast, func, literal_column, select, text
 
 from submissions_checker.api.dependencies import AdminUser, DBSession, TeacherUser
 from submissions_checker.db.models.enums import UserRole
@@ -130,14 +130,20 @@ async def analytics_dashboard(
     difficulty_rows = [row._asdict() for row in difficulty_result]
 
     # --- Grade distribution (10-point buckets) ---
+    # Integer-floor the grade into a 0–10 bucket. ``grade / 10`` would be true
+    # (numeric) division — producing fractional buckets that never match the
+    # integer keys below — and grouping by a bound-parameter expression is
+    # rejected by PostgreSQL, so we cast to an integer bucket and group/order by
+    # the output alias.
+    bucket = cast(StudentAssignment.grade / 10, Integer).label("bucket")
     grade_dist_result = await db.execute(
         select(
-            (StudentAssignment.grade / 10).label("bucket"),
+            bucket,
             func.count().label("count"),
         )
         .where(StudentAssignment.grade.is_not(None))
-        .group_by((StudentAssignment.grade / 10))
-        .order_by((StudentAssignment.grade / 10))
+        .group_by(literal_column("bucket"))
+        .order_by(literal_column("bucket"))
     )
     grade_distribution = {row.bucket: row.count for row in grade_dist_result}
     grade_dist_labels = [f"{b * 10}–{b * 10 + 9 if b < 10 else 100}" for b in range(11)]
