@@ -98,6 +98,13 @@ addopts = [
     "--cov-report=xml",
 ]
 
+[tool.coverage.run]
+# SQLAlchemy's asyncio layer runs DB calls inside greenlets. Without declaring
+# the greenlet (and thread) concurrency models, coverage.py loses its trace
+# function after the first `await db.execute(...)` and reports the rest of every
+# DB-touching handler as uncovered — drastically understating real coverage.
+concurrency = ["greenlet", "thread"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
