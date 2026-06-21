@@ -86,7 +86,7 @@ e2e: ## Run E2E tests (headless). Options: TAGS=@tag SCENARIO="name" FILE=featur
 	@echo "Running E2E tests..."
 	E2E_APP_URL=http://localhost:8001 \
 	E2E_DB_URL=postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e \
-	pytest -c pytest-e2e.ini tests/e2e/ -v \
+	uv run --extra e2e pytest -c pytest-e2e.ini tests/e2e/ -v \
 		$(if $(TAGS),-m "$(TAGS)",) \
 		$(if $(SCENARIO),-k "$(SCENARIO)",) \
 		$(if $(FILE),$(FILE),) \
@@ -99,7 +99,7 @@ e2e-headed: ## Run E2E tests with browser visible (for debugging)
 	@echo "Running E2E tests (headed)..."
 	E2E_APP_URL=http://localhost:8001 \
 	E2E_DB_URL=postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e \
-	pytest -c pytest-e2e.ini tests/e2e/ -v --headed \
+	uv run --extra e2e pytest -c pytest-e2e.ini tests/e2e/ -v --headed \
 		$(if $(TAGS),-m "$(TAGS)",) \
 		$(if $(SCENARIO),-k "$(SCENARIO)",) \
 		$(if $(FILE),$(FILE),) \
