@@ -34,14 +34,17 @@ logs: ## View logs from all services
 logs-app: ## View logs from app service
 	docker compose logs -f app
 
-test: ## Run all tests with coverage
+test: ## Run all tests (unit + integration + functional) with coverage. Needs Docker.
 	pytest --cov=submissions_checker --cov-report=term-missing --cov-report=html
 
-test-integration: ## Run integration tests only
+test-unit: ## Run unit tests only (fast, no Docker)
+	pytest tests/unit/ -v
+
+test-integration: ## Run integration tests only (needs Docker for testcontainers)
 	pytest tests/integration/ -v
 
-test-unit: ## Run unit tests only
-	pytest tests/unit/ -v
+test-functional: ## Run functional API tests only (real app + Postgres container)
+	pytest tests/functional/ -v
 
 test-watch: ## Run tests in watch mode
 	pytest --watch

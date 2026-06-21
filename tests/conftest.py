@@ -1,20 +1,31 @@
-"""Pytest configuration and shared fixtures."""
+"""Pytest configuration and shared fixtures.
+
+``testcontainers`` (and the ``redis`` client it pulls in) are imported lazily
+inside the fixtures that need them, not at module top level. That keeps this
+top-level conftest importable for test suites that don't use containers — most
+importantly the e2e/BDD suite (which talks to a live Dockerised stack via its
+own config) and any unit-only run — without requiring the dev/redis extras to
+be installed just to collect.
+"""
+
+from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from testcontainers.postgres import PostgresContainer
-from testcontainers.redis import RedisContainer
-
-from submissions_checker.core.config import Settings
 
 # Importing the models package ensures every table (not just the subset wired
 # into db.base) is registered on Base.metadata before create_all runs.
 import submissions_checker.db.models  # noqa: F401
+from submissions_checker.core.config import Settings
 from submissions_checker.db.base import Base
+
+if TYPE_CHECKING:
+    from testcontainers.postgres import PostgresContainer
+    from testcontainers.redis import RedisContainer
 
 
 @pytest.fixture(scope="session")
@@ -36,6 +47,8 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
 
     Uses testcontainers to spin up a PostgreSQL instance for integration tests.
     """
+    from testcontainers.postgres import PostgresContainer
+
     with PostgresContainer("postgres:16-alpine") as postgres:
         yield postgres
 
@@ -47,6 +60,8 @@ def redis_container() -> Generator[RedisContainer, None, None]:
 
     Uses testcontainers to spin up a Redis instance for integration tests.
     """
+    from testcontainers.redis import RedisContainer
+
     with RedisContainer("redis:7-alpine") as redis:
         yield redis
 

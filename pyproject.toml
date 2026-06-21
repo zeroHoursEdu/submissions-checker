@@ -36,6 +36,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
     "testcontainers>=4.8.0",
+    # redis client is used by the integration tests (Redis testcontainer + ping/round-trip);
+    # included here so the whole unit/integration/functional suite installs with just [dev].
+    "redis>=5.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
 ]
