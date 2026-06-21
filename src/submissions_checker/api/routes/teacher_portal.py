@@ -11,7 +11,8 @@ from datetime import date
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from sqlalchemy import and_, false, func, select, text
+from sqlalchemy import and_, cast, false, func, select, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -396,7 +397,10 @@ async def teacher_assignment(
             .join(Submission, Submission.id == QuizAttempt.submission_id)
             .where(
                 Submission.students_assignment_id.in_(sa_id_list),
-                func.jsonb_object_length(QuizAttempt.violations) > 0,
+                # violations is a NOT NULL JSONB object (default {}); select rows
+                # whose object is non-empty. PostgreSQL has no jsonb_object_length,
+                # so compare against the empty object directly.
+                QuizAttempt.violations != cast({}, JSONB),
             )
             .order_by(QuizAttempt.started_at.desc())
         )
