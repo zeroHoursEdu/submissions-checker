@@ -14,7 +14,11 @@ from tests.e2e.helpers import (
 from tests.e2e.pages.student_portal import StudentPortal
 
 FIXTURES_DIR = __import__("pathlib").Path(__file__).parent.parent / "fixtures"
-SUBMISSION_WAIT_TIMEOUT = 150
+# Generous ceiling: the async check-runner (DinD) processes submissions in the
+# background, and under full-suite load with many browser contexts competing for
+# the worker the FAILED/PASSED transition can lag well past a minute. Keep this
+# high so the suite stays reliable when run end-to-end, not just in isolation.
+SUBMISSION_WAIT_TIMEOUT = 240
 
 
 def _get_student_assignment_id(subject_id: int, assignment_code: str, student_username: str) -> int | None:

@@ -29,4 +29,7 @@ class LoginPage:
         assert "/auth/login" in self.page.url
 
     def logout(self) -> None:
-        self.page.goto(f"{self.app_url}/auth/logout")
+        # The logout route is POST-only and clears the access_token cookie via
+        # Set-Cookie. page.request shares the browser context's cookie jar, so
+        # the deletion takes effect for subsequent page navigations.
+        self.page.request.post(f"{self.app_url}/auth/logout")

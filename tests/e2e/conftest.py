@@ -30,6 +30,7 @@ pytest_plugins = [
     "tests.e2e.steps.notification_steps",
     "tests.e2e.steps.feedback_steps",
     "tests.e2e.steps.quiz_steps",
+    "tests.e2e.steps.security_steps",
 ]
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
