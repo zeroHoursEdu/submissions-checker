@@ -13,6 +13,8 @@ import bcrypt
 import pytest
 
 from tests.e2e.helpers import (
+    ADMIN_PASSWORD,
+    ADMIN_USERNAME,
     TEACHER_PASSWORD,
     TEACHER_USERNAME,
     db_conn,
@@ -60,6 +62,35 @@ def teacher_account() -> Generator[dict, None, None]:
                 )
                 conn.commit()
         yield {"username": TEACHER_USERNAME, "password": TEACHER_PASSWORD}
+    finally:
+        conn.close()
+
+
+@pytest.fixture(scope="session")
+def admin_account() -> Generator[dict, None, None]:
+    """Insert an admin user directly into the E2E DB (if not already present).
+
+    The analytics overview and fraud dashboards are gated to ADMIN (they aggregate
+    across all teachers' subjects), so these scenarios need a real admin login.
+    """
+    conn = db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USERNAME,))
+            existing = cur.fetchone()
+            if existing is None:
+                password_hash = bcrypt.hashpw(
+                    ADMIN_PASSWORD.encode(), bcrypt.gensalt(12)
+                ).decode()
+                cur.execute(
+                    """
+                    INSERT INTO users (username, password_hash, role, created_at, updated_at)
+                    VALUES (%s, %s, 'ADMIN', NOW(), NOW())
+                    """,
+                    (ADMIN_USERNAME, password_hash),
+                )
+                conn.commit()
+        yield {"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}
     finally:
         conn.close()
 

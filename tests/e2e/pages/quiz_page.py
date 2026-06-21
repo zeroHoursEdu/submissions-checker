@@ -10,12 +10,28 @@ class QuizPage:
         self.page = page
         self.app_url = app_url
 
+    def accept_consent_if_present(self) -> None:
+        """Quizzes are webcam-proctored; the student must acknowledge the one-time
+        recording-consent notice before any quiz route is reachable. If the current
+        page is the consent page, submit the agreement form (mirrors the real flow)."""
+        if "/portal/consent" in self.page.url:
+            self.page.locator('form[action="/portal/consent"] button[type="submit"]').click()
+            self.page.wait_for_load_state("networkidle")
+
     def start_quiz(self, subject_id: int, assignment_id: int) -> None:
         """Navigate to the quiz start endpoint and follow the redirect to the quiz form."""
         self.page.goto(
             f"{self.app_url}/portal/subjects/{subject_id}/assignments/{assignment_id}/quiz"
         )
         self.page.wait_for_load_state("networkidle")
+        # First-time quiz access redirects to the proctoring consent page; accept it
+        # and retry the quiz start so we land on the quiz form.
+        if "/portal/consent" in self.page.url:
+            self.accept_consent_if_present()
+            self.page.goto(
+                f"{self.app_url}/portal/subjects/{subject_id}/assignments/{assignment_id}/quiz"
+            )
+            self.page.wait_for_load_state("networkidle")
         assert "/portal/quiz/" in self.page.url, f"Expected quiz URL, got: {self.page.url}"
 
     def get_attempt_id(self) -> int:

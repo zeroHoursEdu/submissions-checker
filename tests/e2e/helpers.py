@@ -15,6 +15,8 @@ E2E_DB_URL = os.environ.get(
 
 TEACHER_USERNAME = "e2e_teacher"
 TEACHER_PASSWORD = "E2eTeacher#2024"
+ADMIN_USERNAME = "e2e_admin"
+ADMIN_PASSWORD = "E2eAdmin#2024"
 STUDENT_EMAIL = "e2e.student@test.example"
 
 

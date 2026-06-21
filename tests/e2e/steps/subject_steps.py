@@ -120,4 +120,11 @@ def assert_analytics_content(page, app_url: str) -> None:
 @then("the fraud analytics page should load without errors")
 def assert_fraud_analytics_loaded(page, app_url: str) -> None:
     page.wait_for_load_state("networkidle")
-    assert "Internal Server Error" not in page.content()
+    assert page.url.rstrip("/").endswith("/teacher/analytics/fraud"), (
+        f"Expected to stay on the fraud analytics page, got: {page.url}"
+    )
+    content = page.content()
+    assert "Internal Server Error" not in content
+    assert "Admin access required" not in content, "Got 403 — admin login failed"
+    # The rendered fraud dashboard has a real <h1> heading; a 403/JSON body would not.
+    expect(page.locator("h1").first).to_be_visible()
