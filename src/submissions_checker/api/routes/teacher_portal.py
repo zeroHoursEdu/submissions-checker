@@ -6,7 +6,7 @@ import csv
 import io
 import secrets
 import urllib.parse
-from datetime import UTC, date, datetime
+from datetime import date
 
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
@@ -20,6 +20,7 @@ from submissions_checker.api.dependencies import AppSettings, DBSession, Teacher
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.security import COOKIE_NAME, create_access_token
 from submissions_checker.core.state_machine import transition
+from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     EntityType,
     FeedbackRequest,
@@ -32,19 +33,24 @@ from submissions_checker.db.models import (
     Student,
     StudentAssignment,
     Subject,
-    SubjectTestStudent,
     SubjectsAssignment,
     SubjectsStudents,
+    SubjectTestStudent,
     Submission,
     User,
     UserLogin,
 )
-from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, SubmissionStatus, SubjectStatus, UserRole
+from submissions_checker.db.models.enums import (
+    OutboxEventType,
+    OutboxMessageState,
+    SubjectStatus,
+    SubmissionStatus,
+    UserRole,
+)
 from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
 from submissions_checker.services.storage import StorageService
-from submissions_checker.core.templates import render
 
 router = APIRouter(prefix="/teacher", tags=["teacher-portal"])
 

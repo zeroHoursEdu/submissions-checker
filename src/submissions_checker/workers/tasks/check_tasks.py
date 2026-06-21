@@ -27,11 +27,15 @@ from submissions_checker.db.models import (
     SubjectsAssignment,
     Submission,
 )
-from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
+from submissions_checker.db.models.enums import (
+    OutboxEventType,
+    OutboxMessageState,
+    SubmissionStatus,
+)
 from submissions_checker.services import check_core
 from submissions_checker.services.docker_sandbox import DockerSandbox
-from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
+from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
 logger = get_logger(__name__)
 
@@ -145,7 +149,17 @@ async def _fetch_latest_config(db: AsyncSession, subject_id: int) -> SubjectPlug
 
 
 def _fail_validation(submission: Submission, reason: str) -> None:
+    """Record a clean VALIDATION_FAILED with a teacher-facing reason.
+
+    Pre-sandbox failures (no plugin config, misconfigured plan, bad/unsafe ZIP)
+    are detected while the submission is still PENDING. The state machine only
+    allows ``validation_failed`` from VALIDATING, so step through
+    ``start_validation`` first; otherwise the transition raises and the outbox
+    message loops in ERROR/retry instead of converging on VALIDATION_FAILED.
+    """
     submission.test_results = {"check_reason": reason}
+    if submission.status == SubmissionStatus.PENDING:
+        transition(submission, "start_validation")
     transition(submission, "validation_failed")
 
 

@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import Integer, and_, cast, func, literal_column, select, text
 
 from submissions_checker.api.dependencies import AdminUser, DBSession, TeacherUser
-from submissions_checker.db.models.enums import UserRole
+from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     Group,
     Student,
@@ -19,7 +19,7 @@ from submissions_checker.db.models import (
     User,
     UserLogin,
 )
-from submissions_checker.core.templates import render
+from submissions_checker.db.models.enums import UserRole
 
 router = APIRouter(prefix="/teacher/analytics", tags=["analytics"])
 
@@ -130,12 +130,13 @@ async def analytics_dashboard(
     difficulty_rows = [row._asdict() for row in difficulty_result]
 
     # --- Grade distribution (10-point buckets) ---
-    # Integer-floor the grade into a 0–10 bucket. ``grade / 10`` would be true
-    # (numeric) division — producing fractional buckets that never match the
-    # integer keys below — and grouping by a bound-parameter expression is
-    # rejected by PostgreSQL, so we cast to an integer bucket and group/order by
-    # the output alias.
-    bucket = cast(StudentAssignment.grade / 10, Integer).label("bucket")
+    # Integer-floor the grade into a 0–10 bucket. ``grade / 10`` is true (numeric)
+    # division, and ``CAST(... AS INTEGER)`` *rounds* in PostgreSQL — so a grade of
+    # 95 (9.5) would round up into bucket 10 and 9 (0.9) into bucket 1, mislabelling
+    # them. ``FLOOR`` truncates toward zero for the non-negative grade domain, giving
+    # the intended floor bucket. Grouping by a bound-parameter expression is rejected
+    # by PostgreSQL, so we group/order by the output alias.
+    bucket = cast(func.floor(StudentAssignment.grade / 10.0), Integer).label("bucket")
     grade_dist_result = await db.execute(
         select(
             bucket,
@@ -287,7 +288,7 @@ async def analytics_fraud(
             Student.full_name,
             Group.name.label("group_name"),
             func.count(Submission.id).label("total_submissions"),
-            func.min(func.cast(Submission.created_at, type_=None)).label("earliest_day"),
+            func.min(func.date(Submission.created_at)).label("earliest_day"),
         )
         .join(StudentAssignment, StudentAssignment.student_id == Student.id)
         .join(Submission, Submission.students_assignment_id == StudentAssignment.id)

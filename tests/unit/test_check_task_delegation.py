@@ -12,9 +12,6 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
-from submissions_checker.core.state_machine import InvalidTransitionError
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.services import check_core
 from submissions_checker.workers.tasks import check_tasks
@@ -127,9 +124,10 @@ async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None
     monkeypatch.setattr(check_tasks, "get_settings",
                         lambda: SimpleNamespace(plugins_dir=str(tmp_path)))
 
-    # Pre-existing behavior preserved by the refactor: a config error calls _fail_validation
-    # while the submission is still PENDING, and `validation_failed` is not a legal transition
-    # from PENDING — so it raises. The teacher-facing reason is still recorded first.
-    with pytest.raises(InvalidTransitionError):
-        await check_tasks.execute_check_task(db, {"submission_id": 1})
+    # A config error is detected while the submission is still PENDING. _fail_validation
+    # steps through start_validation (PENDING -> VALIDATING) before validation_failed, so
+    # the submission converges cleanly on VALIDATION_FAILED with a teacher-facing reason
+    # instead of raising InvalidTransitionError.
+    await check_tasks.execute_check_task(db, {"submission_id": 1})
+    assert submission.status == SubmissionStatus.VALIDATION_FAILED
     assert "check_reason" in submission.test_results

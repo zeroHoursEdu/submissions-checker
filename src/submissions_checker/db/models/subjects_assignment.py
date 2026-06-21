@@ -19,7 +19,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,7 +51,8 @@ class SubjectsAssignment(Base, TimestampMixin):
     code: Mapped[str | None] = mapped_column(String(100), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    deadline: Mapped[datetime | None] = mapped_column(nullable=True)
+    # TIMESTAMPTZ to match alembic 0001 (deadline TIMESTAMPTZ); writers store tz-aware UTC.
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     min_grade: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_grade: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
