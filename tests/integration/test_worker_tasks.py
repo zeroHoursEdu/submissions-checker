@@ -904,3 +904,177 @@ async def test_check_missing_submission_noops(
     )
     message = await _process(db_session, monkeypatch, message)
     assert message.state == OutboxMessageState.FINISHED
+
+
+@pytest.mark.asyncio
+async def test_check_passed_tests_then_teacher_awaits_review(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """A passed outcome in tests_then_teacher mode -> AWAITING_TEACHER_REVIEW."""
+    zip_path = tmp_path / "tt.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(
+        db_session, "thenteacher", review_mode="tests_then_teacher", saved_as="tt.zip"
+    )
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(
+        monkeypatch,
+        check_core.CheckOutcome("passed", 2, 2, [{"name": "t1", "passed": True}]),
+    )
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_check_passed_tests_then_ai_then_teacher_enqueues_ai_with_next_step(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """tests_then_ai_then_teacher mode -> AWAITING_AI_REVIEW + RUN_AI_REVIEW carrying next_step=teacher."""
+    zip_path = tmp_path / "att.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(
+        db_session,
+        "thenaiteacher",
+        review_mode="tests_then_ai_then_teacher",
+        saved_as="att.zip",
+    )
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(
+        monkeypatch,
+        check_core.CheckOutcome("passed", 2, 2, [{"name": "t1", "passed": True}]),
+    )
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.AWAITING_AI_REVIEW
+    ai_msgs = (
+        await db_session.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.event_type == OutboxEventType.RUN_AI_REVIEW
+            )
+        )
+    ).scalars().all()
+    mine = [m for m in ai_msgs if m.payload.get("submission_id") == sub.id]
+    assert mine and mine[0].payload.get("next_step") == "teacher"
+
+
+@pytest.mark.asyncio
+async def test_check_passed_tests_then_quiz_sends_quiz(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """A passed outcome in tests_then_quiz mode -> QUIZ_SENT."""
+    zip_path = tmp_path / "q.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(
+        db_session, "thenquiz", review_mode="tests_then_quiz", saved_as="q.zip"
+    )
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(
+        monkeypatch,
+        check_core.CheckOutcome("passed", 2, 2, [{"name": "t1", "passed": True}]),
+    )
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.QUIZ_SENT
+
+
+@pytest.mark.asyncio
+async def test_check_misconfigured_plan_records_validation_failed(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """A ConfigError from plan resolution -> clean VALIDATION_FAILED with the reason."""
+    zip_path = tmp_path / "cfg.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(db_session, "badcfg", saved_as="cfg.zip")
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+
+    def _bad_plan(config, assignment_code, variant):
+        return check_core.ConfigError("no check command configured for this assignment")
+
+    monkeypatch.setattr(check_tasks.check_core, "resolve_check_plan", _bad_plan)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.VALIDATION_FAILED
+    assert "no check command" in sub.test_results["check_reason"]
+
+
+@pytest.mark.asyncio
+async def test_check_unsafe_archive_records_validation_failed(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """A zip-slip / unsafe archive -> clean VALIDATION_FAILED, message FINISHED."""
+    from submissions_checker.utils.safe_zip import UnsafeArchiveError
+
+    zip_path = tmp_path / "unsafe.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(db_session, "unsafe", saved_as="unsafe.zip")
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+
+    def _boom(zf, dest):
+        raise UnsafeArchiveError("path escapes extraction root")
+
+    monkeypatch.setattr(check_tasks, "safe_extract", _boom)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.VALIDATION_FAILED
+    assert "unsafe" in sub.test_results["check_reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_check_missing_saved_as_raises_and_errors(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """A submission whose source_metadata lacks saved_as -> RuntimeError -> message ERROR."""
+    sub = await _seed_check_submission(db_session, "nosaved", saved_as="nosaved.zip")
+    sub.source_metadata = {}
+    await db_session.commit()
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.ERROR

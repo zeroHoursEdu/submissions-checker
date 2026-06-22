@@ -273,3 +273,62 @@ async def test_flush_skips_teacher_without_email(
 
     assert not any(s for s in dispatcher.sent if s[0] is None)
     assert len(await _pending(db_session, teacher.id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_not_ready_keeps_pending(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    """Batch neither past the window nor at the threshold -> left pending, no email."""
+    teacher, submission = await _seed(db_session, "notready")
+    await notification_tasks.enqueue_teacher_review_notification(db_session, submission.id)
+    # huge window AND huge threshold -> a single fresh entry is never "ready"
+    settings = test_settings.model_copy(
+        update={"teacher_digest_window_seconds": 99999, "teacher_digest_max_batch": 1000}
+    )
+    dispatcher = _FakeDispatcher()
+    _patch_flush(monkeypatch, db_session, settings, dispatcher)
+    await teacher_digest_processor.flush_teacher_digests()
+
+    assert dispatcher.sent == []
+    assert len(await _pending(db_session, teacher.id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_send_failure_leaves_rows_pending(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    """dispatcher.notify raising -> rows stay pending for retry, flush still completes."""
+    teacher, submission = await _seed(db_session, "senderr")
+    await notification_tasks.enqueue_teacher_review_notification(db_session, submission.id)
+    settings = test_settings.model_copy(update={"teacher_digest_window_seconds": 0})
+
+    class _BoomDispatcher(_FakeDispatcher):
+        async def notify(self, recipient: str, subject: str, body: str) -> None:
+            raise RuntimeError("smtp down")
+
+    dispatcher = _BoomDispatcher()
+    _patch_flush(monkeypatch, db_session, settings, dispatcher)
+    # Must not raise — the send error is caught and the row left pending.
+    await teacher_digest_processor.flush_teacher_digests()
+
+    assert len(await _pending(db_session, teacher.id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_swallows_unexpected_error(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    """An unexpected error inside the flush is logged and swallowed, not propagated."""
+    settings = test_settings.model_copy(update={"teacher_digest_window_seconds": 0})
+
+    @asynccontextmanager
+    async def boom_get_session():
+        raise RuntimeError("connection pool exhausted")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(teacher_digest_processor, "get_settings", lambda: settings)
+    monkeypatch.setattr(teacher_digest_processor, "get_session", boom_get_session)
+
+    # The outer try/except must absorb this — no exception escapes.
+    await teacher_digest_processor.flush_teacher_digests()
