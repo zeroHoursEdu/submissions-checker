@@ -19,6 +19,7 @@ without network I/O. Behaviour was read from ``services/config_apply.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
 import io
 import zipfile
 from datetime import UTC, datetime
@@ -90,13 +91,14 @@ def _mock_storage() -> AsyncMock:
 
 async def test_s3_upload_failure_raises_runtime_error_and_persists_nothing(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
 
     storage = _mock_storage()
     storage.upload_file = AsyncMock(side_effect=RuntimeError("boom"))
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["gridPicture"] = "grid.png"
@@ -120,11 +122,12 @@ async def test_s3_upload_failure_raises_runtime_error_and_persists_nothing(
 
 async def test_create_subject_uploads_and_sets_picture_urls(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["gridPicture"] = "grid.png"
@@ -149,11 +152,12 @@ async def test_create_subject_uploads_and_sets_picture_urls(
 
 async def test_reapply_changed_image_removes_old_s3_key(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["gridPicture"] = "old.png"
@@ -188,11 +192,12 @@ async def test_reapply_changed_image_removes_old_s3_key(
 
 async def test_reapply_updates_all_assignment_field_types(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     # v1: subject with a grid image + lab1 with one content file.
     cfg = _base_config()
@@ -269,11 +274,11 @@ async def test_reapply_updates_all_assignment_field_types(
 # ── Removing a content file on re-apply removes its S3 key  248-253 ──────────
 
 
-async def test_reapply_removes_content_file_s3_key(db_session: AsyncSession) -> None:
+async def test_reapply_removes_content_file_s3_key(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [
@@ -308,11 +313,12 @@ async def test_reapply_removes_content_file_s3_key(db_session: AsyncSession) -> 
 
 async def test_reapply_existing_content_file_not_reuploaded(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [
@@ -338,11 +344,11 @@ async def test_reapply_existing_content_file_not_reuploaded(
 # ── Changing the MAIN picture on re-apply  486-491 ───────────────────────────
 
 
-async def test_reapply_changes_main_picture_url(db_session: AsyncSession) -> None:
+async def test_reapply_changes_main_picture_url(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["mainPicture"] = "main_old.png"
@@ -368,11 +374,11 @@ async def test_reapply_changes_main_picture_url(db_session: AsyncSession) -> Non
 # ── S3 cleanup delete failure is swallowed (best-effort)  455-459 ────────────
 
 
-async def test_s3_delete_failure_is_swallowed(db_session: AsyncSession) -> None:
+async def test_s3_delete_failure_is_swallowed(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["gridPicture"] = "g_old.png"
@@ -402,11 +408,11 @@ async def test_s3_delete_failure_is_swallowed(db_session: AsyncSession) -> None:
 # ── Content-file entry without a filename is skipped  563-564 ────────────────
 
 
-async def test_content_file_without_filename_skipped(db_session: AsyncSession) -> None:
+async def test_content_file_without_filename_skipped(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     # One valid content file + one malformed entry (no filename) → the malformed
@@ -442,10 +448,10 @@ async def test_content_file_without_filename_skipped(db_session: AsyncSession) -
 # ── Malformed deadline parses to NULL  570-577 ───────────────────────────────
 
 
-async def test_apply_invalid_deadline_stored_as_null(db_session: AsyncSession) -> None:
+async def test_apply_invalid_deadline_stored_as_null(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["deadline"] = "not-a-date"

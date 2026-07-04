@@ -14,6 +14,7 @@ NOT duplicate them and instead drives the DB-mutating apply() entry point.
 
 from __future__ import annotations
 
+from pathlib import Path
 import io
 import zipfile
 from datetime import UTC, datetime
@@ -108,11 +109,12 @@ def _base_config() -> dict[str, Any]:
 
 async def test_fresh_apply_creates_subject_assignment_and_config(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
 
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
     result = await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
 
     assert result.changed is True
@@ -168,10 +170,11 @@ async def test_fresh_apply_creates_subject_assignment_and_config(
 
 async def test_reapply_updates_subject_assignments_and_bumps_version(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
     await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
     subject = (
@@ -241,10 +244,10 @@ async def test_reapply_updates_subject_assignments_and_bumps_version(
     assert active_count == 1
 
 
-async def test_reapply_removes_deleted_assignment(db_session: AsyncSession) -> None:
+async def test_reapply_removes_deleted_assignment(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["assignments"]["lab2"] = {"title": "Lab 2", "min_grade": 0, "max_grade": 100}
@@ -275,10 +278,10 @@ async def test_reapply_removes_deleted_assignment(db_session: AsyncSession) -> N
     assert remaining == ["lab1"]
 
 
-async def test_reapply_identical_zip_is_unchanged(db_session: AsyncSession) -> None:
+async def test_reapply_identical_zip_is_unchanged(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
     zip_bytes = _make_zip(_base_config())
     await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
@@ -306,10 +309,10 @@ async def test_reapply_identical_zip_is_unchanged(db_session: AsyncSession) -> N
 # ---------------------------------------------------------------------------
 
 
-async def test_owner_id_set_on_create(db_session: AsyncSession) -> None:
+async def test_owner_id_set_on_create(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session, "ownerA")
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
     await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
 
     subject = (
@@ -318,11 +321,11 @@ async def test_owner_id_set_on_create(db_session: AsyncSession) -> None:
     assert subject.owner_id == owner.id
 
 
-async def test_non_owner_cannot_reapply(db_session: AsyncSession) -> None:
+async def test_non_owner_cannot_reapply(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session, "ownerA")
     intruder = await _make_owner(db_session, "ownerB")
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
     await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
 
@@ -341,11 +344,12 @@ async def test_non_owner_cannot_reapply(db_session: AsyncSession) -> None:
 
 async def test_create_then_enrolled_students_get_student_assignments(
     db_session: AsyncSession,
+    tmp_path: Path,
 ) -> None:
     owner = await _make_owner(db_session)
     student = await _make_student(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
     # Create the subject first (no assignments yet) so we can enroll a student,
     # then add an assignment on re-apply and assert StudentAssignment fan-out.
@@ -384,18 +388,18 @@ async def test_create_then_enrolled_students_get_student_assignments(
 # ---------------------------------------------------------------------------
 
 
-async def test_apply_rejects_non_zip(db_session: AsyncSession) -> None:
+async def test_apply_rejects_non_zip(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
     with pytest.raises(ValueError, match="not a valid ZIP"):
         await svc.apply(b"this is not a zip", owner_id=owner.id, db=db_session)
 
 
-async def test_apply_rejects_missing_config_yml(db_session: AsyncSession) -> None:
+async def test_apply_rejects_missing_config_yml(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -405,33 +409,33 @@ async def test_apply_rejects_missing_config_yml(db_session: AsyncSession) -> Non
         await svc.apply(buf.getvalue(), owner_id=owner.id, db=db_session)
 
 
-async def test_apply_rejects_empty_subject_code(db_session: AsyncSession) -> None:
+async def test_apply_rejects_empty_subject_code(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
     cfg = _base_config()
     cfg["subjectCode"] = ""
     with pytest.raises(ValueError, match="subjectCode"):
         await svc.apply(_make_zip(cfg), owner_id=owner.id, db=db_session)
 
 
-async def test_apply_rejects_oversize_zip(db_session: AsyncSession) -> None:
+async def test_apply_rejects_oversize_zip(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
     big = b"\x00" * (50 * 1024 * 1024 + 1)
     with pytest.raises(ValueError, match="50 MB limit"):
         await svc.apply(big, owner_id=owner.id, db=db_session)
 
 
-async def test_apply_with_storage_uploads_content_files(db_session: AsyncSession) -> None:
+async def test_apply_with_storage_uploads_content_files(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
 
     storage = AsyncMock()
     storage.upload_file = AsyncMock(return_value="https://cdn/spec.pdf")
     storage.delete_file = AsyncMock()
-    svc = ConfigApplyService(storage=storage)
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [
@@ -461,10 +465,10 @@ async def test_apply_with_storage_uploads_content_files(db_session: AsyncSession
     ]
 
 
-async def test_apply_null_deadline_when_absent(db_session: AsyncSession) -> None:
+async def test_apply_null_deadline_when_absent(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None)
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
     cfg = _base_config()
     del cfg["assignments"]["lab1"]["deadline"]
     await svc.apply(_make_zip(cfg), owner_id=owner.id, db=db_session)
@@ -478,3 +482,98 @@ async def test_apply_null_deadline_when_absent(db_session: AsyncSession) -> None
         )
     ).scalar_one()
     assert a.deadline is None
+
+
+# ---------------------------------------------------------------------------
+# Plugin tree extraction: the ZIP upload is the only way checker code reaches disk
+# ---------------------------------------------------------------------------
+
+
+async def test_fresh_apply_extracts_full_zip_tree_to_plugins_dir(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    owner = await _make_owner(db_session)
+    await db_session.commit()
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+
+    zip_bytes = _make_zip(
+        _base_config(),
+        extra_files={
+            "assignments/lab1/check.py": b"print('check')",
+            "assignments/lab1/fixtures/input.txt": b"seed data",
+        },
+    )
+    await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
+
+    subject_dir = tmp_path / "demo101"
+    assert (subject_dir / "config.yml").is_file()
+    assert (subject_dir / "assignments" / "lab1" / "check.py").read_bytes() == b"print('check')"
+    assert (subject_dir / "assignments" / "lab1" / "fixtures" / "input.txt").is_file()
+
+
+async def test_reapply_removes_stale_files_from_plugins_dir(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    owner = await _make_owner(db_session)
+    await db_session.commit()
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+
+    cfg = _base_config()
+    await svc.apply(
+        _make_zip(cfg, extra_files={"assignments/lab1/check.py": b"v1", "old_helper.py": b"stale"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
+    subject_dir = tmp_path / "demo101"
+    assert (subject_dir / "old_helper.py").is_file()
+
+    cfg["description"] = "changed so the hash differs"
+    await svc.apply(
+        _make_zip(cfg, extra_files={"assignments/lab1/check.py": b"v2"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
+
+    assert not (subject_dir / "old_helper.py").exists()
+    assert (subject_dir / "assignments" / "lab1" / "check.py").read_bytes() == b"v2"
+
+
+async def test_duplicate_zip_with_missing_disk_dir_still_extracts(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """A hash match alone must not skip extraction forever: if a prior apply's disk
+    swap never completed (e.g. crashed after the DB commit), the on-disk tree is
+    missing despite the DB claiming success. Re-uploading the identical ZIP must
+    self-heal by re-extracting, while still reporting 'unchanged' and NOT inserting
+    a second SubjectPluginConfig row for the same content hash."""
+    owner = await _make_owner(db_session)
+    await db_session.commit()
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+
+    zip_bytes = _make_zip(_base_config(), extra_files={"assignments/lab1/check.py": b"code"})
+    await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
+
+    subject_dir = tmp_path / "demo101"
+    assert subject_dir.is_dir()
+    import shutil
+
+    shutil.rmtree(subject_dir)
+    assert not subject_dir.exists()
+
+    result = await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
+
+    assert result.changed is False
+    assert result.subject_action == "unchanged"
+    assert (subject_dir / "assignments" / "lab1" / "check.py").read_bytes() == b"code"
+
+    subject = (
+        await db_session.execute(select(Subject).where(Subject.code == "demo101"))
+    ).scalar_one()
+    version_count = (
+        await db_session.execute(
+            select(func.count()).select_from(SubjectPluginConfig).where(
+                SubjectPluginConfig.subject_id == subject.id
+            )
+        )
+    ).scalar_one()
+    assert version_count == 1, "self-heal must not insert a duplicate SubjectPluginConfig row"

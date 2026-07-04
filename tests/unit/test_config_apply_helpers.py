@@ -20,8 +20,8 @@ from submissions_checker.services.config_apply import (
 
 
 @pytest.fixture
-def svc() -> ConfigApplyService:
-    return ConfigApplyService(storage=None)
+def svc(tmp_path: Path) -> ConfigApplyService:
+    return ConfigApplyService(storage=None, plugins_dir=tmp_path)
 
 
 # ── _parse_deadline ───────────────────────────────────────────────────────────

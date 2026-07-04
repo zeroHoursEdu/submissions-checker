@@ -7,6 +7,7 @@ import io
 import secrets
 import urllib.parse
 from datetime import date
+from pathlib import Path
 
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
@@ -119,7 +120,7 @@ async def apply_subject_config(
     config_zip: UploadFile,
 ) -> RedirectResponse:
     storage = StorageService(settings) if settings.s3_endpoint_url else None
-    service = ConfigApplyService(storage)
+    service = ConfigApplyService(storage, plugins_dir=Path(settings.plugins_dir))
     try:
         zip_bytes = await config_zip.read()
         result = await service.apply(zip_bytes, owner_id=current_user.user_id, db=db)

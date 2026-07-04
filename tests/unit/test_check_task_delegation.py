@@ -79,7 +79,7 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks, "get_settings",
-                        lambda: SimpleNamespace(plugins_dir=str(tmp_path)))
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None))
 
     canned_tests = [{"name": "v1", "passed": True, "points_earned": 100, "max_points": 100}]
     recorded: dict = {}
@@ -122,7 +122,7 @@ async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None
     config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
     db = _FakeDB(submission, config_record)
     monkeypatch.setattr(check_tasks, "get_settings",
-                        lambda: SimpleNamespace(plugins_dir=str(tmp_path)))
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None))
 
     # A config error is detected while the submission is still PENDING. _fail_validation
     # steps through start_validation (PENDING -> VALIDATING) before validation_failed, so

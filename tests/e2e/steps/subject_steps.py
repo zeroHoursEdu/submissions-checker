@@ -28,12 +28,18 @@ def _get_subject_id_by_code(code: str) -> int | None:
 
 @given("the E2E test subject exists")
 def ensure_subject_exists(page, app_url: str, e2e_context: dict, teacher_account: dict) -> None:
-    """Upload the subject config ZIP if the subject is not yet in the DB."""
+    """Upload the subject config ZIP if the subject is not yet in the DB.
+
+    Some Backgrounds (e.g. analytics.feature) log in as a different role before this
+    step runs. Log out first so the login form is always reachable here, regardless
+    of whatever session — if any — is already active on this page.
+    """
     subject_id = _get_subject_id_by_code("E2E Test Subject")
     if subject_id is None:
         # Need to log in and upload
         from tests.e2e.pages.login_page import LoginPage
         lp = LoginPage(page, app_url)
+        lp.logout()
         lp.navigate()
         lp.login(teacher_account["username"], teacher_account["password"])
         lp.assert_on_teacher_dashboard()

@@ -2,14 +2,21 @@
 
 Accepts a ZIP file uploaded by a teacher, extracts it, computes a field-level
 diff against the current DB state, logs the plan, then executes it in the
-required order: S3 uploads → DB transaction → S3 cleanup.
+required order: S3 uploads → DB transaction → plugin tree extraction → S3
+cleanup. The plugin tree extraction step writes the full ZIP contents (checker
+scripts, fixtures, config.yml) to plugins_dir/<subjectCode>/, which is what
+check_tasks.py mounts into the sandbox at check time — this is the only way a
+subject's checker code reaches disk, there is no separate startup scan.
 """
 
 from __future__ import annotations
 
 import hashlib
 import io
+import os
+import shutil
 import tempfile
+import uuid
 import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -63,8 +70,9 @@ class ApplyResult:
 # ---------------------------------------------------------------------------
 
 class ConfigApplyService:
-    def __init__(self, storage: StorageService | None) -> None:
+    def __init__(self, storage: StorageService | None, plugins_dir: Path) -> None:
         self._storage = storage
+        self._plugins_dir = plugins_dir
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -107,7 +115,7 @@ class ConfigApplyService:
 
         # Deduplication: if the ZIP hash matches the latest stored version, skip
         if subject is not None:
-            dup = await self._check_duplicate(db, subject.id, sha256)
+            dup = await self._check_duplicate(db, subject.id, sha256, subject_code, zip_bytes)
             if dup is not None:
                 logger.info("config_apply_unchanged", subject_code=subject_code, sha256=sha256)
                 return dup
@@ -172,17 +180,62 @@ class ConfigApplyService:
         db: AsyncSession,
         subject_id: int,
         sha256: str,
+        subject_code: str,
+        zip_bytes: bytes,
     ) -> ApplyResult | None:
-        """Return ApplyResult(changed=False) if this exact ZIP was already applied."""
+        """Return ApplyResult(changed=False) if this exact ZIP was already applied.
+
+        A hash match means the content truly hasn't changed, so no new SubjectPluginConfig
+        version is ever inserted here (that would violate the (subject_id, content_hash)
+        unique constraint). But if the extracted plugin tree is missing from disk despite the
+        matching hash — a prior apply's disk extraction never completed (e.g. crashed after the
+        DB commit) — self-heal by re-extracting before returning, rather than leaving the
+        subject permanently uncheckable while the DB claims success.
+        """
         result = await db.execute(
             select(SubjectPluginConfig.id).where(
                 SubjectPluginConfig.subject_id == subject_id,
                 SubjectPluginConfig.content_hash == sha256,
             )
         )
-        if result.scalar_one_or_none() is not None:
-            return ApplyResult(changed=False, subject_action="unchanged", subject_name="")
-        return None
+        if result.scalar_one_or_none() is None:
+            return None
+
+        if not (self._plugins_dir / subject_code).is_dir():
+            self._extract_plugin_tree(zip_bytes, subject_code)
+
+        return ApplyResult(changed=False, subject_action="unchanged", subject_name="")
+
+    # ------------------------------------------------------------------
+    # On-disk plugin tree
+    # ------------------------------------------------------------------
+
+    def _extract_plugin_tree(self, zip_bytes: bytes, subject_code: str) -> None:
+        """Extract the full ZIP tree to plugins_dir/<subject_code>/, atomically replacing any
+        previous version so check_tasks.py's plugin_dir resolution always finds a complete tree.
+
+        Extracts to a sibling temp directory *inside* plugins_dir (not the system tempdir) so the
+        swap is a same-filesystem os.replace(), which is atomic — a check resolving plugin_dir
+        during the swap sees either the complete old tree or the complete new one.
+        """
+        self._plugins_dir.mkdir(parents=True, exist_ok=True)
+        tmp_target = self._plugins_dir / f".tmp-{subject_code}-{uuid.uuid4().hex}"
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            try:
+                safe_extract(zf, tmp_target)
+            except UnsafeArchiveError:
+                shutil.rmtree(tmp_target, ignore_errors=True)
+                raise
+
+        final_target = self._plugins_dir / subject_code
+        old_backup = self._plugins_dir / f".old-{subject_code}-{uuid.uuid4().hex}"
+        replaced_old = False
+        if final_target.exists():
+            os.replace(final_target, old_backup)
+            replaced_old = True
+        os.replace(tmp_target, final_target)
+        if replaced_old:
+            shutil.rmtree(old_backup, ignore_errors=True)
 
     # ------------------------------------------------------------------
     # Diff computation (field-level)
@@ -449,7 +502,11 @@ class ConfigApplyService:
             subject_action="created" if subject_created else plan.subject_action,
         )
 
-        # Step 7: best-effort S3 cleanup
+        # Step 7: extract the full ZIP tree to plugins_dir/<subject_code>/, replacing any
+        # previous version, so this subject is checkable without any manual file placement.
+        self._extract_plugin_tree(zip_bytes, subject_code)
+
+        # Step 8: best-effort S3 cleanup
         if self._storage is not None:
             for key in plan.removed_s3_keys:
                 try:

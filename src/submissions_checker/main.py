@@ -21,9 +21,6 @@ from submissions_checker.core.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
-from submissions_checker.db.session import get_session
-from submissions_checker.services.plugin_loader import PluginLoader
-from submissions_checker.services.storage import StorageService
 
 # Configure logging before anything else
 configure_logging()
@@ -57,14 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     logger.info("database_initialized")
 
-    # 3. Load subject plugins from plugins directory
-    plugins_dir = Path(settings.plugins_dir)
-    storage = StorageService(settings) if settings.s3_endpoint_url else None
-    async with get_session() as db:
-        await PluginLoader().load_all(plugins_dir, db, storage=storage)
-    logger.info("plugins_loaded", plugins_dir=str(plugins_dir))
-
-    # 4. Start scheduler (if enabled)
+    # 3. Start scheduler (if enabled)
     if settings.scheduler_enabled:
         init_scheduler()
         await start_scheduler()

@@ -25,7 +25,11 @@ plugins/
     docs/                    ← optional: your own documentation and examples
 ```
 
-Place this directory alongside the application. It is gitignored and loaded at startup.
+Zip this directory (with `config.yml` at the ZIP's root) and upload it through the teacher
+portal's "Apply config" form, or `POST` it directly to `/teacher/subjects/apply-config` as an
+authenticated teacher. There is no startup scan and no manual file placement — uploading is the
+only way a subject's code and config reach the system. The upload extracts the full ZIP contents
+to the server's `plugins_dir/<subjectCode>/`, which is what the sandbox mounts at check time.
 
 ---
 
@@ -232,16 +236,16 @@ Variants allow different problem instances per student (preventing copy-paste).
 
 ## Adding a New Subject
 
-1. Create `plugins/<subjectCode>/config.yml` with the full config.
-2. Write validate and check scripts for each assignment.
-3. Restart the application — the plugin loader runs at startup and upserts the subject and assignments into the database.
+1. Build a local `<subjectCode>/config.yml` with the full config, plus validate/check scripts for each assignment, laid out as shown above.
+2. Zip the directory (`config.yml` must be at the ZIP's root).
+3. Upload the ZIP via the teacher portal's "Apply config" form (or `POST /teacher/subjects/apply-config`). This creates the subject, its assignments, and extracts the checker code to the server — no restart needed.
 4. Enroll students via the teacher portal (use the subject's CSV template).
 
 ---
 
 ## Updating a Subject
 
-Edit `config.yml` and restart. The loader detects the changed content hash and inserts a new config version. In-progress submission checks continue using the previous version; new checks use the updated one.
+Edit your local copy of `config.yml` (and/or the check scripts), re-zip the whole directory, and upload it again through the same form/endpoint. The service detects the changed content hash, inserts a new config version, and replaces the on-disk checker code with the new tree — nothing to delete or merge by hand. In-progress submission checks continue using the previous version; new checks use the updated one. Uploading an identical ZIP again is a no-op.
 
 ---
 
