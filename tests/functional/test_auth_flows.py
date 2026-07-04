@@ -66,6 +66,19 @@ async def test_login_redirects_student_to_portal(
     assert resp.headers["location"] == "/portal"
 
 
+async def test_login_redirects_admin_to_admin_dashboard(
+    client: AsyncClient, make_user
+) -> None:
+    await make_user(role=UserRole.ADMIN, username="root", password=PASSWORD)
+    resp = await client.post(
+        "/auth/login",
+        data={"username": "root", "password": PASSWORD},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/admin"
+
+
 async def test_login_records_user_login_row(
     client: AsyncClient, make_user, db
 ) -> None:

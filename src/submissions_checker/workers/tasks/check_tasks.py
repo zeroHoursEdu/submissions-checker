@@ -124,9 +124,14 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
 
         # ── Validation + testing run in the shared core ────────────────────────
         transition(submission, "start_validation")
-        outcome = await check_core.run_check(
-            plan=plan, submission_dir=extract_path, plugin_dir=plugin_dir, sandbox=_SANDBOX
-        )
+        try:
+            outcome = await check_core.run_check(
+                plan=plan, submission_dir=extract_path, plugin_dir=plugin_dir, sandbox=_SANDBOX
+            )
+        except check_core.CheckExecutionError as exc:
+            logger.error("check_task_execution_error", submission_id=submission_id, error=str(exc))
+            _fail_validation(submission, str(exc))
+            return
 
         if outcome.status == "validation_failed":
             submission.test_results = {"check_reason": outcome.reason}

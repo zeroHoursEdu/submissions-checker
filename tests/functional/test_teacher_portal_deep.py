@@ -662,11 +662,11 @@ async def test_provision_test_student_cross_teacher_is_403(
     assert (await db.scalar(select(func.count()).select_from(SubjectTestStudent))) == 0
 
 
-async def test_provision_test_student_admin_is_403_inline_owner_check(
+async def test_provision_test_student_admin_succeeds_cross_teacher(
     client: AsyncClient, db, admin, make_user
 ) -> None:
-    # NOTE: provision_test_student uses an inline owner check (subject.owner_id !=
-    # current_user.user_id), NOT require_subject_access — so ADMIN is rejected too.
+    # provision_test_student uses require_subject_access, which admits ADMIN —
+    # unlike the old inline owner check this replaced.
     await _make_test_group(db)
     other = await make_user(role=UserRole.TEACHER, username="other")
     subject = await _make_subject(db, owner_id=other.id)
@@ -674,7 +674,8 @@ async def test_provision_test_student_admin_is_403_inline_owner_check(
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"/teacher/subjects/{subject.id}?test_student=created"
 
 
 async def test_provision_test_student_missing_subject_is_404(
@@ -742,6 +743,26 @@ async def test_enter_as_test_student_cross_teacher_is_403(
         f"/teacher/subjects/{subject.id}/test-student/enter", follow_redirects=False
     )
     assert resp.status_code == 403
+
+
+async def test_enter_as_test_student_admin_succeeds_cross_teacher(
+    client: AsyncClient, db, admin, make_user
+) -> None:
+    await _make_test_group(db)
+    other = await make_user(role=UserRole.TEACHER, username="other")
+    subject = await _make_subject(db, owner_id=other.id)
+    owner_client = _client_for(other)
+    await owner_client.post(
+        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
+    )
+    await owner_client.aclose()
+
+    authenticate(client, admin)
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/test-student/enter", follow_redirects=False
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/portal"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

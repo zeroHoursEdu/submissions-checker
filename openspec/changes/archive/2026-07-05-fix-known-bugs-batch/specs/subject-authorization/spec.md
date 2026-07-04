@@ -1,11 +1,4 @@
-# Spec: Subject Authorization
-
-## Purpose
-
-Defines object-level authorization for subject-scoped resources, analytics
-scoping, and safe redirects — ensuring teachers only access their own subjects.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Subject-scoped object-level authorization
 A teacher SHALL only access subject-scoped resources for subjects they own;
@@ -35,6 +28,8 @@ ADMIN users may access all. Non-owners receive 403.
   subject owned by a different teacher
 - **THEN** the request succeeds (not 403)
 
+## ADDED Requirements
+
 ### Requirement: Teacher student roster is scoped to owned subjects
 The teacher-facing student roster listing SHALL be scoped to students enrolled in subjects the
 requesting teacher owns; an ADMIN SHALL see all students. A teacher who owns zero subjects SHALL
@@ -52,19 +47,3 @@ see zero students.
 #### Scenario: Admin sees the full roster
 - **WHEN** an ADMIN requests the student roster
 - **THEN** all students platform-wide appear in the response
-
-### Requirement: Analytics scoped to owned subjects
-Teacher analytics SHALL be limited to subjects owned by the requesting teacher;
-ADMIN may view all.
-
-#### Scenario: Cross-tenant student analytics blocked
-- **WHEN** a teacher requests analytics for a student not enrolled in any of
-  their subjects
-- **THEN** the response is 403 (or excludes that student's data)
-
-### Requirement: Safe redirect on language switch
-The language switcher SHALL only redirect to same-origin relative paths.
-
-#### Scenario: External redirect blocked
-- **WHEN** `set_language` is called with an absolute/external `Referer`
-- **THEN** the redirect falls back to a safe local path

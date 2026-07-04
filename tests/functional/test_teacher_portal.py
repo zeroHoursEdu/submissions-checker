@@ -228,6 +228,18 @@ async def test_delete_missing_subject_is_404(teacher_client: AsyncClient) -> Non
     assert resp.status_code == 404
 
 
+async def test_delete_admin_succeeds_cross_teacher(
+    client: AsyncClient, db, admin, make_user
+) -> None:
+    other = await make_user(role=UserRole.TEACHER, username="other")
+    subject = await _make_subject(db, owner_id=other.id)
+    authenticate(client, admin)
+    resp = await client.post(f"/teacher/subjects/{subject.id}/delete", follow_redirects=False)
+    assert resp.status_code == 303
+    await db.refresh(subject)
+    assert subject.status == SubjectStatus.DELETED
+
+
 # ── 3. Submission review: authorization + state transitions ──────────────────
 
 

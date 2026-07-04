@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from submissions_checker.services.docker_sandbox import (
+    MAX_OUTPUT_FILES,
     DockerSandbox,
     SandboxResult,
 )
@@ -29,12 +30,18 @@ def _fake_proc(stdout=b"", stderr=b"", returncode=0):
 
 
 def _patch_exec(proc):
-    """Patch create_subprocess_exec; return the patcher + a recorder for argv."""
-    recorder: dict = {}
+    """Patch create_subprocess_exec; return the patcher + a recorder for argv.
+
+    Records every call (not just the last) in `recorder["calls"]`, since a timed-out
+    run issues a second `docker kill` subprocess in addition to the original `docker
+    run` — `recorder["cmd"]` stays as a convenience alias for the most recent call.
+    """
+    recorder: dict = {"calls": []}
 
     async def fake_exec(*cmd, **kwargs):
         recorder["cmd"] = list(cmd)
         recorder["kwargs"] = kwargs
+        recorder["calls"].append(list(cmd))
         return proc
 
     p = patch(
@@ -173,7 +180,7 @@ async def test_run_timeout_kills_and_returns_sentinel(tmp_path: Path) -> None:
 
     proc.kill = _kill
 
-    patcher, _ = _patch_exec(proc)
+    patcher, rec = _patch_exec(proc)
     with patcher, patch(
         "submissions_checker.services.docker_sandbox.asyncio.wait_for",
         side_effect=asyncio.TimeoutError,
@@ -186,6 +193,54 @@ async def test_run_timeout_kills_and_returns_sentinel(tmp_path: Path) -> None:
     assert result.exit_code == -1
     assert "timed out" in result.stderr.lower()
     assert result.stdout == ""
+
+    # A timeout must also kill the actual container (docker_sandbox.py:84-96 bug #7),
+    # not just the local `docker run` CLI wrapper — `proc.kill()` alone leaves the
+    # container running under the daemon since --rm only removes it once it stops.
+    run_cmd, kill_cmd = rec["calls"]
+    assert run_cmd[:2] == ["docker", "run"]
+    name_idx = run_cmd.index("--name")
+    container_name = run_cmd[name_idx + 1]
+    assert container_name.startswith("submission-check-")
+    assert kill_cmd == ["docker", "kill", container_name]
+
+
+async def test_run_timeout_kill_failure_is_swallowed(tmp_path: Path) -> None:
+    """A `docker kill` racing against a container that already exited on its own
+    (or any kill failure) must not surface as an error — the timeout result is
+    still returned normally, not an unhandled exception."""
+    student = tmp_path / "s"
+    plugin = tmp_path / "p"
+    student.mkdir()
+    plugin.mkdir()
+
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(return_value=(b"", b""))
+    proc.returncode = -1
+    proc.kill = lambda: None
+
+    call_count = {"n": 0}
+
+    async def fake_exec(*cmd, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return proc  # the original `docker run`
+        raise OSError("container already gone")  # the `docker kill` call
+
+    with patch(
+        "submissions_checker.services.docker_sandbox.asyncio.create_subprocess_exec",
+        side_effect=fake_exec,
+    ), patch(
+        "submissions_checker.services.docker_sandbox.asyncio.wait_for",
+        side_effect=asyncio.TimeoutError,
+    ):
+        result = await DockerSandbox().run(
+            image="i", tool="python", script_path="c.py",
+            student_files_dir=student, plugin_dir=plugin, timeout=1,
+        )
+
+    assert result.exit_code == -1
+    assert "timed out" in result.stderr.lower()
 
 
 async def test_run_missing_docker_binary_raises_runtime_error(tmp_path: Path) -> None:
@@ -218,3 +273,18 @@ def test_read_output_dir_skips_large_and_missing(tmp_path: Path) -> None:
 
     files = sandbox._read_output_dir(out)
     assert files == {"small.txt": "hi"}
+
+
+def test_read_output_dir_caps_file_count(tmp_path: Path) -> None:
+    """A check script writing an excessive number of output files must not force
+    reading all of them into memory (docs/known_bugs.md #11)."""
+    out = tmp_path / "out"
+    out.mkdir()
+    cap = 5
+    for i in range(cap + 10):
+        (out / f"f{i}.txt").write_text(str(i), encoding="utf-8")
+
+    with patch("submissions_checker.services.docker_sandbox.MAX_OUTPUT_FILES", cap):
+        files = DockerSandbox()._read_output_dir(out)
+
+    assert len(files) == cap

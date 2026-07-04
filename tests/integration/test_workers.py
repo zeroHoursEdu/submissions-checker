@@ -104,14 +104,19 @@ async def test_outbox_processor_marks_message_error_on_failure(
 
 
 @pytest.mark.asyncio
-async def test_outbox_processor_errors_on_unknown_event_type(
+async def test_outbox_processor_drops_retired_event_type_without_retry(
     db_session: AsyncSession, monkeypatch
 ) -> None:
-    """A retired/legacy event type falls through to the error branch.
+    """A retired/legacy event type (docs/known_bugs.md #8) is marked ERROR and its
+    retry budget is pre-exhausted on the first attempt, instead of retrying
+    outbox_max_retries times against the same undispatchable event before going
+    silent.
 
-    This exercises the real dispatch routing table (no dispatch monkeypatch):
-    the deprecated PULL event has no handler and must be marked ERROR.
+    This exercises the real dispatch routing table (no dispatch monkeypatch): the
+    deprecated PULL event has no handler and must be dropped immediately.
     """
+    from submissions_checker.core.config import get_settings
+
     message = OutboxMessage(
         event_type=OutboxEventType.PULL,
         payload={},
@@ -126,5 +131,33 @@ async def test_outbox_processor_errors_on_unknown_event_type(
 
     await db_session.refresh(message)
     assert message.state == OutboxMessageState.ERROR
-    assert message.retry_count == 1
-    assert "Unknown event type" in (message.error_message or "")
+    assert message.retry_count >= get_settings().outbox_max_retries
+    assert "Retired event type" in (message.error_message or "")
+
+    # Excluded from the next poll's retry_count < outbox_max_retries filter.
+    pending = (
+        await db_session.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.state.in_(
+                    [OutboxMessageState.PENDING, OutboxMessageState.ERROR]
+                ),
+                OutboxMessage.retry_count < get_settings().outbox_max_retries,
+            )
+        )
+    ).scalars().all()
+    assert message not in pending
+
+
+@pytest.mark.asyncio
+async def test_dispatch_still_errors_on_a_truly_unhandled_event_type() -> None:
+    """The generic unknown-type branch (distinct from the retired-type branch)
+    still raises for an event type that is neither dispatched nor retired."""
+    from types import SimpleNamespace
+
+    from submissions_checker.workers.scheduled.outbox_processor import (
+        dispatch_outbox_message,
+    )
+
+    message = SimpleNamespace(id=1, event_type=SimpleNamespace(value="SOMETHING_ELSE"))
+    with pytest.raises(ValueError, match="Unknown event type"):
+        await dispatch_outbox_message(db=None, message=message)

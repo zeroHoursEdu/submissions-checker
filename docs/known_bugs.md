@@ -46,7 +46,7 @@ is currently `NULL`). Out of scope for `disable-plugin-autoloading`.
 
 ---
 
-## 2. 🔴 Admin login redirects into a 403
+## 2. ✅ Admin login redirects into a 403
 
 **Where:** `src/submissions_checker/api/routes/auth.py`, login handler picks
 `redirect_url = "/teacher" if role == UserRole.TEACHER else "/portal"`. There is no branch for
@@ -57,9 +57,12 @@ app either (confirmed: no route creates an ADMIN user), so this path is presumab
 exercised by whoever seeds an admin directly in the DB, but it's still broken UX whenever it
 is exercised.
 
+**Fixed (2026-07-05):** `_redirect_by_role` now returns `/admin` for `UserRole.ADMIN`
+(`fix-known-bugs-batch`).
+
 ---
 
-## 3. 🔴 Ownership check inconsistency lets ADMIN get blocked on a few subject-scoped routes
+## 3. ✅ Ownership check inconsistency lets ADMIN get blocked on a few subject-scoped routes
 
 **Where:** `teacher_portal.py` — `delete_subject` (line 152), `provision_test_student` (line
 168), `enter_as_test_student` (line 226) each hand-roll `if subject.owner_id !=
@@ -71,15 +74,21 @@ any teacher's subject, but gets 403 trying to delete that subject or provision/e
 student — inconsistent with sibling endpoints, and (combined with bug #1) means **nobody**,
 not even an admin, can delete or test-drive a plugin-autoloaded subject via the UI.
 
+**Fixed (2026-07-05):** all three routes now call `require_subject_access` instead of
+hand-rolling the owner check (`fix-known-bugs-batch`).
+
 ---
 
-## 4. 🔴 Unscoped global student roster leak
+## 4. ✅ Unscoped global student roster leak
 
 **Where:** `teacher_portal.py:658-698`, `GET /teacher/students`. No subject/ownership `WHERE`
 clause at all. Any authenticated TEACHER — even one who owns zero subjects — can view every
 student's full name, email, group, username, active flag, and first-login timestamp,
 platform-wide. Inconsistent with the strict per-subject ownership model enforced everywhere
 else in this file.
+
+**Fixed (2026-07-05):** the query now joins through `SubjectsStudents`/`Subject` and filters to
+`Subject.owner_id == current_user.user_id`, skipped for ADMIN (`fix-known-bugs-batch`).
 
 ---
 
@@ -93,7 +102,7 @@ reachable API surface that silently does nothing — looks like a real endpoint 
 
 ---
 
-## 6. 🔴 A crashed check script permanently wedges the submission (no student/teacher-visible error)
+## 6. ✅ A crashed check script permanently wedges the submission (no student/teacher-visible error)
 
 **Where:** `check_core.py:256-269` raises `CheckExecutionError` on a non-zero check-script exit
 or missing/invalid `result.json`. `check_tasks.py:126-129` has no try/except around
@@ -113,23 +122,35 @@ identically 5 times (`"No transition for event='start_validation' from
 status=<SubmissionStatus.VALIDATING>"`) before giving up. Confirms this is a real, hit-in-
 practice failure mode, not just a theoretical read of the code.
 
+**Fixed (2026-07-05):** `execute_check_task` now catches `check_core.CheckExecutionError`
+around the `run_check()` call and routes it through `_fail_validation`, so the submission
+converges on `VALIDATION_FAILED` with the error recorded instead of raising and getting stuck
+mid-transition (`fix-known-bugs-batch`).
+
 ---
 
-## 7. 🟡 Sandbox timeout kills the CLI wrapper, not the container
+## 7. ✅ Sandbox timeout kills the CLI wrapper, not the container
 
 **Where:** `docker_sandbox.py:84-96` — on `asyncio.TimeoutError`, calls `proc.kill()` on the
 local `docker run` subprocess. `--rm` is honored by the (now-dead) CLI process, not
 necessarily the daemon in every failure mode; a hung/slow student script can in principle keep
 running inside an orphaned container past the configured timeout, consuming CPU/memory.
 
+**Fixed (2026-07-05):** each sandbox run gets a unique `--name`, and the timeout handler now
+issues `docker kill <name>` in addition to killing the local process (`fix-known-bugs-batch`).
+
 ---
 
-## 8. 🟡 Retired legacy outbox events can wedge silently
+## 8. ✅ Retired legacy outbox events can wedge silently
 
 **Where:** `outbox_processor.py:162-194` — a stray leftover `PULL`/`REVIEW`/`NOTIFY` outbox
 row (the retired GitHub-PR-ingest event types) falls into the "unknown event type" branch,
 raises `ValueError`, and is retried up to `outbox_max_retries` with no operator-facing alert
 before landing permanently in ERROR.
+
+**Fixed (2026-07-05):** retired event types now get an explicit branch that logs
+`outbox_retired_event_type_dropped` and pre-exhausts the retry budget, so they fail once
+instead of retrying to exhaustion (`fix-known-bugs-batch`).
 
 ---
 
@@ -172,6 +193,10 @@ zip-of-zips (not currently exploitable since nothing auto-recurses into nested a
 worth a note for the future), and `docker_sandbox.py:123-133`'s `_read_output_dir` caps each
 output file at 1MB but has no cap on the *number* of files a check script can write to
 `/output` before they're all read into memory.
+
+**Partially fixed (2026-07-05):** `_read_output_dir` now stops at `MAX_OUTPUT_FILES` (1,000)
+(`fix-known-bugs-batch`). The nested-archive recursion guard remains a future-facing note —
+not currently exploitable, left open.
 
 ---
 

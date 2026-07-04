@@ -147,11 +147,7 @@ async def delete_subject(
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
-    if subject.owner_id != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Only the subject owner can delete this subject")
+    subject = await require_subject_access(db, subject_id, current_user)
     subject.status = SubjectStatus.DELETED
     await db.commit()
     return RedirectResponse("/teacher", status_code=303)
@@ -163,11 +159,7 @@ async def provision_test_student(
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
-    if subject.owner_id != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Only the subject owner can provision a test student")
+    await require_subject_access(db, subject_id, current_user)
 
     existing = await db.execute(
         select(SubjectTestStudent).where(SubjectTestStudent.subject_id == subject_id)
@@ -221,11 +213,7 @@ async def enter_as_test_student(
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
-    subject = await db.get(Subject, subject_id)
-    if subject is None:
-        raise HTTPException(status_code=404, detail="Subject not found")
-    if subject.owner_id != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Only the subject owner can enter as the test student")
+    await require_subject_access(db, subject_id, current_user)
 
     sts_result = await db.execute(
         select(SubjectTestStudent).where(SubjectTestStudent.subject_id == subject_id)
@@ -664,8 +652,9 @@ async def teacher_students(
     imported: int = 0,
     skipped: int = 0,
 ) -> HTMLResponse:
-    """Student registration overview: list all students with account/email/login status."""
-    rows_result = await db.execute(
+    """Student registration overview: list students with account/email/login status,
+    scoped to students enrolled in subjects the current teacher owns (ADMIN sees all)."""
+    query = (
         select(
             Student.id,
             Student.full_name,
@@ -686,9 +675,21 @@ async def teacher_students(
             ),
         )
         .outerjoin(UserLogin, UserLogin.user_id == User.id)
-        .group_by(Student.id, Group.name, User.username, User.is_active, OutboxMessage.state)
-        .order_by(Student.created_at.desc())
     )
+    if current_user.role != UserRole.ADMIN:
+        query = query.join(
+            SubjectsStudents, SubjectsStudents.student_id == Student.id
+        ).join(
+            Subject,
+            and_(
+                Subject.id == SubjectsStudents.subject_id,
+                Subject.owner_id == current_user.user_id,
+            ),
+        )
+    query = query.group_by(
+        Student.id, Group.name, User.username, User.is_active, OutboxMessage.state
+    ).order_by(Student.created_at.desc())
+    rows_result = await db.execute(query)
     students = [row._asdict() for row in rows_result]
 
     return render(request, "teacher_students.html", {

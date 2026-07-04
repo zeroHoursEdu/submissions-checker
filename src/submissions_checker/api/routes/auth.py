@@ -43,7 +43,11 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 
 def _redirect_by_role(role: UserRole) -> str:
-    return "/teacher" if role == UserRole.TEACHER else "/portal"
+    if role == UserRole.TEACHER:
+        return "/teacher"
+    if role == UserRole.ADMIN:
+        return "/admin"
+    return "/portal"
 
 
 @router.get("/login", response_class=HTMLResponse)

@@ -131,3 +131,47 @@ async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None
     await check_tasks.execute_check_task(db, {"submission_id": 1})
     assert submission.status == SubmissionStatus.VALIDATION_FAILED
     assert "check_reason" in submission.test_results
+
+
+async def test_worker_check_execution_error_fails_validation_not_wedged(
+    tmp_path, monkeypatch
+) -> None:
+    """A crashed check script (non-zero exit, bad result.json) must fail the
+    submission cleanly instead of leaving it stuck in VALIDATING with no visible
+    error (docs/known_bugs.md #6): execute_check_task must not propagate
+    check_core.CheckExecutionError, and the outbox processor must therefore never
+    see an exception to retry — there is no second attempt at all."""
+    zip_path = tmp_path / "s.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("solution.py", "print('hi')\n")
+
+    subject = SimpleNamespace(id=5)
+    subjects_assignment = SimpleNamespace(code="lab1", subject=subject)
+    student_assignment = SimpleNamespace(variant="3", subjects_assignment=subjects_assignment)
+    submission = SimpleNamespace(
+        id=1,
+        plugin_config_id=99,
+        source_metadata={"saved_as": "s.zip"},
+        status=SubmissionStatus.PENDING,
+        test_results=None,
+        students_assignment=student_assignment,
+    )
+    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
+    db = _FakeDB(submission, config_record)
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings",
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None))
+
+    async def crashing_run_check(*, plan, submission_dir, plugin_dir, sandbox):
+        raise check_core.CheckExecutionError("check script exited 1: NameError: boom")
+
+    monkeypatch.setattr(check_tasks.check_core, "run_check", crashing_run_check)
+
+    # Must not raise — this is exactly what previously propagated out of
+    # execute_check_task, got caught by the outbox processor's generic handler,
+    # and retried against a submission already past PENDING.
+    await check_tasks.execute_check_task(db, {"submission_id": 1})
+
+    assert submission.status == SubmissionStatus.VALIDATION_FAILED
+    assert "boom" in submission.test_results["check_reason"]

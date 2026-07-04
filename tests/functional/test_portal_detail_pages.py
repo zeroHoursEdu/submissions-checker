@@ -262,8 +262,11 @@ async def test_teacher_students_overview_lists_students(
     client: AsyncClient, db, teacher, make_user, make_student
 ) -> None:
     # A REAL student plus a STUDENT user account for join coverage, and a
-    # SEND_CREDENTIALS outbox row matched by email.
+    # SEND_CREDENTIALS outbox row matched by email. Enrolled in a subject the
+    # teacher owns, since the roster is scoped to owned subjects.
+    subject = await _make_subject(db, owner_id=teacher.id)
     student = await make_student(full_name="Linus Pauling", email="linus@example.com")
+    await _enroll(db, subject.id, student.id)
     await make_user(role=UserRole.STUDENT, username="linus", student=student)
     db.add(OutboxMessage(
         event_type=OutboxEventType.SEND_CREDENTIALS,
@@ -275,6 +278,53 @@ async def test_teacher_students_overview_lists_students(
     resp = await client.get("/teacher/students")
     assert resp.status_code == 200
     assert "Linus Pauling" in resp.text
+
+
+async def test_teacher_students_overview_excludes_other_teachers_students(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    other = await make_user(role=UserRole.TEACHER, username="other")
+    other_subject = await _make_subject(db, owner_id=other.id, name="Other Subject")
+    other_student = await make_student(full_name="Not Mine", email="notmine@example.com")
+    await _enroll(db, other_subject.id, other_student.id)
+
+    my_subject = await _make_subject(db, owner_id=teacher.id, name="Mine")
+    my_student = await make_student(full_name="Is Mine", email="ismine@example.com")
+    await _enroll(db, my_subject.id, my_student.id)
+    await db.commit()
+
+    authenticate(client, teacher)
+    resp = await client.get("/teacher/students")
+    assert resp.status_code == 200
+    assert "Is Mine" in resp.text
+    assert "Not Mine" not in resp.text
+
+
+async def test_teacher_students_overview_empty_for_teacher_with_no_subjects(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    await make_student(full_name="Nobodys Student", email="nobody@example.com")
+    await db.commit()
+
+    authenticate(client, teacher)
+    resp = await client.get("/teacher/students")
+    assert resp.status_code == 200
+    assert "Nobodys Student" not in resp.text
+
+
+async def test_teacher_students_overview_admin_sees_all(
+    client: AsyncClient, db, admin, make_user, make_student
+) -> None:
+    other = await make_user(role=UserRole.TEACHER, username="other")
+    other_subject = await _make_subject(db, owner_id=other.id, name="Other Subject")
+    student = await make_student(full_name="Everyones Visible", email="everyone@example.com")
+    await _enroll(db, other_subject.id, student.id)
+    await db.commit()
+
+    authenticate(client, admin)
+    resp = await client.get("/teacher/students")
+    assert resp.status_code == 200
+    assert "Everyones Visible" in resp.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
