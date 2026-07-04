@@ -326,7 +326,12 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
 
   if (hasRule('keyboard_shortcut')) {
     document.addEventListener('keydown', e => {
-      const sus = (e.ctrlKey && 'casp'.includes((e.key || '').toLowerCase())) ||
+      const mod = e.ctrlKey || e.metaKey;
+      const key = (e.key || '').toLowerCase();
+      const sus = (mod && 'casp'.includes(key)) ||
+                  (mod && key === 'u') ||
+                  (mod && e.shiftKey && 'ijc'.includes(key)) ||
+                  (mod && e.altKey && 'ijc'.includes(key)) ||
                   e.key === 'F12' || e.key === 'PrintScreen';
       if (sus) { e.preventDefault(); report('keyboard_shortcut'); }
     });

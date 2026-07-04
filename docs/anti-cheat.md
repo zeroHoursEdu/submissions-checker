@@ -16,7 +16,7 @@ The system detects suspicious browser events during a quiz and responds accordin
 | `window_blur` | `window.blur` | Browser window lost focus (alt+tab, clicked another window) |
 | `resize` | `window.resize` ≥ 150 px | Window resized — may indicate split-screen with notes |
 | `copy_attempt` | `document.copy` | Student pressed Ctrl+C or used browser copy |
-| `keyboard_shortcut` | `keydown` | Ctrl+C/A/S/P, F12, PrintScreen |
+| `keyboard_shortcut` | `keydown` | Ctrl/Cmd+C/A/S/P, Ctrl/Cmd+U (view source), Ctrl+Shift+I/J/C or Cmd+Option+I/J/C (devtools), F12, PrintScreen |
 | `right_click` | `contextmenu` | Right-click (search, translate, inspect) |
 | `fullscreen_exit` | `fullscreenchange` | Student exited forced-fullscreen mode |
 
@@ -26,6 +26,9 @@ The system detects suspicious browser events during a quiz and responds accordin
 - Screen-reading tools / accessibility software
 - Browser extensions that intercept or override JavaScript
 - OS-level clipboard operations before the quiz page is focused
+- Developer tools or view-source opened via the browser's menu bar instead of a keyboard
+  shortcut — no DOM event fires for menu-driven browser actions, so there is nothing for
+  page JavaScript to detect
 
 ---
 
