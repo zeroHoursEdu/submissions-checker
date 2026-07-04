@@ -238,6 +238,40 @@ async def test_event_fail_sets_force_fail_and_keeps_in_progress(
     assert attempt.status == QuizAttemptStatus.IN_PROGRESS
 
 
+async def test_event_fail_and_reduce_time_unaffected_by_notify_student_false(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    """notify_student only gates the client-rendered banner/sound — report_violation
+    never reads it, so rule matching, penalties, and _force_fail are unchanged."""
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    anti_cheat = {
+        "notify_student": False,
+        "rules": [
+            _rule("paste", 1, {"type": "fail", "message": "out"}),
+            _rule("blur", 1, {"type": "reduce_time", "penalty_seconds": 30, "message": "-30s"}),
+        ],
+    }
+    attempt = await _make_attempt(
+        db, sub.id, cfg,
+        config_snapshot={"anti_cheat": anti_cheat, "time_limit_minutes": 10},
+        started_at=datetime.now(UTC),
+    )
+
+    r_fail = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "paste"})
+    assert r_fail.json()["action"] == "fail"
+    await db.refresh(attempt)
+    assert attempt.violations["_force_fail"] is True
+    assert attempt.status == QuizAttemptStatus.IN_PROGRESS
+
+    r_reduce = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "blur"})
+    body = r_reduce.json()
+    assert body["action"] == "reduce_time"
+    assert 560 <= body["seconds_remaining"] <= 570
+    await db.refresh(attempt)
+    assert attempt.violations["_time_penalty_seconds"] == 30
+
+
 async def test_event_message_template_interpolates_count_and_threshold(
     student_client: AsyncClient, db, student_user
 ) -> None:
@@ -842,6 +876,57 @@ async def test_show_in_progress_proctored_quiz_renders(
     )
     r = await student_client.get(f"/portal/quiz/{attempt.id}", follow_redirects=False)
     assert r.status_code == 200
+
+
+# =============================================================================
+# 1b. notify_student rendering (banner + sound gate)
+# =============================================================================
+
+
+async def test_notify_student_defaults_true_when_key_absent(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    """No notify_student key configured: both the passive block's embedded
+    anti_cheat JSON and the camera module's server-evaluated default read true."""
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(
+        db, sub.id, cfg,
+        config_snapshot={
+            "anti_cheat": {
+                "rules": [_rule("tab_switch", 3, {"type": "warn", "message": "m"})],
+                "camera": {"enabled": True},
+            },
+        },
+        started_at=datetime.now(UTC),
+    )
+    r = await student_client.get(f"/portal/quiz/{attempt.id}", follow_redirects=False)
+    assert r.status_code == 200
+    assert "const notifyStudent = true;" in r.text
+
+
+async def test_notify_student_explicit_false_rendered_in_camera_block(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    """notify_student: false is threaded into the camera module's config,
+    independent of the camera sub-object it otherwise reads from."""
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(
+        db, sub.id, cfg,
+        config_snapshot={
+            "anti_cheat": {
+                "notify_student": False,
+                "rules": [_rule("tab_switch", 3, {"type": "warn", "message": "m"})],
+                "camera": {"enabled": True},
+            },
+        },
+        started_at=datetime.now(UTC),
+    )
+    r = await student_client.get(f"/portal/quiz/{attempt.id}", follow_redirects=False)
+    assert r.status_code == 200
+    assert "const notifyStudent = false;" in r.text
+    assert '"notify_student": false' in r.text  # embedded in the passive block's ac json
 
 
 async def test_start_quiz_builds_choices_format_and_extra_types(

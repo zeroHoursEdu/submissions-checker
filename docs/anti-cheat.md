@@ -77,6 +77,7 @@ The full config lives inside the quiz template's `config` JSONB:
 | `text_protection` | boolean | false | Disables text selection (`user-select: none`) and blocks the browser `copy` event |
 | `disable_right_click` | boolean | false | Blocks the context menu |
 | `require_fullscreen` | boolean | false | Requests Fullscreen API on quiz load; auto re-enters if exited (unless `fullscreen_exit` rule fires) |
+| `notify_student` | boolean | true | Whether the student sees a banner and hears an audible alert when a `warn`/`reduce_time`/`fail` action fires. Has no effect on `flag`, which is always silent to the student. Set to `false` for quieter enforcement while still recording violations, penalties, and auto-fails normally. |
 | `rules` | array | [] | List of violation rules (see below) |
 
 ### Rule fields
@@ -99,10 +100,12 @@ The full config lives inside the quiz template's `config` JSONB:
 
 | Type | Effect on student | Effect on grade |
 |---|---|---|
-| `fail` | Quiz auto-submitted immediately with a red error banner | Attempt status = `VIOLATION_FAIL`, graded as not passed |
-| `warn` | Amber warning banner (dismisses after 7 s) | No grade impact; violation count recorded |
-| `reduce_time` | Amber banner with new time; timer jumps back | No direct grade impact; may lead to timeout |
-| `flag` | No visible message | Attempt flagged for teacher review (visible in the assignment grade table) |
+| `fail` | Quiz auto-submitted immediately with a red error banner + alert sound (if `notify_student`) | Attempt status = `VIOLATION_FAIL`, graded as not passed |
+| `warn` | Amber warning banner + alert sound, dismisses after 7 s (if `notify_student`) | No grade impact; violation count recorded |
+| `reduce_time` | Amber banner with new time + alert sound (if `notify_student`); timer jumps back | No direct grade impact; may lead to timeout |
+| `flag` | No visible message, ever — unaffected by `notify_student` | Attempt flagged for teacher review (visible in the assignment grade table) |
+
+Setting `notify_student: false` suppresses the banner and sound for `fail`/`warn`/`reduce_time` too — useful for a teacher who wants the deterrent effect of `flag`-style covert enforcement across all action types, while `fail`/`reduce_time` still apply their real effect on the attempt.
 
 **Note:** Each rule fires at most once per threshold crossing. If `threshold = 3` and student hits the event 5 times, the action fires when count reaches 3 and does not repeat at 4 or 5.
 

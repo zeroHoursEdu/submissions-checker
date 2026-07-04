@@ -12,6 +12,13 @@ deprecated and will be overwritten on restart when a plugin config is present.
   variants_required: bool                                              (default: false)
   sandbox:           dict — image, tool, commands, resource limits, visibility flags
   variants:          dict[str, dict] — per-variant command overrides
+
+Quiz config (only relevant when review_mode == "tests_then_quiz") is NOT part of this
+JSONB — it lives in the raw config.yml blob on SubjectPluginConfig.config, under
+assignments.<code>.quiz. See docs/anti-cheat.md for its `anti_cheat` sub-schema,
+including `anti_cheat.notify_student` (bool, default true) — controls whether the
+student sees/hears a notification on warn/reduce_time/fail violations (flag stays
+silent regardless).
 """
 
 from __future__ import annotations

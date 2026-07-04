@@ -230,6 +230,7 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
   const ac = {{ anti_cheat_config | tojson }};
   const rules = ac.rules || [];
   const attemptId = {{ attempt.id }};
+  const notifyStudent = ac.notify_student !== false;
 
   function hasRule(ev) { return rules.some(r => r.event === ev); }
 
@@ -242,6 +243,32 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
     if (level !== 'error') setTimeout(() => b.classList.add('hidden'), 7000);
   }
 
+  // Short synthesized alert tone — no external audio asset, shared across this
+  // block and the camera-proctoring module block via window.__playAntiCheatBeep.
+  function playAlertSound() {
+    try {
+      if (!window.__acAudioCtx) {
+        window.__acAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const ctx = window.__acAudioCtx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch (_) {}
+  }
+  window.__playAntiCheatBeep = playAlertSound;
+
+  function notify(msg, level) {
+    if (!notifyStudent) return;
+    showBanner(msg, level);
+    playAlertSound();
+  }
+
   async function report(type) {
     try {
       const res = await fetch(`/portal/quiz/${attemptId}/event`, {
@@ -251,13 +278,13 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
       });
       const d = await res.json();
       if (d.action === 'fail') {
-        showBanner(d.message || 'Your quiz has been automatically failed.', 'error');
+        notify(d.message || 'Your quiz has been automatically failed.', 'error');
         setTimeout(() => document.getElementById('quiz-form').submit(), 2000);
       } else if (d.action === 'reduce_time' && d.seconds_remaining !== null) {
         remaining = d.seconds_remaining;
-        showBanner(d.message, 'warning');
+        notify(d.message, 'warning');
       } else if (d.action === 'warn') {
-        showBanner(d.message, 'warning');
+        notify(d.message, 'warning');
       }
     } catch (_) {}
   }
@@ -331,6 +358,9 @@ import { FilesetResolver, FaceLandmarker }
 const cfg = {{ proctoring_config | tojson }};
 const attemptId = {{ attempt.id }};
 const det = cfg.detectors || {};
+// notify_student lives on the parent anti_cheat block, not on the camera sub-object,
+// since it also governs the passive anti-cheat block above.
+const notifyStudent = {{ anti_cheat_config.get('notify_student', True) | tojson }};
 
 const video = document.getElementById('proctor-video');
 const canvas = document.getElementById('proctor-canvas');
@@ -356,6 +386,19 @@ function failGate(msg) {
   if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
 }
 function openGate() { gate.classList.add('hidden'); }
+
+// Reuses the beep synthesized by the passive anti-cheat block above (a classic
+// <script>, which runs before this deferred module executes) so there's one
+// shared AudioContext instead of a second one for camera-sourced violations.
+function playAlertSound() {
+  if (window.__playAntiCheatBeep) window.__playAntiCheatBeep();
+}
+
+function notify(msg, level) {
+  if (!notifyStudent) return;
+  showBanner(msg, level);
+  playAlertSound();
+}
 
 // Capture a frame and upload as evidence (best-effort; never blocks the quiz).
 async function captureSnapshot(eventType) {
@@ -383,13 +426,13 @@ async function report(type) {
     const action = d.action || 'none';
     if (cfg.capture_snapshots && (cfg.snapshot_on || []).includes(action)) captureSnapshot(type);
     if (action === 'fail') {
-      showBanner(d.message || 'Your quiz has been automatically failed.', 'error');
+      notify(d.message || 'Your quiz has been automatically failed.', 'error');
       setTimeout(() => document.getElementById('quiz-form').submit(), 2000);
     } else if (action === 'reduce_time' && d.seconds_remaining !== null) {
       window.remaining = d.seconds_remaining;
-      showBanner(d.message, 'warning');
+      notify(d.message, 'warning');
     } else if (action === 'warn') {
-      showBanner(d.message, 'warning');
+      notify(d.message, 'warning');
     }
   } catch (_) {}
 }
