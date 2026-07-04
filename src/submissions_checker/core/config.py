@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     # Subject plugins directory (gitignored; each subdirectory is a plugin with config.yml)
     plugins_dir: str = "plugins"
 
+    # Host-absolute path to the plugins directory, used only for Docker-in-Docker sandbox bind
+    # mounts (the host daemon can't resolve plugins_dir's container-relative path). Falls back
+    # to plugins_dir when unset.
+    host_plugins_dir: str | None = None
+
     # S3-compatible object storage (images and assignment content files)
     s3_bucket_name: str = "submissions-checker"
     s3_endpoint_url: str | None = None           # set to http://localstack:4566 in dev

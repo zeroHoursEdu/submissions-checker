@@ -48,6 +48,7 @@ services:
       - S3_PUBLIC_BASE_URL=http://localhost:4566/submissions-checker
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
+      - HOST_PLUGINS_DIR=${PWD}/plugins
     env_file:
       - .env
     ports:
@@ -64,6 +65,7 @@ services:
       - ./i18n:/app/i18n
       - ./plugins:/app/plugins
       - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
     depends_on:
       postgres:
         condition: service_healthy

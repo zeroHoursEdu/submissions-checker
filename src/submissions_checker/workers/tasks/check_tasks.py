@@ -89,7 +89,8 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         return
 
     settings = get_settings()
-    plugin_dir = Path(settings.plugins_dir) / (config_record.config.get("subjectCode") or "")
+    plugins_root = settings.host_plugins_dir or settings.plugins_dir
+    plugin_dir = Path(plugins_root) / (config_record.config.get("subjectCode") or "")
 
     # Locate and extract the submitted ZIP
     saved_as = (submission.source_metadata or {}).get("saved_as")
