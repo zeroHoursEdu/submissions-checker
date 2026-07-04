@@ -8,6 +8,7 @@ transitions and outbox messages.
 
 from __future__ import annotations
 
+import os
 import tempfile
 import zipfile
 from pathlib import Path
@@ -110,6 +111,16 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
             logger.error("check_task_unsafe_archive", submission_id=submission_id, error=str(exc))
             _fail_validation(submission, f"Submitted ZIP archive is unsafe: {exc}")
             return
+
+        # Subject images drop to a non-root user (e.g. uid 10001), so every extracted file
+        # and directory must be traversable/readable by that user, regardless of the mode
+        # bits stored in the archive entries — mirrors the /output widening below.
+        os.chmod(extract_path, 0o755)
+        for root, dirs, files in os.walk(extract_path):
+            for name in dirs:
+                os.chmod(Path(root) / name, 0o755)
+            for name in files:
+                os.chmod(Path(root) / name, 0o644)
 
         # ── Validation + testing run in the shared core ────────────────────────
         transition(submission, "start_validation")
