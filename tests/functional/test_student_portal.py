@@ -112,14 +112,14 @@ async def _consent(db, student_id: int) -> None:
         "/portal/summary",
         "/portal/subjects/1",
         "/portal/subjects/1/assignments/1",
-        "/portal/notification-preferences",
+        "/portal/settings",
     ],
 )
 async def test_anonymous_rejected(client: AsyncClient, path: str) -> None:
     assert (await client.get(path)).status_code == 401
 
 
-@pytest.mark.parametrize("path", ["/portal", "/portal/summary", "/portal/notification-preferences"])
+@pytest.mark.parametrize("path", ["/portal", "/portal/summary", "/portal/settings"])
 async def test_teacher_forbidden(teacher_client: AsyncClient, path: str) -> None:
     # StudentUser is STUDENT-only; TEACHER hits the role guard.
     assert (await teacher_client.get(path)).status_code == 403
@@ -479,7 +479,7 @@ async def test_summary_renders_for_consented_student(
 
 
 async def test_notification_prefs_page_ok(student_client: AsyncClient) -> None:
-    resp = await student_client.get("/portal/notification-preferences")
+    resp = await student_client.get("/portal/settings")
     assert resp.status_code == 200
 
 

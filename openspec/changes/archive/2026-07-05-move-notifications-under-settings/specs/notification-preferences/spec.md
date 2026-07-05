@@ -1,11 +1,4 @@
-# notification-preferences
-
-## Purpose
-
-Defines student-controlled, per-case-and-method notification preferences (opt-out model), and
-the portal UI for viewing and toggling them.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Student can view notification preferences
 The system SHALL provide notification preferences as a "Notifications" section within a Settings page at `GET /portal/settings`, showing all available notification cases and methods, with the current enabled/disabled state for the authenticated student.

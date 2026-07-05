@@ -573,7 +573,7 @@ _ALL_METHODS: list[tuple[NotificationMethod, str]] = [
 ]
 
 
-@router.get("/notification-preferences", response_class=HTMLResponse)
+@router.get("/settings", response_class=HTMLResponse)
 async def notification_preferences_page(
     request: Request,
     db: DBSession,
@@ -594,7 +594,7 @@ async def notification_preferences_page(
             methods.append({"method": method, "method_label": method_label, "enabled": enabled})
         preferences.append({"case": case, "case_label": case_label, "methods": methods})
 
-    return render(request, "student_notification_preferences.html", {"current_user": current_user, "preferences": preferences})
+    return render(request, "student_settings.html", {"current_user": current_user, "preferences": preferences})
 
 
 @router.post("/notification-preferences/{case}/{method}/toggle")
@@ -618,4 +618,4 @@ async def toggle_notification_preference(
     else:
         pref.enabled = not pref.enabled
     await db.commit()
-    return RedirectResponse(url="/portal/notification-preferences", status_code=303)
+    return RedirectResponse(url="/portal/settings", status_code=303)

@@ -1,18 +1,22 @@
 {% extends "base.html" %}
 
-{% block title %}{{ vocab.notifications.prefs_title }}{% endblock %}
+{% block title %}{{ vocab.settings.page_title }}{% endblock %}
 
 {% block breadcrumbs %}
   <span class="text-indigo-400 mx-1">/</span>
   <a href="/portal" class="text-indigo-200 hover:text-white text-sm transition-colors">{{ vocab.student.portal_tab }}</a>
   <span class="text-indigo-400 mx-1">/</span>
-  <span class="text-white text-sm font-medium">{{ vocab.notifications.prefs_title }}</span>
+  <span class="text-white text-sm font-medium">{{ vocab.settings.page_title }}</span>
 {% endblock %}
 
 {% block content %}
 <div class="max-w-2xl mx-auto">
   <div class="mb-6">
-    <h1 class="text-2xl font-bold text-slate-900">{{ vocab.notifications.prefs_title }}</h1>
+    <h1 class="text-2xl font-bold text-slate-900">{{ vocab.settings.page_title }}</h1>
+  </div>
+
+  <div class="mb-3">
+    <h2 class="text-lg font-semibold text-slate-800">{{ vocab.notifications.prefs_title }}</h2>
     <p class="text-slate-500 mt-1 text-sm">{{ vocab.notifications.prefs_subtitle }}</p>
   </div>
 

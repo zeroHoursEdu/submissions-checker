@@ -9,7 +9,7 @@ nav:
   role_student: Студент
   notifications: Сповіщення
   admin_link: Адмін
-  notification_prefs_link: Сповіщення
+  settings_link: Налаштування
   sign_out: Вийти
   sign_in: Увійти
 
@@ -527,6 +527,9 @@ feedback:
   not_found_body: Це посилання для відгуку недійсне або застаріло. Перевірте свою електронну пошту для правильного посилання.
   already_submitted_heading: Вже надіслано
   already_submitted_body: Ви вже надіслали відгук за цим посиланням. Кожне посилання можна використати лише один раз.
+
+settings:
+  page_title: Налаштування
 
 notifications:
   page_title: Сповіщення
