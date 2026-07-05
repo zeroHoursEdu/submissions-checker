@@ -194,6 +194,22 @@
       {% else %}
       <p class="text-sm text-slate-500 mb-4">Create a test student to verify that your assignments and grading setup work correctly before real students enroll.</p>
       <form method="POST" action="/teacher/subjects/{{ subject.id }}/test-student">
+        {% for a in assignments %}
+          {% set variants = (a.config or {}).get('variants') or {} %}
+          {% if variants %}
+          <div class="mb-3">
+            <label class="block text-xs font-medium text-slate-500 mb-1">{{ a.title }} — variant</label>
+            <select name="variant_{{ a.code }}" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5">
+              {% if not a.config.get('variants_required') %}
+              <option value="">No variant</option>
+              {% endif %}
+              {% for v in variants.keys() | sort %}
+              <option value="{{ v }}">{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endif %}
+        {% endfor %}
         <button type="submit"
                 class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-teal-300 bg-teal-50 text-teal-700 text-sm font-medium hover:bg-teal-100 transition-colors">
           Create Test Student

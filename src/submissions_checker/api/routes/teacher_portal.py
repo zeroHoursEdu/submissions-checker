@@ -156,6 +156,7 @@ async def delete_subject(
 @router.post("/subjects/{subject_id}/test-student")
 async def provision_test_student(
     subject_id: int,
+    request: Request,
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
@@ -195,11 +196,27 @@ async def provision_test_student(
     db.add(SubjectsStudents(subject_id=subject_id, student_id=student.id))
     await db.flush()
 
-    sa_ids_result = await db.execute(
-        select(SubjectsAssignment.id).where(SubjectsAssignment.subject_id == subject_id)
+    form = await request.form()
+    sa_rows_result = await db.execute(
+        select(SubjectsAssignment.id, SubjectsAssignment.code, SubjectsAssignment.config)
+        .where(SubjectsAssignment.subject_id == subject_id)
     )
-    for (sa_id_val,) in sa_ids_result:
-        db.add(StudentAssignment(student_id=student.id, subjects_assignment_id=sa_id_val))
+    for sa_id_val, sa_code, sa_config in sa_rows_result:
+        sa_config = sa_config or {}
+        variants: dict = sa_config.get("variants") or {}
+        variant: str | None = None
+        if variants:
+            submitted = form.get(f"variant_{sa_code}")
+            if submitted in variants:
+                variant = submitted
+            elif sa_config.get("variants_required"):
+                # Always assign a valid variant for required assignments, even if the
+                # teacher didn't touch the selector — otherwise the test student can't
+                # submit at all (docs/known_bugs.md #12b).
+                variant = sorted(variants)[0]
+        db.add(StudentAssignment(
+            student_id=student.id, subjects_assignment_id=sa_id_val, variant=variant
+        ))
 
     db.add(SubjectTestStudent(subject_id=subject_id, student_id=student.id, plain_password=password))
     await db.commit()

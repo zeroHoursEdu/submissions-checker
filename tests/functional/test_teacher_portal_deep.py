@@ -622,6 +622,113 @@ async def test_provision_test_student_creates_entities(
     )
 
 
+async def test_provision_test_student_defaults_variant_when_required_and_unpicked(
+    client: AsyncClient, db, teacher
+) -> None:
+    """docs/known_bugs.md #12b: a variants_required assignment must get a real
+    variant even if the teacher never touches the selector."""
+    await _make_test_group(db)
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(
+        db, subject.id, code="a1",
+        config={"variants_required": True, "variants": {"2": {}, "1": {}}},
+    )
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
+    )
+    assert resp.status_code == 303
+
+    student_assignment = (
+        await db.execute(
+            select(StudentAssignment).where(
+                StudentAssignment.subjects_assignment_id == sa.id
+            )
+        )
+    ).scalar_one()
+    assert student_assignment.variant == "1"  # first sorted key, not left NULL
+
+
+async def test_provision_test_student_persists_explicit_variant_choice(
+    client: AsyncClient, db, teacher
+) -> None:
+    await _make_test_group(db)
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(
+        db, subject.id, code="a1",
+        config={"variants_required": True, "variants": {"1": {}, "2": {}}},
+    )
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/test-student",
+        data={"variant_a1": "2"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    student_assignment = (
+        await db.execute(
+            select(StudentAssignment).where(
+                StudentAssignment.subjects_assignment_id == sa.id
+            )
+        )
+    ).scalar_one()
+    assert student_assignment.variant == "2"
+
+
+async def test_provision_test_student_invalid_variant_falls_back_to_default(
+    client: AsyncClient, db, teacher
+) -> None:
+    await _make_test_group(db)
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(
+        db, subject.id, code="a1",
+        config={"variants_required": True, "variants": {"1": {}, "3": {}}},
+    )
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/test-student",
+        data={"variant_a1": "does-not-exist"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    student_assignment = (
+        await db.execute(
+            select(StudentAssignment).where(
+                StudentAssignment.subjects_assignment_id == sa.id
+            )
+        )
+    ).scalar_one()
+    assert student_assignment.variant == "1"  # fell back to first sorted key
+
+
+async def test_provision_test_student_no_variants_configured_leaves_null(
+    client: AsyncClient, db, teacher
+) -> None:
+    await _make_test_group(db)
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id, code="a1", config={})
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
+    )
+    assert resp.status_code == 303
+
+    student_assignment = (
+        await db.execute(
+            select(StudentAssignment).where(
+                StudentAssignment.subjects_assignment_id == sa.id
+            )
+        )
+    ).scalar_one()
+    assert student_assignment.variant is None
+
+
 async def test_provision_test_student_idempotent(
     client: AsyncClient, db, teacher
 ) -> None:
