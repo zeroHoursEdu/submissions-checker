@@ -27,7 +27,9 @@ from submissions_checker.db.models import (
     SubjectPluginConfig,
     SubjectsAssignment,
     Submission,
+    User,
 )
+from submissions_checker.services.notification_service import push_notification
 from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
@@ -149,10 +151,25 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
 
         if not outcome.passed:
             transition(submission, "test_failed")
+            await _notify_student(
+                db, student_assignment.student_id,
+                title=f"{subjects_assignment.title}: didn't pass",
+                body=f"Your submission for \"{subjects_assignment.title}\" did not pass the automated checks.",
+                link=f"/portal/subjects/{subject.id}/assignments/{subjects_assignment.id}",
+            )
             return
 
         review_mode: str = plugin_assignment.get("review_mode", "tests_only")
         await _advance_after_tests(db, submission, review_mode)
+
+
+async def _notify_student(db: AsyncSession, student_id: int, title: str, body: str, link: str) -> None:
+    """Push an in-app notification for a graded submission. No-op if the student
+    has no user account (shouldn't happen in practice, but never worth crashing
+    the check task over)."""
+    user_id = await db.scalar(select(User.id).where(User.student_id == student_id))
+    if user_id is not None:
+        await push_notification(db, user_id, title, body, link)
 
 
 async def _fetch_latest_config(db: AsyncSession, subject_id: int) -> SubjectPluginConfig | None:
@@ -202,3 +219,11 @@ async def _advance_after_tests(db: AsyncSession, submission: Submission, review_
         transition(submission, "test_passed_quiz")
     else:
         transition(submission, "test_passed_tests_only")
+        sa = submission.students_assignment
+        subjects_assignment = sa.subjects_assignment
+        await _notify_student(
+            db, sa.student_id,
+            title=f"{subjects_assignment.title}: passed",
+            body=f"Your submission for \"{subjects_assignment.title}\" passed the automated checks.",
+            link=f"/portal/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}",
+        )

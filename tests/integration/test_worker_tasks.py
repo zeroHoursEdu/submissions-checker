@@ -22,7 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.db.models.enums import (
@@ -35,6 +35,7 @@ from submissions_checker.db.models.enums import (
 from submissions_checker.db.models.feedback_request import FeedbackRequest
 from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.group import Group
+from submissions_checker.db.models.notification import Notification
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.models.semester import Semester
@@ -156,6 +157,21 @@ async def _seed_submission(
     if head_ref is not None:
         submission.head_ref = head_ref
     return student, teacher, sa_tmpl, enrollment, submission, subject
+
+
+async def _make_student_user(db: AsyncSession, student: Student) -> User:
+    """Attach a STUDENT-role user account to an already-seeded Student row —
+    _seed_submission doesn't create one, but the in-app notification path
+    resolves Notification.user_id via User.student_id."""
+    user = User(
+        username=f"stud-login-{student.id}",
+        password_hash="x",
+        role="STUDENT",
+        student_id=student.id,
+    )
+    db.add(user)
+    await db.commit()
+    return user
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -399,6 +415,72 @@ async def test_submission_reviewed_suppressed_by_preference(
 
     assert message.state == OutboxMessageState.FINISHED
     assert dispatcher.sent == []  # suppressed, no email
+
+
+@pytest.mark.asyncio
+async def test_submission_reviewed_creates_in_app_notification_on_approve(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    student, _, _, _, sub, _ = await _seed_submission(
+        db_session, "rev-inapp-ok", status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    user = await _make_student_user(db_session, student)
+    monkeypatch.setattr(notification_tasks, "get_settings", lambda: test_settings)
+    _patch_dispatcher(monkeypatch, notification_tasks, _FakeDispatcher())
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.SUBMISSION_REVIEWED,
+        payload={"submission_id": sub.id, "action": "approve", "reason": ""},
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    notif = (
+        await db_session.execute(
+            select(Notification).where(Notification.user_id == user.id)
+        )
+    ).scalar_one()
+    assert "approved" in notif.title or "approved" in notif.body
+
+
+@pytest.mark.asyncio
+async def test_submission_reviewed_in_app_notification_survives_email_suppression(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    """In-app notifications are a separate channel from email — the
+    SUBMISSION_CHECKED/EMAIL preference must not suppress them."""
+    student, _, _, _, sub, _ = await _seed_submission(
+        db_session, "rev-inapp-supp", status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    user = await _make_student_user(db_session, student)
+    db_session.add(
+        NotificationPreference(
+            student_id=student.id,
+            case=NotificationCase.SUBMISSION_CHECKED,
+            method=NotificationMethod.EMAIL,
+            enabled=False,
+        )
+    )
+    await db_session.commit()
+
+    monkeypatch.setattr(notification_tasks, "get_settings", lambda: test_settings)
+    dispatcher = _FakeDispatcher()
+    _patch_dispatcher(monkeypatch, notification_tasks, dispatcher)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.SUBMISSION_REVIEWED,
+        payload={"submission_id": sub.id, "action": "reject", "reason": "redo"},
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    assert dispatcher.sent == []  # email suppressed
+    notif = (
+        await db_session.execute(
+            select(Notification).where(Notification.user_id == user.id)
+        )
+    ).scalar_one()
+    assert "redo" in notif.body  # in-app notification still created
 
 
 @pytest.mark.asyncio
@@ -768,6 +850,38 @@ async def test_check_test_failed(
 
 
 @pytest.mark.asyncio
+async def test_check_test_failed_notifies_student_in_app(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    zip_path = tmp_path / "tfn.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(db_session, "tfn", saved_as="tfn.zip")
+    sa_row = await db_session.get(StudentAssignment, sub.students_assignment_id)
+    student = await db_session.get(Student, sa_row.student_id)
+    user = await _make_student_user(db_session, student)
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(
+        monkeypatch,
+        check_core.CheckOutcome("failed", 1, 2, [{"name": "t1", "passed": False}]),
+    )
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    notif = (
+        await db_session.execute(
+            select(Notification).where(Notification.user_id == user.id)
+        )
+    ).scalar_one()
+    assert "didn't pass" in notif.title or "pass" in notif.body.lower()
+
+
+@pytest.mark.asyncio
 async def test_check_passed_tests_only_completes(
     db_session: AsyncSession, test_settings, monkeypatch, tmp_path
 ) -> None:
@@ -797,6 +911,40 @@ async def test_check_passed_tests_only_completes(
 
 
 @pytest.mark.asyncio
+async def test_check_passed_tests_only_notifies_student_in_app(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    zip_path = tmp_path / "okn.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(
+        db_session, "okn", review_mode="tests_only", saved_as="okn.zip"
+    )
+    sa_row = await db_session.get(StudentAssignment, sub.students_assignment_id)
+    student = await db_session.get(Student, sa_row.student_id)
+    user = await _make_student_user(db_session, student)
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(
+        monkeypatch,
+        check_core.CheckOutcome("passed", 2, 2, [{"name": "t1", "passed": True}]),
+    )
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    notif = (
+        await db_session.execute(
+            select(Notification).where(Notification.user_id == user.id)
+        )
+    ).scalar_one()
+    assert "passed" in notif.title or "passed" in notif.body.lower()
+
+
+@pytest.mark.asyncio
 async def test_check_passed_tests_then_ai_enqueues_ai_review(
     db_session: AsyncSession, test_settings, monkeypatch, tmp_path
 ) -> None:
@@ -806,6 +954,9 @@ async def test_check_passed_tests_then_ai_enqueues_ai_review(
     sub = await _seed_check_submission(
         db_session, "thenai", review_mode="tests_then_ai", saved_as="ai.zip"
     )
+    sa_row = await db_session.get(StudentAssignment, sub.students_assignment_id)
+    student = await db_session.get(Student, sa_row.student_id)
+    user = await _make_student_user(db_session, student)
 
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
@@ -831,6 +982,11 @@ async def test_check_passed_tests_then_ai_enqueues_ai_review(
         )
     ).scalars().all()
     assert any(m.payload.get("submission_id") == sub.id for m in ai_msgs)
+    # Not final yet — no in-app notification at this intermediate step.
+    notif_count = await db_session.scalar(
+        select(func.count()).select_from(Notification).where(Notification.user_id == user.id)
+    )
+    assert notif_count == 0
 
 
 @pytest.mark.asyncio

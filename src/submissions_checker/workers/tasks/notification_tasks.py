@@ -18,6 +18,7 @@ from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.db.models.user import User
 from submissions_checker.services.notifications.dispatcher import build_dispatcher
+from submissions_checker.services.notification_service import push_notification
 from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.subject import Subject
 from submissions_checker.services.notifications.templates import (
@@ -150,6 +151,19 @@ async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> N
         reason=reason,
         portal_url=portal_url,
     )
+
+    # In-app notification is a separate channel from email — pushed regardless of the
+    # student's SUBMISSION_CHECKED/EMAIL preference, which only governs email.
+    verb = "approved" if action == "approve" else "rejected"
+    in_app_body = f"Your submission for \"{assignment.title}\" was {verb}."
+    if reason and action == "reject":
+        in_app_body += f" Feedback: {reason}"
+    notify_user_id = await db.scalar(select(User.id).where(User.student_id == student.id))
+    if notify_user_id is not None:
+        await push_notification(
+            db, notify_user_id, email_subject, in_app_body,
+            f"/portal/subjects/{assignment.subject_id}/assignments/{sa.id}",
+        )
 
     if not await _is_email_enabled(db, student.id, NotificationCase.SUBMISSION_CHECKED):
         logger.info(

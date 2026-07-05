@@ -53,6 +53,11 @@ class _FakeDB:
     async def get(self, _model, _pk):
         return self._config_record
 
+    async def scalar(self, _stmt):
+        # Used by check_tasks._notify_student's User.id lookup — no matching
+        # user in this minimal mock, so the notification push is a no-op.
+        return None
+
     def add(self, obj):
         self.added.append(obj)
 
@@ -64,8 +69,12 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         zf.writestr("solution.py", "print('hi')\n")
 
     subject = SimpleNamespace(id=5)
-    subjects_assignment = SimpleNamespace(code="lab1", subject=subject)
-    student_assignment = SimpleNamespace(variant="3", subjects_assignment=subjects_assignment)
+    subjects_assignment = SimpleNamespace(
+        id=7, code="lab1", title="Lab 1", subject=subject, subject_id=5
+    )
+    student_assignment = SimpleNamespace(
+        variant="3", subjects_assignment=subjects_assignment, student_id=42
+    )
     submission = SimpleNamespace(
         id=1,
         plugin_config_id=99,
