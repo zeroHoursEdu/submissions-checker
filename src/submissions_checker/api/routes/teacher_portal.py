@@ -12,7 +12,7 @@ from pathlib import Path
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
-from sqlalchemy import and_, cast, false, func, select, text
+from sqlalchemy import and_, cast, false, func, nullsfirst, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -387,7 +387,7 @@ async def teacher_assignment(
             ),
         )
         .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
-        .order_by(Student.full_name)
+        .order_by(nullsfirst(StudentAssignment.grade.asc()), Student.full_name)
     )
     rows = [row._asdict() for row in rows_result]
 

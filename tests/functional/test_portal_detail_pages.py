@@ -170,6 +170,37 @@ async def test_teacher_assignment_owner_renders_enrolled_students_and_status(
     assert "Lab Alpha" in body
 
 
+async def test_teacher_assignment_roster_sorted_ungraded_first_then_by_grade(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id, title="Sortable", code="sortme")
+
+    high = await make_student(full_name="Zed High Scorer", email="zed@example.com")
+    low = await make_student(full_name="Amy Low Scorer", email="amy@example.com")
+    mid = await make_student(full_name="Mia Mid Scorer", email="mia@example.com")
+    ungraded = await make_student(full_name="Bea Ungraded", email="bea@example.com")
+    for s in (high, low, mid, ungraded):
+        await _enroll(db, subject.id, s.id)
+
+    await _make_student_assignment(db, high.id, sa.id, grade=90)
+    await _make_student_assignment(db, low.id, sa.id, grade=60)
+    await _make_student_assignment(db, mid.id, sa.id, grade=75)
+    # ungraded: enrolled but no StudentAssignment row at all -> grade is NULL via outer join.
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}/assignments/{sa.id}")
+    assert resp.status_code == 200
+    body = resp.text
+
+    positions = {
+        name: body.index(name)
+        for name in ("Bea Ungraded", "Amy Low Scorer", "Mia Mid Scorer", "Zed High Scorer")
+    }
+    ordered = sorted(positions, key=positions.get)
+    assert ordered == ["Bea Ungraded", "Amy Low Scorer", "Mia Mid Scorer", "Zed High Scorer"]
+
+
 async def test_teacher_assignment_cross_teacher_is_403(
     client: AsyncClient, db, teacher, make_user
 ) -> None:
