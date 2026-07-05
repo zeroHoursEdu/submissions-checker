@@ -28,6 +28,8 @@ from submissions_checker.db.models import (
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.outbox import OutboxMessage
+from submissions_checker.core.config import Settings, get_settings
+from submissions_checker.main import app
 
 pytestmark = pytest.mark.asyncio
 
@@ -148,6 +150,36 @@ async def test_subjects_grid_redirects_to_consent_when_unconsented(
 async def test_consent_page_shown_when_unconsented(student_client: AsyncClient) -> None:
     resp = await student_client.get("/portal/consent", follow_redirects=False)
     assert resp.status_code == 200
+
+
+async def test_consent_notice_defaults_to_ukrainian_vocab_text(
+    student_client: AsyncClient,
+) -> None:
+    """No operator override configured -> the notice comes from i18n/uk.yml's
+    consent.notice_text, not a hardcoded English default."""
+    resp = await student_client.get("/portal/consent", follow_redirects=False)
+    assert resp.status_code == 200
+    assert "веб-камеру" in resp.text
+    assert "Some quizzes in this course are proctored" not in resp.text
+
+
+async def test_consent_notice_operator_override_takes_precedence(
+    student_client: AsyncClient,
+) -> None:
+    """A jurisdiction-specific override configured via settings still wins over
+    the localized default."""
+    base = dict(
+        secret_key="test-secret-key-minimum-32-chars-long",
+        recording_consent_notice="Custom jurisdiction-specific legal text.",
+    )
+    settings = Settings(**base)
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        resp = await student_client.get("/portal/consent", follow_redirects=False)
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+    assert resp.status_code == 200
+    assert "Custom jurisdiction-specific legal text." in resp.text
 
 
 async def test_accept_consent_sets_timestamp_and_redirects(

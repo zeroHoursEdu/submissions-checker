@@ -38,6 +38,7 @@ from submissions_checker.services.audit import audit
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import compare_zip_files
 from submissions_checker.core.templates import render
+from submissions_checker.core.i18n import get_vocab
 
 router = APIRouter(prefix="/portal", tags=["student-portal"])
 
@@ -59,9 +60,11 @@ async def show_consent(
 ) -> HTMLResponse | RedirectResponse:
     if not await student_needs_consent(db, student_id):
         return RedirectResponse(url="/portal", status_code=303)
+    vocab = get_vocab(request.cookies.get("lang"))
+    notice = settings.recording_consent_notice or vocab["consent"]["notice_text"]
     return render(request, "student_consent.html", {
         "current_user": current_user,
-        "notice": settings.recording_consent_notice,
+        "notice": notice,
     })
 
 
