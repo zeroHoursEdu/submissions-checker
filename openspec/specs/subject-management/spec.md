@@ -61,3 +61,13 @@ On error (403 ownership, 400 invalid ZIP, 500 server error) the page SHALL displ
 #### Scenario: Config applied successfully — subject updated
 - **WHEN** a ZIP is uploaded and an existing subject is updated
 - **THEN** the dashboard reloads with a success message containing the subject name and "updated"
+
+### Requirement: No manual subject-creation form exists
+The teacher dashboard SHALL NOT present a manual create-subject form or button. ZIP-based config
+upload (`POST /teacher/subjects/apply-config`) SHALL be the only way to create or update a
+subject.
+
+#### Scenario: Dashboard has no dead create-subject link
+- **WHEN** a teacher views the dashboard
+- **THEN** the only subject-creation affordance is the Upload Config button; no link or form
+  targets a separate manual-creation route

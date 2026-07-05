@@ -182,7 +182,6 @@ teacher:
   no_subjects_configured_hint: Додайте предмети до бази даних для початку роботи.
   analytics: Аналітика
   students: Студенти
-  new_subject: Новий предмет
   subject_count_singular: "предмет"
   subject_count_plural: "предметів"
   view_feedback: Переглянути відгуки
