@@ -37,6 +37,7 @@ LEGAL = [
     (S.AWAITING_AI_REVIEW, "start_ai_review", S.AI_REVIEWING),
     (S.AI_REVIEWING, "ai_review_done_teacher", S.AWAITING_TEACHER_REVIEW),
     (S.AI_REVIEWING, "ai_review_done_completed", S.COMPLETED),
+    (S.AI_REVIEWING, "ai_review_passed_quiz", S.QUIZ_SENT),
     (S.AI_REVIEWING, "ai_review_failed", S.AI_REVIEW_FAILED),
     (S.AI_REVIEW_FAILED, "retry_ai_review", S.AI_REVIEWING),
     (S.AWAITING_TEACHER_REVIEW, "teacher_approve", S.COMPLETED),

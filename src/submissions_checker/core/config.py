@@ -33,11 +33,13 @@ class Settings(BaseSettings):
     # Backend base URL (used to build callback URLs for external services)
     base_url: str = "http://localhost:8000"
 
-    # AI Provider
-    ai_provider: str = "openai"
+    # AI Provider — exactly one is active at a time, selected by `ai_provider`.
+    ai_provider: Literal["openai", "anthropic"] = "openai"
     openai_api_key: str | None = None
     openai_model: str = "gpt-4"
     openai_base_url: str = "https://api.openai.com/v1"
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-opus-4-8"
     ai_max_tokens: int = 4000
     ai_temperature: float = 0.7
 

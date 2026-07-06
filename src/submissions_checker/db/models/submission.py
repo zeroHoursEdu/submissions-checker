@@ -48,6 +48,8 @@ class Submission(Base, TimestampMixin):
     )
     test_results: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     ai_review: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Component scores + weights that produced StudentAssignment.grade (see services.grading)
+    grade_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     # Pinned when checking starts; retries always use the same config version
     plugin_config_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("subject_plugin_configs.id", ondelete="SET NULL"), nullable=True

@@ -60,3 +60,6 @@ class AssignmentDetail(BaseModel):
     quiz_max_attempts: int | None = None
     check_reason: str | None = None
     content_files: list[ContentFile] = []
+    # Populated only when the assignment config enables the corresponding toggle.
+    ai_comment: str | None = None
+    grade_breakdown: dict | None = None  # type: ignore[type-arg]

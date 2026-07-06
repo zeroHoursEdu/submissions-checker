@@ -99,6 +99,31 @@ def test_build_assignment_config_empty(svc: ConfigApplyService) -> None:
     assert svc._build_assignment_config({"title": "only-meta"}) == {}
 
 
+def test_build_assignment_config_persists_ai_review_and_grading(
+    svc: ConfigApplyService,
+) -> None:
+    ai_review = {"cheating_threshold": 0.6, "show_comment_to_student": True}
+    grading = {"code_weight": 0.6, "quiz_weight": 0.4}
+    cfg = svc._build_assignment_config(
+        {"title": "meta", "ai_review": ai_review, "grading": grading}
+    )
+    assert cfg == {"ai_review": ai_review, "grading": grading}
+
+
+def test_diff_assignment_grading_change_grouped_under_config(
+    svc: ConfigApplyService,
+) -> None:
+    changed = svc._diff_assignment(
+        {"grading": {"code_weight": 0.6}}, {"grading": {"code_weight": 0.5}}
+    )
+    assert changed == ["config"]
+
+
+def test_diff_assignment_ai_review_unchanged_no_change(svc: ConfigApplyService) -> None:
+    block = {"ai_review": {"cheating_threshold": 0.5}, "grading": {"code_weight": 1.0}}
+    assert svc._diff_assignment(dict(block), dict(block)) == []
+
+
 # ── _build_content_files ──────────────────────────────────────────────────────
 
 def test_build_content_files_maps_urls(svc: ConfigApplyService) -> None:

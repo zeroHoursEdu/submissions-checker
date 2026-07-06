@@ -25,6 +25,7 @@ from submissions_checker.db.models import (
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, QuizAttemptStatus
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
 from submissions_checker.core.templates import render
 
@@ -271,6 +272,7 @@ async def _grade_and_finalize(
     if submission:
         if is_passed:
             submission.status = SubmissionStatus.COMPLETED
+            await finalize_grade(db, submission)
         else:
             max_attempts = attempt.config_snapshot.get("max_quiz_attempts")
             if max_attempts is not None:

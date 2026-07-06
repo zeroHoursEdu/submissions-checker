@@ -340,7 +340,7 @@ class ConfigApplyService:
 
         # Config JSONB fields
         config_keys = ["review_mode", "late_policy", "max_submissions", "download_links",
-                       "variants_required", "sandbox", "variants"]
+                       "variants_required", "sandbox", "variants", "ai_review", "grading"]
         new_config = {k: new_a[k] for k in config_keys if k in new_a}
         prev_config = {k: prev_a[k] for k in config_keys if k in prev_a}
         if new_config != prev_config:
@@ -600,7 +600,7 @@ class ConfigApplyService:
         config: dict[str, Any] = {}
         for key in (
             "review_mode", "late_policy", "max_submissions", "download_links",
-            "variants_required", "sandbox", "variants",
+            "variants_required", "sandbox", "variants", "ai_review", "grading",
         ):
             if key in a_cfg:
                 config[key] = a_cfg[key]

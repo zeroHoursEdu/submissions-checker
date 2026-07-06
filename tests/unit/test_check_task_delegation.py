@@ -70,10 +70,11 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
 
     subject = SimpleNamespace(id=5)
     subjects_assignment = SimpleNamespace(
-        id=7, code="lab1", title="Lab 1", subject=subject, subject_id=5
+        id=7, code="lab1", title="Lab 1", subject=subject, subject_id=5,
+        config={}, min_grade=0, max_grade=100,
     )
     student_assignment = SimpleNamespace(
-        variant="3", subjects_assignment=subjects_assignment, student_id=42
+        variant="3", subjects_assignment=subjects_assignment, student_id=42, grade=None
     )
     submission = SimpleNamespace(
         id=1,
@@ -81,6 +82,9 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         source_metadata={"saved_as": "s.zip"},
         status=SubmissionStatus.PENDING,
         test_results=None,
+        ai_review=None,
+        grade_breakdown=None,
+        quiz_attempts=[],
         students_assignment=student_assignment,
     )
     config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
@@ -117,6 +121,9 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         "plugin_config_version": 2,
     }
     assert submission.status == SubmissionStatus.COMPLETED
+    # Tests-only completion finalizes the grade: works=100%, default weights → 100.
+    assert student_assignment.grade == 100
+    assert submission.grade_breakdown["grade"] == 100
 
 
 async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None:

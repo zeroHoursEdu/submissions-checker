@@ -52,6 +52,7 @@ from submissions_checker.db.models.enums import (
 from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
+from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
 
 router = APIRouter(prefix="/teacher", tags=["teacher-portal"])
@@ -906,6 +907,11 @@ async def teacher_review_submission_action(
             transition(submission, "teacher_reject")
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
+
+    # A teacher approval that completes the submission (no quiz) finalizes the grade now;
+    # approvals that route to a quiz finalize on quiz completion instead.
+    if submission.status == SubmissionStatus.COMPLETED:
+        await finalize_grade(db, submission)
 
     # Queue email notification to student
     db.add(OutboxMessage(

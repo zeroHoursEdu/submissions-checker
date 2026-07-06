@@ -276,6 +276,18 @@ async def assignment_detail(
     raw_content_files: list[dict] = sa.subjects_assignment.content_files or []  # type: ignore[type-arg]
     content_files = [ContentFile(**cf) for cf in raw_content_files]
 
+    # AI comment and grade breakdown are shown to the student only when the
+    # assignment config opts in. Cheating/AI-generated verdicts are never exposed.
+    assignment_cfg = sa.subjects_assignment.config or {}
+    ai_comment: str | None = None
+    if latest_sub and latest_sub.ai_review:
+        if (assignment_cfg.get("ai_review") or {}).get("show_comment_to_student"):
+            ai_comment = latest_sub.ai_review.get("comment")
+    grade_breakdown: dict | None = None  # type: ignore[type-arg]
+    if latest_sub and latest_sub.grade_breakdown:
+        if (assignment_cfg.get("grading") or {}).get("show_breakdown_to_student"):
+            grade_breakdown = latest_sub.grade_breakdown
+
     detail = AssignmentDetail(
         student_assignment_id=sa.id,
         title=sa.subjects_assignment.title,
@@ -293,6 +305,8 @@ async def assignment_detail(
         quiz_max_attempts=quiz_max_attempts,
         check_reason=check_reason,
         content_files=content_files,
+        ai_comment=ai_comment,
+        grade_breakdown=grade_breakdown,
     )
 
     student = await db.get(Student, student_id)

@@ -29,7 +29,6 @@ from submissions_checker.db.models import (
     Submission,
     User,
 )
-from submissions_checker.services.notification_service import push_notification
 from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
@@ -37,6 +36,8 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.services import check_core
 from submissions_checker.services.docker_sandbox import DockerSandbox
+from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services.notification_service import push_notification
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
@@ -215,10 +216,19 @@ async def _advance_after_tests(db: AsyncSession, submission: Submission, review_
             state=OutboxMessageState.PENDING,
             payload={"submission_id": submission.id, "next_step": "teacher"},
         ))
+    elif review_mode == "tests_then_ai_then_quiz":
+        transition(submission, "test_passed_ai")
+        db.add(OutboxMessage(
+            event_type=OutboxEventType.RUN_AI_REVIEW,
+            state=OutboxMessageState.PENDING,
+            payload={"submission_id": submission.id, "next_step": "quiz"},
+        ))
     elif review_mode == "tests_then_quiz":
         transition(submission, "test_passed_quiz")
     else:
         transition(submission, "test_passed_tests_only")
+        # Tests-only submissions complete here — compute their final grade now.
+        await finalize_grade(db, submission)
         sa = submission.students_assignment
         subjects_assignment = sa.subjects_assignment
         await _notify_student(
