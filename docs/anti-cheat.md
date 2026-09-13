@@ -97,7 +97,7 @@ The full config lives inside the quiz template's `config` JSONB:
 |---|---|---|---|
 | `type` | `"fail"` \| `"warn"` \| `"reduce_time"` \| `"flag"` | all | Action type |
 | `message` | string | all (optional) | Text shown to the student. Supports template placeholders. |
-| `penalty_seconds` | integer | `reduce_time` only | Seconds to deduct from the effective time limit |
+| `penalty_seconds` | integer | `reduce_time` only | Seconds to deduct from the effective time limit — see the note below on which limit that is |
 
 #### Action types
 
@@ -107,6 +107,20 @@ The full config lives inside the quiz template's `config` JSONB:
 | `warn` | Amber warning banner + alert sound, dismisses after 7 s (if `notify_student`) | No grade impact; violation count recorded |
 | `reduce_time` | Amber banner with new time + alert sound (if `notify_student`); timer jumps back | No direct grade impact; may lead to timeout |
 | `flag` | No visible message, ever — unaffected by `notify_student` | Attempt flagged for teacher review (visible in the assignment grade table) |
+
+#### What `reduce_time` deducts from
+
+Which clock the penalty comes off depends on how the quiz is delivered:
+
+- **Single-page quiz** (no per-question limits): the penalty is deducted from the attempt-wide
+  `time_limit_minutes` budget and accumulates across violations. A quiz with no
+  `time_limit_minutes` at all has nothing to deduct from, so `reduce_time` degrades to a
+  message-only action — use `warn` instead there.
+- **Stepped quiz** (any question carries `time_limit_seconds`): there is no attempt-wide budget,
+  so the penalty comes off the **question the student is currently answering**. If it exhausts
+  that question's remaining time, the question expires at once and is recorded as timed out with
+  zero points, and the next question is served. Penalties do not carry over between questions —
+  each violation bites only where the student is standing.
 
 Setting `notify_student: false` suppresses the banner and sound for `fail`/`warn`/`reduce_time` too — useful for a teacher who wants the deterrent effect of `flag`-style covert enforcement across all action types, while `fail`/`reduce_time` still apply their real effect on the attempt.
 

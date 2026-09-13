@@ -94,6 +94,25 @@ assignments:
 | `tests_then_ai_then_teacher`| AI review → AWAITING_TEACHER_REVIEW → teacher grades   |
 | `tests_then_quiz`           | Quiz sent to student                                   |
 
+**Check-free modes** — for coursework that cannot be auto-checked at all (Windows-only GUI
+programs, hardware labs, written reports). These run **no sandbox**, so the assignment needs
+**no `sandbox` block and no `check_command`**; the uploaded ZIP is only validated as a safe
+archive and the student goes straight to the quiz:
+
+| `review_mode`        | What happens                                                          |
+|----------------------|-----------------------------------------------------------------------|
+| `quiz_only`          | Upload accepted → quiz → COMPLETED on a pass                          |
+| `quiz_then_teacher`  | Upload accepted → quiz → AWAITING_TEACHER_REVIEW → teacher approves    |
+
+Both require a `quiz` block with questions. Since there is no test score, weight the grade
+onto the quiz, otherwise the assignment grades as zero:
+
+```yaml
+grading:
+  code_weight: 0
+  quiz_weight: 1
+```
+
 ---
 
 ## Sandbox Security Model
@@ -221,6 +240,90 @@ output.write_text(json.dumps({
 ```
 
 ---
+
+## Quiz Block
+
+A quiz lives at `assignments.<code>.quiz` in `config.yml`. It is read from the pinned plugin
+config at runtime — there is no quiz code, no separate file, and no database seeding. Questions
+and settings are snapshotted onto each attempt when it starts, so editing `config.yml` never
+disturbs an attempt already in progress.
+
+```yaml
+assignments:
+  lab1:
+    review_mode: quiz_then_teacher
+    quiz:
+      # ── selection ──
+      questions_to_send: 15        # draw 15 of the pool per attempt (default: all)
+      shuffle_questions: true      # default true
+      shuffle_options: true        # default true
+      # ── passing ──
+      pass_threshold_pct: 0.7      # fraction of points needed (default 0.6)
+      max_quiz_attempts: 2         # omit for unlimited
+      show_correct_answers_after: false   # default false
+      # ── timing ──
+      time_limit_minutes: 20       # whole-attempt budget (optional)
+      question_time_default_seconds: 30   # per-question default (optional)
+      anti_cheat: { ... }          # see docs/anti-cheat.md
+      questions:
+        - type: single_choice
+          text: "Which function registers a window class?"
+          points: 1
+          time_limit_seconds: 45   # overrides the quiz default for this question
+          choices:
+            - { text: "RegisterClassEx", is_correct: true }
+            - { text: "CreateWindow",    is_correct: false }
+```
+
+### Quiz-level keys
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `questions` | list | — | The question pool. Required. |
+| `questions_to_send` | int | all | How many to draw per attempt. Questions marked `required: true` are always drawn first. |
+| `shuffle_questions` | bool | `true` | Randomise the order of the drawn questions. |
+| `shuffle_options` | bool | `true` | Randomise choice order (correct indices are remapped). |
+| `pass_threshold_pct` | float | `0.6` | Fraction of the drawn questions' points needed to pass. |
+| `max_quiz_attempts` | int | unlimited | Terminal attempts allowed. Exhausting them fails the submission. |
+| `show_correct_answers_after` | bool | `false` | Reveal the correct answers on the result page. Leave `false` when students get more than one attempt from a pool, or the first attempt hands them the answer key. |
+| `time_limit_minutes` | int | none | Budget for the whole attempt. Expiry finalises the attempt as `TIMED_OUT`. |
+| `question_time_default_seconds` | int | none | Per-question budget applied to every question that does not set its own. |
+| `anti_cheat` | map | none | Proctoring and punishment rules — see `docs/anti-cheat.md`. |
+
+### Question keys
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | string | `single_choice`, `multiple_choice`, `true_false`, `ordering`. (`short_answer` is stored but **not graded** and still inflates the maximum score — avoid it.) |
+| `text` | string | The prompt. |
+| `points` | int | Weight. Default `1`. |
+| `choices` | list | `{text, is_correct}` entries. `single_choice` takes the first `is_correct`; `multiple_choice` requires the exact set. |
+| `options` + `correct` | list + int/list | Alternative to `choices`: `correct: 0` for single, `correct: [0, 2]` for multiple. |
+| `items` + `correct_order` | list + list | For `ordering`. |
+| `correct` | bool | For `true_false`. |
+| `required` | bool | Always include this question in every draw. |
+| `time_limit_seconds` | int | This question's own clock. Overrides `question_time_default_seconds`. |
+
+### Per-question timing (stepper mode)
+
+If **any** drawn question resolves a `time_limit_seconds` — its own or the quiz default — the
+whole attempt switches to **stepper delivery**: one question per page, each with its own
+countdown, and **no going back**. A quiz where no question has a limit keeps the familiar
+all-questions-on-one-page form, so existing subjects are unaffected.
+
+The clock is the server's, not the browser's:
+
+- The window starts when the server serves the question.
+- Closing or reloading the page neither pauses nor resets it. On the next page load, every
+  question whose window elapsed in the meantime is recorded as answered-with-zero and flagged
+  as timed out — and an expired question's successor starts its window when the expired one
+  *ended*, so disappearing for an hour burns the rest of the attempt rather than one question.
+- Answering early is not punished: a normal answer restarts the clock at that moment.
+- An answer that arrives after its window closed scores zero, even if it was correct.
+- Timed-out questions are shown as such on the result page, distinct from wrong answers.
+
+Calibrate the windows generously enough to absorb a page load — 30 s for recall, 45–60 s for
+questions that need thought — rather than shaving them to the second.
 
 ## Variants
 

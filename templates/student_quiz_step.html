@@ -1,5 +1,15 @@
 {% extends "base.html" %}
 
+{#
+  One timed question at a time.
+
+  Used when the attempt's config snapshot has per_question_timing — i.e. at least one drawn
+  question carries its own clock. The countdown here is decoration only: the server decides
+  when a question has expired (see _advance_expired), so a stopped or hacked timer buys the
+  student nothing. Answers post to /answer with the question index, and the server redirects
+  back here for the next one, which is what makes "no going back" enforceable.
+#}
+
 {% block title %}{{ vocab.quiz.page_title }}{% endblock %}
 
 {% block breadcrumbs %}
@@ -21,13 +31,11 @@
 
 {% block content %}
 
-
-
 {% if seconds_remaining is not none %}
-<!-- Timer -->
+<!-- Per-question timer -->
 <div id="timer"
      class="fixed top-14 right-4 z-30 bg-amber-50 border border-amber-300 rounded-xl px-4 py-2 shadow-md font-mono font-bold text-amber-800 text-lg min-w-[80px] text-center">
-  <div class="text-xs font-normal text-amber-600 mb-0.5">{{ vocab.quiz.time_left }}</div>
+  <div class="text-xs font-normal text-amber-600 mb-0.5">{{ vocab.quiz.question_time_left }}</div>
   <span id="timer-display">--:--</span>
 </div>
 {% endif %}
@@ -35,37 +43,37 @@
 <!-- Header -->
 <div class="mb-6">
   <h1 class="text-2xl font-bold text-slate-900 mb-1">{{ vocab.quiz.page_title }}</h1>
-  <p class="text-sm text-slate-500">{{ vocab.quiz.answer_all }}</p>
-  {% if attempt.config_snapshot.get('time_limit_minutes') %}
-  <p class="text-sm text-amber-600 mt-1">{{ vocab.quiz.time_limit }} {{ attempt.config_snapshot.time_limit_minutes }} {{ vocab.quiz.minutes }}</p>
-  {% endif %}
+  <p class="text-sm text-slate-500">{{ vocab.quiz.one_question_at_a_time }}</p>
 </div>
 
-<form id="quiz-form" method="POST" action="/portal/quiz/{{ attempt.id }}/submit">
-  <div id="quiz-content" class="space-y-5">
+<!-- Progress -->
+<div class="mb-4">
+  <div class="flex items-center justify-between text-xs text-slate-500 mb-1">
+    <span>{{ vocab.quiz.question_label }} {{ question_number }} / {{ total_questions }}</span>
+    <span>{{ question.points }} {{ vocab.quiz.pts }}</span>
+  </div>
+  <div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+    <div class="h-full bg-indigo-500 rounded-full transition-all"
+         style="width: {{ (question_number / total_questions * 100) | round(1) }}%"></div>
+  </div>
+</div>
 
-  {% for q in questions %}
-  {% set q_id = q.id %}
-  {% set existing = existing_answers.get(q_id) %}
+{% set q = question %}
+{% set q_id = q.id %}
+
+<form id="quiz-form" method="POST" action="/portal/quiz/{{ attempt.id }}/answer">
+  <input type="hidden" name="index" value="{{ attempt.current_index }}">
+  <div id="quiz-content">
 
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-    <!-- Question header -->
-    <div class="flex items-start gap-3 mb-4">
-      <span class="shrink-0 mt-0.5 text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-        {{ loop.index }} / {{ questions|length }}
-      </span>
-      <p class="text-sm font-medium text-slate-800 leading-relaxed">{{ q.text }}</p>
-      <span class="shrink-0 ml-auto text-xs text-slate-400">{{ q.points }} {{ vocab.quiz.pts }}</span>
-    </div>
+    <p class="text-sm font-medium text-slate-800 leading-relaxed mb-4">{{ q.text }}</p>
 
     <!-- ── SINGLE CHOICE ── -->
     {% if q.type == "SINGLE_CHOICE" %}
     <div class="space-y-2">
       {% for opt in q.config.get("options", []) %}
-      <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
-                    {% if existing and existing.get('selected') == loop.index0 %}border-indigo-400 bg-indigo-50{% endif %}">
-        <input type="radio" name="answer_{{ q_id }}" value="{{ loop.index0 }}" class="shrink-0"
-               {% if existing and existing.get('selected') == loop.index0 %}checked{% endif %}>
+      <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors">
+        <input type="radio" name="answer_{{ q_id }}" value="{{ loop.index0 }}" class="shrink-0">
         <span class="text-sm text-slate-700">{{ opt }}</span>
       </label>
       {% endfor %}
@@ -76,10 +84,8 @@
     <p class="text-xs text-slate-400 mb-2">{{ vocab.quiz.multiple_choice_hint }}</p>
     <div class="space-y-2">
       {% for opt in q.config.get("options", []) %}
-      <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
-                    {% if existing and loop.index0 in existing.get('selected', []) %}border-indigo-400 bg-indigo-50{% endif %}">
-        <input type="checkbox" name="answer_{{ q_id }}" value="{{ loop.index0 }}" class="shrink-0 rounded"
-               {% if existing and loop.index0 in existing.get('selected', []) %}checked{% endif %}>
+      <label class="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors">
+        <input type="checkbox" name="answer_{{ q_id }}" value="{{ loop.index0 }}" class="shrink-0 rounded">
         <span class="text-sm text-slate-700">{{ opt }}</span>
       </label>
       {% endfor %}
@@ -89,11 +95,7 @@
     {% elif q.type == "ORDERING" %}
     <p class="text-xs text-slate-400 mb-2">{{ vocab.quiz.ordering_hint }}</p>
     {% set items = q.config.get("items", []) %}
-    {% if existing and existing.get('order') %}
-      {% set display_order = existing.get('order') %}
-    {% else %}
-      {% set display_order = range(items|length)|list %}
-    {% endif %}
+    {% set display_order = range(items|length)|list %}
     <ul id="ord-{{ q_id }}" class="space-y-2 mb-1" ondragover="event.preventDefault()">
       {% for idx in display_order %}
       <li data-idx="{{ idx }}" draggable="true"
@@ -112,16 +114,12 @@
     <!-- ── TRUE / FALSE ── -->
     {% elif q.type == "TRUE_FALSE" %}
     <div class="flex gap-4">
-      <label class="flex-1 flex items-center gap-3 p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
-                    {% if existing and existing.get('value') == true %}border-indigo-400 bg-indigo-50{% endif %}">
-        <input type="radio" name="answer_{{ q_id }}" value="true" class="shrink-0"
-               {% if existing and existing.get('value') == true %}checked{% endif %}>
+      <label class="flex-1 flex items-center gap-3 p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors">
+        <input type="radio" name="answer_{{ q_id }}" value="true" class="shrink-0">
         <span class="text-sm font-medium text-slate-700">{{ vocab.common.true }}</span>
       </label>
-      <label class="flex-1 flex items-center gap-3 p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors
-                    {% if existing and existing.get('value') == false %}border-indigo-400 bg-indigo-50{% endif %}">
-        <input type="radio" name="answer_{{ q_id }}" value="false" class="shrink-0"
-               {% if existing and existing.get('value') == false %}checked{% endif %}>
+      <label class="flex-1 flex items-center gap-3 p-4 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 cursor-pointer transition-colors">
+        <input type="radio" name="answer_{{ q_id }}" value="false" class="shrink-0">
         <span class="text-sm font-medium text-slate-700">{{ vocab.common.false }}</span>
       </label>
     </div>
@@ -132,20 +130,20 @@
       <textarea name="answer_{{ q_id }}" rows="4"
                 placeholder="{{ vocab.quiz.short_answer_placeholder }}"
                 class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400
-                       focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-y">{{ existing.get('text', '') if existing else '' }}</textarea>
+                       focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-y"></textarea>
       <p class="text-xs text-slate-400 mt-1">{{ vocab.quiz.short_answer_hint }}</p>
     </div>
     {% endif %}
   </div>
-  {% endfor %}
 
   </div>
 
-  <!-- Submit bar -->
-  <div class="mt-6 flex justify-end">
-    <button type="submit"
+  <!-- Answer bar -->
+  <div class="mt-6 flex items-center justify-between">
+    <p class="text-xs text-slate-400">{{ vocab.quiz.no_going_back }}</p>
+    <button type="submit" id="answer-btn"
             class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
-      {{ vocab.quiz.submit_quiz }}
+      {{ vocab.quiz.answer_and_next }}
     </button>
   </div>
 </form>
@@ -167,26 +165,29 @@ function onDrop(e, listId, inputId) {
   document.getElementById(inputId).value = Array.from(list.children).map(li => li.dataset.idx).join(',');
 }
 
-// ─── Shared timer variable (exposed to anti-cheat scope) ──────────
+// ─── Shared timer variable (read/written by the anti-cheat include) ──
 var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null' }};
 
 {% if seconds_remaining is not none %}
-// ─── Countdown timer ──────────────────────────────────────────────
+// ─── Per-question countdown ───────────────────────────────────────
+// Submits whatever is selected when the window closes. If nothing is selected the server
+// scores it zero anyway, and if the POST never arrives the server expires it on next load.
 (function() {
   const display = document.getElementById('timer-display');
   const timerEl = document.getElementById('timer');
   const form = document.getElementById('quiz-form');
+  let submitted = false;
 
   function tick() {
     if (remaining <= 0) {
       display.textContent = '0:00';
-      form.submit();
+      if (!submitted) { submitted = true; form.submit(); }
       return;
     }
     const m = Math.floor(remaining / 60);
     const s = remaining % 60;
     display.textContent = m + ':' + String(s).padStart(2, '0');
-    if (remaining <= 60) {
+    if (remaining <= 10) {
       timerEl.classList.replace('bg-amber-50','bg-red-50');
       timerEl.classList.replace('border-amber-300','border-red-300');
       timerEl.classList.replace('text-amber-800','text-red-800');
@@ -199,10 +200,8 @@ var remaining = {{ seconds_remaining if seconds_remaining is not none else 'null
   tick();
 })();
 {% endif %}
-
 </script>
 
 {% include "_quiz_anticheat.html" %}
-
 
 {% endblock %}

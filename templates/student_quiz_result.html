@@ -58,6 +58,11 @@
   </div>
   {% set threshold_pct = (attempt.config_snapshot.get('pass_threshold_pct', 0.6) * 100) | round(0) | int %}
   <p class="text-xs text-slate-400">{{ vocab.quiz.pass_threshold }} {{ threshold_pct }}%</p>
+  {% if timed_out_count %}
+  <p class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+    <span>⏱</span>{{ vocab.quiz.result_timed_out_count }} {{ timed_out_count }}
+  </p>
+  {% endif %}
 </div>
 
 <!-- Per-question breakdown -->
@@ -76,6 +81,8 @@
             <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-700">
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 0 1 0 1.414l-8 8a1 1 0 0 1-1.414 0l-4-4a1 1 0 0 1 1.414-1.414L8 12.586l7.293-7.293a1 1 0 0 1 1.414 0Z" clip-rule="evenodd"/></svg>
             </span>
+          {% elif qr.timed_out %}
+            <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[11px]">⏱</span>
           {% else %}
             <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-700">
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/></svg>
@@ -83,9 +90,14 @@
           {% endif %}
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-slate-800 mb-2">{{ q.text }}</p>
+          <p class="text-sm font-medium text-slate-800 mb-2">
+            {{ q.text }}
+            {% if qr.timed_out %}
+            <span class="ml-1.5 align-middle inline-block text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">⏱ {{ vocab.quiz.result_timed_out_badge }}</span>
+            {% endif %}
+          </p>
 
-          {% if qr.answer is not none %}
+          {% if qr.answer and not qr.timed_out %}
           <p class="text-xs text-slate-500 mb-1">
             <span class="font-medium text-slate-600">{{ vocab.quiz.your_answer }}</span>
             {% if q.type == "SINGLE_CHOICE" %}

@@ -37,6 +37,11 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     SubmissionStatus.AI_REVIEW_FAILED: {
         "retry_ai_review": SubmissionStatus.AI_REVIEWING,
     },
+    SubmissionStatus.QUIZ_SENT: {
+        "quiz_passed": SubmissionStatus.COMPLETED,
+        "quiz_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        "quiz_failed": SubmissionStatus.FAILED,
+    },
     SubmissionStatus.AWAITING_TEACHER_REVIEW: {
         "teacher_approve": SubmissionStatus.COMPLETED,
         "teacher_reject": SubmissionStatus.FAILED,

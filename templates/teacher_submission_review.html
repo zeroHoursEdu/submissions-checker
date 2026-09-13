@@ -51,7 +51,17 @@
       <dl class="space-y-2 text-sm">
         <div class="flex gap-2">
           <dt class="text-slate-400 w-32 shrink-0">{{ vocab.teacher.original_name }}</dt>
-          <dd class="text-slate-900 font-mono">{{ submission.source_metadata.get("original_filename", "—") }}</dd>
+          <dd class="text-slate-900 font-mono">
+            {% if submission.source_metadata.get("saved_as") %}
+            <a href="/teacher/submissions/{{ submission.id }}/download"
+               class="text-indigo-600 hover:text-indigo-800 underline underline-offset-2">
+              {{ submission.source_metadata.get("original_filename", "—") }}
+            </a>
+            <span class="ml-1 text-xs text-slate-400">({{ vocab.teacher.download_submission }})</span>
+            {% else %}
+            {{ submission.source_metadata.get("original_filename", "—") }}
+            {% endif %}
+          </dd>
         </div>
         <div class="flex gap-2">
           <dt class="text-slate-400 w-32 shrink-0">{{ vocab.teacher.submitted_at }}</dt>

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -27,7 +28,11 @@ from submissions_checker.db.models.subject_plugin_config import SubjectPluginCon
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
+from submissions_checker.core.state_machine import transition
 from submissions_checker.core.templates import render
+from submissions_checker.workers.tasks.notification_tasks import (
+    enqueue_teacher_review_notification,
+)
 
 router = APIRouter(prefix="/portal", tags=["student-quiz"])
 
@@ -47,7 +52,7 @@ _ALLOWED_SNAPSHOT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 # ---------------------------------------------------------------------------
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _needs_consent(db: Any, student_id: int) -> bool:
@@ -59,7 +64,7 @@ async def _needs_consent(db: Any, student_id: int) -> bool:
 
 
 def _elapsed_seconds(attempt: QuizAttempt) -> float:
-    return (_utcnow() - attempt.started_at.replace(tzinfo=timezone.utc)).total_seconds()
+    return (_utcnow() - attempt.started_at.replace(tzinfo=UTC)).total_seconds()
 
 
 def _time_penalty(attempt: QuizAttempt) -> int:
@@ -91,6 +96,81 @@ def _seconds_remaining_from_violations(attempt: QuizAttempt, violations: dict[st
     effective_limit = limit * 60 - penalty
     elapsed = _elapsed_seconds(attempt)
     return max(0, int(effective_limit - elapsed))
+
+
+def _is_stepped(attempt: QuizAttempt) -> bool:
+    return bool(attempt.config_snapshot.get("per_question_timing"))
+
+
+def _current_question(attempt: QuizAttempt) -> dict[str, Any] | None:
+    questions: list[dict[str, Any]] = attempt.questions_snapshot or []
+    if attempt.current_index >= len(questions):
+        return None
+    return questions[attempt.current_index]
+
+
+def _question_seconds_remaining(attempt: QuizAttempt) -> int | None:
+    """Seconds left on the current question, or None when it carries no limit."""
+    question = _current_question(attempt)
+    if question is None:
+        return None
+    limit = question.get("time_limit_seconds")
+    if not limit or attempt.question_started_at is None:
+        return None
+    elapsed = (_utcnow() - attempt.question_started_at.replace(tzinfo=UTC)).total_seconds()
+    # Ceil, so a question opens showing its full limit rather than one second short.
+    return max(0, ceil(int(limit) - elapsed))
+
+
+def _record_timed_out(attempt: QuizAttempt, db: DBSession) -> None:
+    """Burn the current question: zero points, flagged as lost to the clock."""
+    question = _current_question(attempt)
+    if question is None:
+        return
+    answer = QuizAnswer(
+        attempt_id=attempt.id,
+        question_id=question["id"],
+        answer={},
+        is_correct=False,
+        points_earned=0,
+        timed_out=True,
+    )
+    db.add(answer)
+    attempt.answers.append(answer)
+
+
+def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
+    """Burn every question whose window has closed, and return how many were burned.
+
+    Loops rather than handling one question, because the student may have been away for
+    longer than a single window — the clock runs whether or not their browser is open.
+    Questions with no limit never expire, so the loop stops at the first of those.
+    """
+    burned = 0
+    questions: list[dict[str, Any]] = attempt.questions_snapshot or []
+    while attempt.current_index < len(questions):
+        question = questions[attempt.current_index]
+        limit = question.get("time_limit_seconds")
+        if not limit:
+            break
+        if attempt.question_started_at is None:
+            attempt.question_started_at = _utcnow()
+            break
+        elapsed = (
+            _utcnow() - attempt.question_started_at.replace(tzinfo=UTC)
+        ).total_seconds()
+        if elapsed <= limit:
+            break
+        _record_timed_out(attempt, db)
+        attempt.current_index += 1
+        # The next window starts when this one ENDED, not now — otherwise a student who
+        # closes the laptop for an hour loses exactly one question and gets a fresh clock
+        # on the next. Answering normally restarts the clock at "now"; expiring does not.
+        attempt.question_started_at = attempt.question_started_at.replace(
+            tzinfo=UTC
+        ) + timedelta(seconds=limit)
+        burned += 1
+    return burned
 
 
 def _build_question_config(q_type: str, q: dict[str, Any]) -> dict[str, Any]:
@@ -127,6 +207,7 @@ def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any
     """
     questions_raw: list[dict[str, Any]] = quiz_cfg.get("questions", [])
     total = int(quiz_cfg.get("questions_to_send", len(questions_raw)))
+    default_seconds = quiz_cfg.get("question_time_default_seconds")
     shuffle_q = bool(quiz_cfg.get("shuffle_questions", True))
     shuffle_opts = bool(quiz_cfg.get("shuffle_options", True))
 
@@ -148,12 +229,16 @@ def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any
         q_type = str(q.get("type", "")).upper()
         q_config = _build_question_config(q_type, q)
 
+        raw_seconds = q.get("time_limit_seconds", default_seconds)
         q_snap: dict[str, Any] = {
             "id": orig_idx,
             "type": q_type,
             "text": str(q.get("text", "")),
             "points": int(q.get("points", 1)),
             "is_required": bool(q.get("required", False)),
+            # Question value → quiz-level default → no limit. Resolved once, at draw time, so
+            # a later config edit cannot change the clock of an attempt already running.
+            "time_limit_seconds": int(raw_seconds) if raw_seconds else None,
             "config": q_config,
         }
 
@@ -269,16 +354,26 @@ async def _grade_and_finalize(
 
     attempts_left: int | None = None
     submission = attempt.submission
-    if submission:
+    # Only a submission still sitting at QUIZ_SENT can be moved by a quiz outcome. Anything
+    # else (already completed, already handed to a teacher) means a stale attempt finishing
+    # late; record the attempt but leave the submission where it is rather than 500-ing the
+    # student with an InvalidTransitionError.
+    if submission and submission.status == SubmissionStatus.QUIZ_SENT:
         if is_passed:
-            submission.status = SubmissionStatus.COMPLETED
-            await finalize_grade(db, submission)
+            # `quiz_then_teacher` hands the attached work to the teacher instead of completing
+            # here; the grade is still computed from the quiz, but only once they approve.
+            if attempt.config_snapshot.get("review_mode") == "quiz_then_teacher":
+                transition(submission, "quiz_passed_teacher")
+                await enqueue_teacher_review_notification(db, submission.id)
+            else:
+                transition(submission, "quiz_passed")
+                await finalize_grade(db, submission)
         else:
             max_attempts = attempt.config_snapshot.get("max_quiz_attempts")
             if max_attempts is not None:
                 prior = await _count_used_attempts(db, attempt.submission_id, attempt.id)
                 if prior + 1 >= max_attempts:
-                    submission.status = SubmissionStatus.FAILED
+                    transition(submission, "quiz_failed")
                     attempts_left = 0
                 else:
                     attempts_left = max_attempts - (prior + 1)
@@ -358,12 +453,10 @@ async def start_or_resume_quiz(
     if not assignment_code:
         raise HTTPException(status_code=404, detail="Assignment has no config code")
 
-    quiz_cfg: dict[str, Any] = (
-        config_record.config
-        .get("assignments", {})
-        .get(assignment_code, {})
-        .get("quiz", {})
+    plugin_assignment: dict[str, Any] = (
+        config_record.config.get("assignments", {}).get(assignment_code, {})
     )
+    quiz_cfg: dict[str, Any] = plugin_assignment.get("quiz", {})
     if not quiz_cfg or not quiz_cfg.get("questions"):
         raise HTTPException(status_code=404, detail="No quiz configured for this assignment")
 
@@ -381,20 +474,30 @@ async def start_or_resume_quiz(
         "pass_threshold_pct": float(quiz_cfg.get("pass_threshold_pct", 0.6)),
         "show_correct_answers_after": bool(quiz_cfg.get("show_correct_answers_after", False)),
         "anti_cheat": quiz_cfg.get("anti_cheat", {}),
+        # Snapshotted so a config re-upload mid-attempt cannot change where a pass lands.
+        "review_mode": plugin_assignment.get("review_mode", "tests_only"),
     }
     if max_attempts is not None:
         config_snapshot["max_quiz_attempts"] = int(max_attempts)
     if quiz_cfg.get("time_limit_minutes") is not None:
         config_snapshot["time_limit_minutes"] = int(quiz_cfg["time_limit_minutes"])
+    # Stepper mode is derived, never declared: if anything actually drawn carries a clock, this
+    # attempt is answered one question at a time. Recorded per attempt so the delivery style
+    # cannot change under a student mid-quiz.
+    if any(q.get("time_limit_seconds") for q in questions_snapshot):
+        config_snapshot["per_question_timing"] = True
 
+    now = _utcnow()
     attempt = QuizAttempt(
         submission_id=latest_sub.id,
         plugin_config_id=config_record.id,
         plugin_config_version=config_record.version,
         questions_snapshot=questions_snapshot,
         config_snapshot=config_snapshot,
-        started_at=_utcnow(),
+        started_at=now,
         status=QuizAttemptStatus.IN_PROGRESS,
+        current_index=0,
+        question_started_at=now if config_snapshot.get("per_question_timing") else None,
     )
     db.add(attempt)
     await db.commit()
@@ -442,10 +545,34 @@ async def show_quiz(
         await _grade_and_finalize(attempt, db, status=QuizAttemptStatus.TIMED_OUT)
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
 
-    existing_answers = {a.question_id: a.answer for a in attempt.answers}
-    seconds_remaining = _seconds_remaining(attempt)
     anti_cheat_config = attempt.config_snapshot.get("anti_cheat", {})
     proctoring_config = anti_cheat_config.get("camera", {})
+
+    if _is_stepped(attempt):
+        # Burn anything whose window closed while they were away, then either finish the
+        # attempt or serve the question they are actually on.
+        if _advance_expired(attempt, db):
+            await db.commit()
+        question = _current_question(attempt)
+        if question is None:
+            await _grade_and_finalize(attempt, db)
+            return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
+        if attempt.question_started_at is None:
+            attempt.question_started_at = _utcnow()
+            await db.commit()
+        return render(request, "student_quiz_step.html", {
+            "current_user": current_user,
+            "attempt": attempt,
+            "question": question,
+            "question_number": attempt.current_index + 1,
+            "total_questions": len(attempt.questions_snapshot or []),
+            "seconds_remaining": _question_seconds_remaining(attempt),
+            "anti_cheat_config": anti_cheat_config,
+            "proctoring_config": proctoring_config,
+        })
+
+    existing_answers = {a.question_id: a.answer for a in attempt.answers}
+    seconds_remaining = _seconds_remaining(attempt)
 
     return render(request, "student_quiz.html", {
             "current_user": current_user,
@@ -524,9 +651,19 @@ async def report_violation(
                 response_action = "fail"
 
             elif action_type == "reduce_time":
-                violations["_time_penalty_seconds"] = int(violations.get("_time_penalty_seconds", 0)) + penalty
                 response_action = "reduce_time"
-                seconds_remaining = _seconds_remaining_from_violations(attempt, violations)
+                if _is_stepped(attempt):
+                    # There is no attempt-wide budget to deduct from — shorten the question
+                    # they are on by walking its start time backwards. If that exhausts it,
+                    # the next page load burns the question like any other expiry.
+                    if attempt.question_started_at is not None:
+                        attempt.question_started_at = attempt.question_started_at - timedelta(
+                            seconds=penalty
+                        )
+                    seconds_remaining = _question_seconds_remaining(attempt)
+                else:
+                    violations["_time_penalty_seconds"] = int(violations.get("_time_penalty_seconds", 0)) + penalty
+                    seconds_remaining = _seconds_remaining_from_violations(attempt, violations)
 
             elif action_type == "warn":
                 response_action = "warn"
@@ -617,6 +754,89 @@ async def upload_snapshot(
     return JSONResponse({"stored": True, "url": url})
 
 
+@router.post("/quiz/{attempt_id}/answer")
+async def answer_question(
+    request: Request,
+    attempt_id: int,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+) -> RedirectResponse:
+    """Record the answer to the current question of a stepped attempt and advance.
+
+    Always redirects (PRG), so a refresh cannot replay an answer, and a stale tab posting an
+    old question index changes nothing.
+    """
+    attempt = await db.get(
+        QuizAttempt,
+        attempt_id,
+        options=[
+            selectinload(QuizAttempt.answers),
+            selectinload(QuizAttempt.submission).selectinload(Submission.students_assignment),
+        ],
+    )
+    if attempt is None:
+        raise HTTPException(status_code=404)
+
+    submission = attempt.submission
+    if submission is None or submission.students_assignment.student_id != student_id:
+        raise HTTPException(status_code=403)
+
+    if attempt.status in _TERMINAL_STATUSES:
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
+
+    if not _is_stepped(attempt):
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
+
+    if (attempt.violations or {}).get("_force_fail"):
+        await _grade_and_finalize(attempt, db, status=QuizAttemptStatus.VIOLATION_FAIL)
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
+
+    form = await request.form()
+
+    # Burn anything that expired before this POST landed. If that consumed the question this
+    # form was for, the answer is already recorded as timed out and must not be graded again.
+    expired = _advance_expired(attempt, db)
+    try:
+        posted_index = int(str(form.get("index", "-1")))
+    except ValueError:
+        posted_index = -1
+
+    if expired == 0 and posted_index == attempt.current_index:
+        q_snap = _current_question(attempt)
+        if q_snap is not None:
+            q_id = q_snap["id"]
+            q_type = q_snap["type"]
+            if q_type == "MULTIPLE_CHOICE":
+                raw: Any = list(form.getlist(f"answer_{q_id}"))
+            elif q_type == "ORDERING":
+                raw = form.get(f"answer_ordering_{q_id}", "")
+            else:
+                raw = form.get(f"answer_{q_id}", "")
+
+            answer_json, is_correct, points_earned = _grade_answer(q_snap, raw)
+            answer = QuizAnswer(
+                attempt_id=attempt_id,
+                question_id=q_id,
+                answer=answer_json,
+                is_correct=is_correct,
+                points_earned=points_earned,
+                timed_out=False,
+            )
+            db.add(answer)
+            attempt.answers.append(answer)
+            attempt.current_index += 1
+            attempt.question_started_at = _utcnow()
+
+    if _current_question(attempt) is None:
+        await db.flush()
+        await _grade_and_finalize(attempt, db)
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
+
+    await db.commit()
+    return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
+
+
 @router.post("/quiz/{attempt_id}/submit")
 async def submit_quiz(
     request: Request,
@@ -642,6 +862,11 @@ async def submit_quiz(
 
     if attempt.status in _TERMINAL_STATUSES:
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
+
+    if _is_stepped(attempt):
+        # A stepped attempt is finalized by its last question, not by a bulk submit. Anything
+        # posting here is a stale form, so send them back to the question they are actually on.
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
 
     if (attempt.violations or {}).get("_force_fail"):
         final_status = QuizAttemptStatus.VIOLATION_FAIL
@@ -730,6 +955,7 @@ async def quiz_result(
             "answer": ans.answer if ans else None,
             "is_correct": ans.is_correct if ans else None,
             "points_earned": ans.points_earned if ans else 0,
+            "timed_out": bool(ans.timed_out) if ans else False,
         })
 
     sa = submission.students_assignment
@@ -745,6 +971,7 @@ async def quiz_result(
             "current_user": current_user,
             "attempt": attempt,
             "question_results": question_results,
+            "timed_out_count": sum(1 for r in question_results if r["timed_out"]),
             "show_correct": show_correct,
             "subject_id": subject_id,
             "student_assignment_id": sa.id,

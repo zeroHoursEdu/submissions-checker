@@ -11,7 +11,7 @@ from pathlib import Path
 
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import and_, cast, false, func, nullsfirst, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -54,6 +54,8 @@ from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
+
+UPLOADS_DIR = Path("uploads")
 
 router = APIRouter(prefix="/teacher", tags=["teacher-portal"])
 
@@ -854,6 +856,53 @@ async def teacher_review_submission(
         })
 
 
+@router.get("/submissions/{submission_id}/download")
+async def teacher_download_submission(
+    submission_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> FileResponse:
+    """Serve the student's uploaded archive to the reviewing teacher.
+
+    Under the quiz-first review modes nothing runs the submission, so reading the attached
+    report and sources IS the teacher's review — without this the review page can only name
+    the file.
+    """
+    result = await db.execute(
+        select(Submission)
+        .where(Submission.id == submission_id)
+        .options(
+            selectinload(Submission.students_assignment)
+            .selectinload(StudentAssignment.subjects_assignment)
+            .selectinload(SubjectsAssignment.subject)
+        )
+    )
+    submission = result.scalar_one_or_none()
+    if submission is None:
+        raise HTTPException(status_code=404)
+
+    subject = submission.students_assignment.subjects_assignment.subject
+    if current_user.role != UserRole.ADMIN and subject.owner_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this subject")
+
+    saved_as = (submission.source_metadata or {}).get("saved_as")
+    if not saved_as:
+        raise HTTPException(status_code=404, detail="Submission has no stored file")
+
+    uploads_root = UPLOADS_DIR.resolve()
+    path = (uploads_root / saved_as).resolve()
+    # saved_as is server-generated, but never trust a stored path to stay inside its root.
+    if not path.is_file() or uploads_root not in path.parents:
+        raise HTTPException(status_code=404, detail="Submission file is no longer available")
+
+    original = (submission.source_metadata or {}).get("original_filename") or path.name
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=Path(original).name,
+    )
+
+
 @router.post("/submissions/{submission_id}/review")
 async def teacher_review_submission_action(
     submission_id: int,
@@ -895,6 +944,20 @@ async def teacher_review_submission_action(
                 .get(subjects_assignment.code, {})
             )
             has_quiz = bool(asgn_cfg.get("quiz", {}).get("questions"))
+        if has_quiz:
+            # Under `quiz_then_teacher` the quiz already happened and this review IS the last
+            # step — without this guard such a submission would be sent back into its quiz on
+            # every approval and could never complete.
+            already_passed = await db.scalar(
+                select(QuizAttempt.id)
+                .where(
+                    QuizAttempt.submission_id == submission.id,
+                    QuizAttempt.is_passed.is_(True),
+                )
+                .limit(1)
+            )
+            if already_passed is not None:
+                has_quiz = False
         if submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW:
             transition(submission, "teacher_send_quiz" if has_quiz else "teacher_approve")
         else:

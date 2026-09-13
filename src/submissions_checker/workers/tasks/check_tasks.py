@@ -46,6 +46,11 @@ logger = get_logger(__name__)
 UPLOADS_DIR = Path("uploads")
 _SANDBOX = DockerSandbox()
 
+# Review modes that examine the student by quiz instead of by automated tests. Assignments in
+# these modes need no `sandbox`/`check_command` block at all: the upload is accepted after an
+# archive-safety check and the submission goes straight to the quiz.
+_QUIZ_FIRST_MODES = frozenset({"quiz_only", "quiz_then_teacher"})
+
 
 async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     submission_id: int = payload["submission_id"]
@@ -85,6 +90,14 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     plugin_assignment: dict[str, Any] = config_record.config.get("assignments", {}).get(
         assignment_code, {}
     )
+
+    review_mode: str = plugin_assignment.get("review_mode", "tests_only")
+
+    # Quiz-examined assignments never touch the sandbox — bail out before a check plan is even
+    # resolved, since these configs legitimately carry no check_command.
+    if review_mode in _QUIZ_FIRST_MODES:
+        _accept_without_checks(submission, review_mode)
+        return
 
     # Resolve the check plan from config (DB-free core). Misconfiguration → validation fail.
     plan = check_core.resolve_check_plan(config_record.config, assignment_code, variant)
@@ -160,7 +173,6 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
             )
             return
 
-        review_mode: str = plugin_assignment.get("review_mode", "tests_only")
         await _advance_after_tests(db, submission, review_mode)
 
 
@@ -196,6 +208,43 @@ def _fail_validation(submission: Submission, reason: str) -> None:
     if submission.status == SubmissionStatus.PENDING:
         transition(submission, "start_validation")
     transition(submission, "validation_failed")
+
+
+def _accept_without_checks(submission: Submission, review_mode: str) -> None:
+    """Accept a quiz-examined submission without running any check.
+
+    No sandbox, no check plan — but the archive is still opened and safe-extracted to a
+    throwaway directory, so a corrupt ZIP or one with traversal/zip-bomb entries fails here
+    exactly as it would on the sandbox path rather than reaching the student's quiz.
+
+    ``test_results`` deliberately carries no ``score``/``max_score``: ``grading._pct`` then
+    returns None for the works component and ``compute_grade`` renormalises onto the quiz.
+    """
+    saved_as = (submission.source_metadata or {}).get("saved_as")
+    if not saved_as:
+        raise RuntimeError("Submission has no saved_as in source_metadata")
+
+    with tempfile.TemporaryDirectory(prefix="submission_") as extract_dir:
+        try:
+            with zipfile.ZipFile(UPLOADS_DIR / saved_as, "r") as zf:
+                safe_extract(zf, Path(extract_dir))
+        except (zipfile.BadZipFile, OSError) as exc:
+            _fail_validation(submission, f"Could not open submitted ZIP: {exc}")
+            return
+        except UnsafeArchiveError as exc:
+            logger.error(
+                "check_task_unsafe_archive", submission_id=submission.id, error=str(exc)
+            )
+            _fail_validation(submission, f"Submitted ZIP archive is unsafe: {exc}")
+            return
+
+    submission.test_results = {"skipped": True, "reason": review_mode}
+    transition(submission, "start_validation")
+    transition(submission, "validation_passed")
+    transition(submission, "test_passed_quiz")
+    logger.info(
+        "check_task_skipped_for_quiz", submission_id=submission.id, review_mode=review_mode
+    )
 
 
 async def _advance_after_tests(db: AsyncSession, submission: Submission, review_mode: str) -> None:

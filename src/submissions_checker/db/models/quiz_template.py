@@ -47,6 +47,12 @@ class QuizAttempt(Base, TimestampMixin):
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Per-question timing cursor. Only meaningful when config_snapshot["per_question_timing"]
+    # is set; otherwise the whole attempt is answered on one page and these stay at 0/NULL.
+    current_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    question_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -92,6 +98,12 @@ class QuizAnswer(Base, TimestampMixin):
     answer: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     points_earned: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # True when the question's own time window closed before a valid answer arrived. Scores
+    # zero either way; the flag is what lets the result page (and later analytics) tell a
+    # wrong answer apart from one lost to the clock.
+    timed_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     attempt: Mapped[QuizAttempt] = relationship("QuizAttempt", back_populates="answers")
 

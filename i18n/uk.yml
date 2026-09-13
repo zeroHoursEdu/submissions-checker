@@ -165,6 +165,13 @@ quiz:
   resubmit_for_new_quiz: Надішліть роботу повторно для нової спроби тесту.
   violation_terminated: Ця спроба була автоматично завершена через порушення антишахрайської політики.
   none_answer: немає
+  question_label: 'Питання'
+  question_time_left: 'На це питання'
+  one_question_at_a_time: 'Питання показуються по одному. Кожне має власний ліміт часу — щойно він спливе, питання зараховується як без відповіді.'
+  no_going_back: 'Повернутися до попереднього питання не можна.'
+  answer_and_next: 'Відповісти →'
+  result_timed_out_badge: 'Час вичерпано'
+  result_timed_out_count: 'Питань без відповіді через брак часу:'
   proctor_recording: Ведеться запис
   proctor_loading: Завантаження системи проктерингу…
   proctor_camera_required: Для цього тесту потрібна камера. Надайте доступ до камери та перезавантажте сторінку.
@@ -230,6 +237,7 @@ teacher:
   review_subtitle: "Схвалити або відхилити цю здачу для"
   student_card_label: Студент
   submitted_file_label: Надісланий файл
+  download_submission: 'завантажити'
   original_name: Оригінальна назва
   submitted_at: Надіслано
   check_output: Вивід перевірки
