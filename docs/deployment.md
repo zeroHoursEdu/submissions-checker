@@ -17,6 +17,7 @@ needs no inbound access beyond ports 80 and 443.
 - [Releases and deployment tracking](#releases-and-deployment-tracking)
 - [First-time host setup](#first-time-host-setup)
 - [The migration rule](#the-migration-rule-read-this-before-writing-one)
+- [Creating the first account](#creating-the-first-account)
 - [Rollback](#rollback)
 - [Backups and restore](#backups-and-restore)
 - [Memory budget](#memory-budget)
@@ -260,6 +261,107 @@ docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate
 
 By the time the new image arrives, the schema is already at head and each replica's boot
 migration is a no-op.
+
+---
+
+## Creating the first account
+
+A production deployment seeds no accounts — the demo accounts exist only when
+`ENVIRONMENT=development`, which production never is. So a freshly deployed system
+has an empty `users` table and no way in through the interface. Create the first
+account directly in the database.
+
+### 1. Generate a bcrypt hash
+
+The application verifies with `bcrypt.checkpw`, so the hash must be bcrypt. Postgres's
+`crypt()` and any SHA variant will not work.
+
+Run this anywhere with Python — your laptop is fine, it never touches the database:
+
+```bash
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'YOUR-PASSWORD-HERE', bcrypt.gensalt(12)).decode())"
+```
+
+Or on the host, without installing anything:
+
+```bash
+docker compose -f docker-compose.prod.yml exec app \
+  python -c "import bcrypt; print(bcrypt.hashpw(b'YOUR-PASSWORD-HERE', bcrypt.gensalt(12)).decode())"
+```
+
+It prints something beginning `$2b$12$`. That whole string is the value to insert.
+
+### 2. Insert a teacher
+
+Teacher is the right first account: it can reach the portal, create subjects and
+import students. Roles are `TEACHER`, `STUDENT` and `ADMIN`.
+
+```sql
+INSERT INTO users (username, password_hash, role, is_active)
+VALUES ('yourname', '$2b$12$...paste the hash...', 'TEACHER', true);
+```
+
+Sign in at `https://<your domain>/auth/login`. A correct password answers `303` and
+redirects to `/teacher`.
+
+### Connecting a database client (DataGrip, psql, …)
+
+Postgres is published on the host's **loopback only**:
+
+```yaml
+ports:
+  - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+```
+
+So it is reachable through an SSH tunnel and not reachable from the internet. The
+`127.0.0.1` prefix is doing all the work and must not be removed: a plain
+`- "5432:5432"` binds `0.0.0.0`, and Docker inserts its own iptables rules *ahead of*
+the INPUT chain, so such a binding bypasses the host firewall completely. The Oracle
+security list would not save you either. Verified: with the loopback binding the port
+answers on `127.0.0.1` and is refused on the host's own external address.
+
+**DataGrip.** New Data Source → PostgreSQL:
+
+*SSH/SSL tab* → check **Use SSH tunnel** → configure the SSH host:
+
+| Field | Value |
+|---|---|
+| Host | your server's public address |
+| Port | `22` |
+| User name | the SSH user (`ubuntu`, `opc`, `root` …) |
+| Authentication | Key pair → your private key |
+
+*General tab* — these are resolved **on the far side of the tunnel**, so they refer to
+the server's own loopback:
+
+| Field | Value |
+|---|---|
+| Host | `127.0.0.1` |
+| Port | `5432` (or `POSTGRES_HOST_PORT`) |
+| Database | `POSTGRES_DB` from `.env` |
+| User | `POSTGRES_USER` from `.env` |
+| Password | `POSTGRES_PASSWORD` from `.env` |
+
+**Command line**, same idea:
+
+```bash
+ssh -L 5433:127.0.0.1:5432 user@your-host    # leave running
+psql -h 127.0.0.1 -p 5433 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+**Or skip the tunnel** for a quick look, with no client at all:
+
+```bash
+docker compose -f docker-compose.prod.yml exec postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+### A student account needs a student row
+
+`ck_users_student_role_has_student_id` requires any `STUDENT` user to reference a
+`students` row, which itself requires a group. Creating students by hand is fiddly and
+unnecessary: import them from CSV in the teacher portal, which creates both records and
+emails each student their credentials. Only use SQL for the first teacher.
 
 ---
 

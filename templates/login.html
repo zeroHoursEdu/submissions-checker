@@ -7,7 +7,7 @@
   <div class="w-full max-w-sm">
 
     <div class="text-center mb-8">
-      <h1 class="text-2xl font-bold text-slate-900">{{ vocab.auth.sign_in_to_edutrack }}</h1>
+      <h1 class="text-2xl font-bold text-slate-900">{{ vocab.auth.sign_in_to_app }}</h1>
       <p class="text-slate-500 text-sm mt-1">{{ vocab.auth.enter_credentials }}</p>
     </div>
 
@@ -60,9 +60,11 @@
     </form>
 
     <div class="text-center mt-5">
+      {% if is_development %}
       <p class="text-xs text-slate-400">
         {{ vocab.auth.demo_accounts }}
       </p>
+      {% endif %}
       <a href="/auth/forgot-password" class="text-xs text-indigo-500 hover:underline mt-2 inline-block">
         {{ vocab.auth.forgot_password }}
       </a>

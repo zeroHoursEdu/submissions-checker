@@ -122,7 +122,7 @@ async def test_forgot_password_dispatches_reset_email_to_student_email(
     assert len(channel.sent) == 1
     recipient, subject, body = channel.sent[0]
     assert recipient == "learner@example.com"
-    assert "Reset your EduTrack password" == subject
+    assert "Reset your SubmissionChecker password" == subject
     assert "Lena Learner" in body
 
     # The dispatched link must carry the token that was persisted for this user.

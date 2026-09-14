@@ -84,7 +84,7 @@ def new_submission_template(
         f"{student_name} has submitted their work for '{assignment_title}' "
         f"and it is awaiting your review.\n\n"
         f"Review it here: {review_url}\n\n"
-        f"Best regards,\nEduTrack"
+        f"Best regards,\nSubmissionChecker"
     )
     return subject, body
 
@@ -112,14 +112,14 @@ def teacher_digest_template(
         f"You have {count} {noun} awaiting review:\n\n"
         + "\n".join(lines)
         + f"\n\nOpen your dashboard: {dashboard_url}\n\n"
-        f"Best regards,\nEduTrack"
+        f"Best regards,\nSubmissionChecker"
     )
     return subject, body
 
 
 def password_reset_template(full_name: str, reset_url: str) -> tuple[str, str]:
     """Return (subject, body) for a password reset email."""
-    subject = "Reset your EduTrack password"
+    subject = "Reset your SubmissionChecker password"
     body = (
         f"Hi {full_name},\n\n"
         f"You requested a password reset. Click the link below to set a new password "
@@ -184,7 +184,7 @@ def credentials_template(
     full_name: str, username: str, password: str, login_url: str
 ) -> tuple[str, str]:
     """Return (subject, body) for a new student account welcome email."""
-    subject = "Your account credentials for EduTrack"
+    subject = "Your account credentials for SubmissionChecker"
     body = (
         f"Hi {full_name},\n\n"
         f"Your account has been created. Here are your login details:\n\n"

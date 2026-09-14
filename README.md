@@ -154,6 +154,27 @@ make up
 make dev
 ```
 
+### Local accounts
+
+The migrations seed a set of accounts **only when `ENVIRONMENT=development`**, which
+is the default for local work:
+
+| Username | Password | Role |
+|---|---|---|
+| `teacher` | `teacher123` | Teacher |
+| `ivan` | `student123` | Student |
+| `olena` | `student123` | Student |
+| `mykola` | `student123` | Student |
+
+The sign-in page repeats this list, also only in development.
+
+**None of these exist in a production deployment.** `ENVIRONMENT` defaults to
+`production` in the migrations and is set explicitly in `docker-compose.prod.yml`, so
+the seeding is skipped and the hint is not rendered. A freshly deployed production
+system has no accounts at all — see
+[creating the first account](docs/deployment.md#creating-the-first-account) for how to
+get into one.
+
 ## Development
 
 ### Available Commands

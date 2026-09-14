@@ -3,7 +3,7 @@ _meta:
   code: uk
 
 nav:
-  brand: EduTrack
+  brand: SubmissionChecker
   role_teacher: Викладач
   role_admin: Адмін
   role_student: Студент
@@ -55,7 +55,7 @@ auth:
   page_title_login: Увійти
   page_title_forgot: Забули пароль
   page_title_reset: Скинути пароль
-  sign_in_to_edutrack: Увійти до EduTrack
+  sign_in_to_app: Увійти до SubmissionChecker
   enter_credentials: Введіть дані для входу
   username: Ім'я користувача
   username_placeholder: ваш логін

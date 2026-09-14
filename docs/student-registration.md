@@ -1,6 +1,6 @@
 # Student Registration Guide
 
-This guide explains how to register students in EduTrack and how the system manages their accounts.
+This guide explains how to register students in SubmissionChecker and how the system manages their accounts.
 
 ---
 
@@ -11,7 +11,7 @@ Instead of creating accounts one by one, teachers register students in bulk via 
 1. Teacher downloads a **blank CSV template**.
 2. Teacher shares it with students in a group chat or email.
 3. Students fill in their details and return the file.
-4. Teacher uploads the completed CSV — EduTrack creates accounts and sends each student their login credentials automatically.
+4. Teacher uploads the completed CSV — SubmissionChecker creates accounts and sends each student their login credentials automatically.
 
 ---
 
@@ -50,7 +50,7 @@ Once students have filled in the file and returned it to you:
 2. Click **Choose file** and select the completed CSV.
 3. Click **Import students**.
 
-EduTrack will:
+SubmissionChecker will:
 - Create a new group if the group name does not exist yet.
 - Create a student profile and login account for each row.
 - Generate a unique username (`firstname.lastname`) and a random password.

@@ -40,6 +40,44 @@ PROTECTED_ENDPOINTS = [
 # ── Open endpoints ───────────────────────────────────────────────────────────
 
 
+# ── Sign-in page discloses nothing in production ─────────────────────────────
+
+
+async def test_login_page_hides_demo_credentials_in_production(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """A production sign-in page must not name an account or a password.
+
+    The hint is a developer convenience. It shipped to a public deployment and
+    advertised `teacher / teacher123` to every visitor, which is a username list
+    handed to anyone who loads the page.
+    """
+    from submissions_checker.core import templates as templates_module
+
+    monkeypatch.setattr(templates_module._settings, "environment", "production")
+
+    resp = await client.get("/auth/login")
+
+    assert resp.status_code == 200
+    body = resp.text
+    for secret in ("teacher123", "student123", "Демо-акаунти"):
+        assert secret not in body, f"production login page leaked {secret!r}"
+
+
+async def test_login_page_shows_demo_credentials_in_development(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """Locally the hint stays: the accounts it describes do exist there."""
+    from submissions_checker.core import templates as templates_module
+
+    monkeypatch.setattr(templates_module._settings, "environment", "development")
+
+    resp = await client.get("/auth/login")
+
+    assert resp.status_code == 200
+    assert "teacher123" in resp.text
+
+
 async def test_health_is_open(client: AsyncClient) -> None:
     resp = await client.get("/health")
     assert resp.status_code == 200

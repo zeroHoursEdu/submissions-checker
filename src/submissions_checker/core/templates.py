@@ -31,6 +31,10 @@ def render(
     merged: dict[str, Any] = {
         "vocab": vocab,
         "available_languages": AVAILABLE_LANGUAGES,
+        # Lets a template show development-only affordances. Read from the same
+        # setting the seeding migrations check, so a page can never advertise
+        # accounts that this environment does not have.
+        "is_development": _settings.is_development,
     }
     if context:
         merged.update(context)

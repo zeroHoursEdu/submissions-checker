@@ -148,6 +148,16 @@ services:
       POSTGRES_USER: "${POSTGRES_USER:?set POSTGRES_USER}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?generate with openssl rand -hex 24}"
       POSTGRES_DB: ${POSTGRES_DB:-submissions_checker}
+    ports:
+      # Bound to the host's loopback ONLY, so a database client can reach it through
+      # an SSH tunnel and nothing can reach it from the internet. The interface is
+      # hardcoded on purpose: only the port number is configurable.
+      #
+      # Publishing on 0.0.0.0 here would be worse than it looks — Docker inserts its
+      # own iptables rules ahead of the INPUT chain, so a 0.0.0.0 binding bypasses the
+      # host firewall entirely and would expose Postgres regardless of the rules in
+      # the Oracle security list.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     # Tuned for a 2GB host. max_connections is deliberately low: it is the ceiling the
     # replicas' pools are sized against, not a value to raise when connections run out.
     command:
