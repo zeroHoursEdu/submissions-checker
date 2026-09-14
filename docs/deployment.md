@@ -324,6 +324,37 @@ restored is a backup you do not know you have.
 
 ---
 
+## Reading Watchtower's logs
+
+A healthy idle cycle looks like this, once a minute:
+
+```
+Session done  Failed=0 Scanned=2 Updated=0
+```
+
+`Scanned=2` is the two app replicas and nothing else — if Postgres, MinIO or
+Caddy ever appear in the count, label scoping has broken and the updater is one
+bad release away from restarting your database.
+
+`Updated=0` means the registry digest for `:main` has not moved. That is the
+normal state between deploys. It is also what you see if CI cancelled a run: a
+newer commit supersedes an in-flight build under the workflow's concurrency
+group, so only the latest commit publishes.
+
+### "Failed to retrieve container image info: No such image: sha256:…"
+
+Benign, and note that `Failed=0` on the same cycle — Watchtower is failing to
+*describe* a container, not to update one. Some stopped container still
+references an image that `WATCHTOWER_CLEANUP` has since deleted, so every scan
+re-reports it.
+
+```bash
+docker inspect --format '{{.Name}} {{.State.Status}} {{.Image}}' $(docker ps -aq) | grep <the-sha>
+docker rm <that-container>     # or: docker container prune
+```
+
+---
+
 ## Memory budget
 
 2GB total. These are ceilings, not reservations — steady-state usage is well under them,
