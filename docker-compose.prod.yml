@@ -91,8 +91,18 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Email: configure exactly ONE of the three. Each is added independently when
+      # its key is present, so setting two makes every notification send twice.
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_ADDRESS: ${RESEND_FROM_ADDRESS:-noreply@example.com}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_FROM_ADDRESS: ${BREVO_FROM_ADDRESS:-noreply@example.com}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-noreply@example.com}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     volumes:
       # Checks run as sibling containers on the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock

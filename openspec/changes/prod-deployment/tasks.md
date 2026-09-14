@@ -74,6 +74,8 @@
 
 ## 6c. Defects found on the target host
 
+- [x] 6c.2 Only Resend was plumbed through the production compose, so BREVO_* and SMTP_* in `.env` were silently ignored. All three channels are now passed through and documented, with a warning that configuring two sends every notification twice
+- [x] 6c.3 The Resend channel discarded the API's explanation of a failure via `raise_for_status()`, reporting a bare 403 for two very different misconfigurations
 - [x] 6c.1 The app's plugins mount was read-only, so applying a subject config failed after the database had committed — subject present, files absent. The app owns that tree; read-only belongs at the sandbox, which already applies it.
 
 ## 7. Verification on the target host

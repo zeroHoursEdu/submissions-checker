@@ -29,6 +29,11 @@ def _patch_httpx(module_path: str, *, raise_for_status_exc: Exception | None = N
     yields ``mock_client`` whose ``.post`` returns ``response``.
     """
     response = MagicMock()
+    # Brevo still calls raise_for_status; Resend inspects `is_error` so that it can
+    # include the provider's explanation in the error it raises.
+    response.is_error = raise_for_status_exc is not None
+    response.status_code = 403 if raise_for_status_exc is not None else 200
+    response.text = ""
     if raise_for_status_exc is not None:
         response.raise_for_status.side_effect = raise_for_status_exc
     else:
@@ -100,7 +105,6 @@ async def test_resend_send_posts_expected_request() -> None:
         "subject": "Subject line",
         "text": "Hello body",
     }
-    response.raise_for_status.assert_called_once()
 
 
 async def test_resend_send_propagates_http_error() -> None:
@@ -111,3 +115,23 @@ async def test_resend_send_propagates_http_error() -> None:
 
     with cm, pytest.raises(httpx.HTTPStatusError):
         await channel.send("a@x.com", "s", "b")
+
+
+async def test_resend_error_carries_the_providers_explanation() -> None:
+    """A 403 alone is not actionable; the body names the actual misconfiguration.
+
+    Resend answers 403 both for an unverified sender domain and for a recipient
+    other than the account owner. Reporting only the status code leaves an operator
+    guessing between them.
+    """
+    channel = ResendChannel(api_key="k", from_address="noreply@example.edu")
+    module = "submissions_checker.services.notifications.resend_channel"
+    err = httpx.HTTPStatusError("403", request=MagicMock(), response=MagicMock())
+    cm, _client, response = _patch_httpx(module, raise_for_status_exc=err)
+    response.text = '{"statusCode":403,"message":"The example.edu domain is not verified."}'
+
+    with cm, pytest.raises(httpx.HTTPStatusError) as excinfo:
+        await channel.send("a@x.com", "s", "b")
+
+    assert "not verified" in str(excinfo.value)
+    assert "403" in str(excinfo.value)
