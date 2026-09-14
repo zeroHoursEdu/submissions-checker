@@ -197,7 +197,12 @@ exist.
 
 ```bash
 docker compose -f docker-compose.prod.yml ps          # all healthy
-curl -sI https://$DOMAIN/health                       # 200, valid certificate
+
+# GET, not HEAD: these routes are registered GET-only, so `curl -I` answers a
+# correct-but-confusing 405 with `allow: GET`.
+curl -s https://$DOMAIN/health        # {"status":"healthy"}
+curl -s https://$DOMAIN/health/ready  # {"status":"ready","database":"connected"}
+curl -s https://$DOMAIN/version       # the commit this host is running
 ```
 
 Then, in a browser: log in, submit an assignment, confirm the check runs, and confirm a
