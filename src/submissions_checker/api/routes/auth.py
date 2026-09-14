@@ -19,12 +19,12 @@ from submissions_checker.core.security import (
     hash_password,
     verify_password,
 )
+from submissions_checker.core.templates import render
 from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models.password_reset import PasswordResetToken
+from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.user import User
 from submissions_checker.db.models.user_login import UserLogin
-from submissions_checker.db.models.student import Student
-from submissions_checker.core.templates import render
 from submissions_checker.services.notifications.dispatcher import build_dispatcher
 from submissions_checker.services.notifications.templates import password_reset_template
 

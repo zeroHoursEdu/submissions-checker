@@ -14,8 +14,6 @@ import json
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from submissions_checker.cli import runner
 from submissions_checker.services import check_core
 

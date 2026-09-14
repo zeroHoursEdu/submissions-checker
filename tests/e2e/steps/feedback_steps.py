@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import secrets
 from datetime import date
 
 from pytest_bdd import given, parsers, then, when
 
-from tests.e2e.helpers import db_conn as _db_conn, get_feedback_token_for_subject
+from tests.e2e.helpers import db_conn as _db_conn
+from tests.e2e.helpers import get_feedback_token_for_subject
 from tests.e2e.pages.feedback_page import StudentFeedbackPage, TeacherFeedbackPage
 
 

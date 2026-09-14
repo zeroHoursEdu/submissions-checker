@@ -606,8 +606,8 @@ async def import_subject_students(
     content = await file.read()
     try:
         text_content = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=422, detail="File must be UTF-8 encoded")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="File must be UTF-8 encoded") from exc
 
     reader = csv.DictReader(io.StringIO(text_content))
     required = {"student_group", "student_name", "student_surname", "email"}
@@ -818,8 +818,8 @@ async def import_students(
     content = await file.read()
     try:
         text_content = content.decode("utf-8-sig")  # strips BOM if present
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=422, detail="File must be UTF-8 encoded")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="File must be UTF-8 encoded") from exc
 
     reader = csv.DictReader(io.StringIO(text_content))
     required = {"student_group", "student_name", "student_surname", "email"}

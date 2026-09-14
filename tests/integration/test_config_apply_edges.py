@@ -19,22 +19,20 @@ without network I/O. Behaviour was read from ``services/config_apply.py``.
 
 from __future__ import annotations
 
-from pathlib import Path
 import io
 import zipfile
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+import yaml
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import yaml
-
 from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models.subject import Subject
-from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.user import User
 from submissions_checker.services.config_apply import ConfigApplyService

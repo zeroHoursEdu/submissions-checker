@@ -30,20 +30,17 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 
 from submissions_checker.db.models import (
-    Student,
     StudentAssignment,
     Subject,
     SubjectsAssignment,
     SubjectsStudents,
     Submission,
-    User,
     UserLogin,
 )
 from submissions_checker.db.models.enums import SubmissionSourceType, SubmissionStatus, UserRole
-from submissions_checker.main import app
 from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio

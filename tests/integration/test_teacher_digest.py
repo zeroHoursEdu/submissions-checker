@@ -18,9 +18,8 @@ from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.db.models.user import User
 from submissions_checker.services.notifications.templates import teacher_digest_template
-from submissions_checker.workers.tasks import notification_tasks
 from submissions_checker.workers.scheduled import teacher_digest_processor
-
+from submissions_checker.workers.tasks import notification_tasks
 
 # ── template (pure) ───────────────────────────────────────────────────────────
 

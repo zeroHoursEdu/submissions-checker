@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pytest_bdd import given, then, when
+from pytest_bdd import then, when
 
 from tests.e2e.pages.quiz_page import QuizPage
 

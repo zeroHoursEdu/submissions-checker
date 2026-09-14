@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 from sqlalchemy import select
 
 import submissions_checker.api.routes.auth as auth_module

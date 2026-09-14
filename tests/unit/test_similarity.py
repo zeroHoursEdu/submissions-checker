@@ -9,15 +9,11 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-import pytest
-
-from submissions_checker.services import similarity
 from submissions_checker.services.similarity import (
     _normalize,
     compare_zip_files,
     jaccard_similarity,
 )
-
 
 # ── jaccard_similarity ────────────────────────────────────────────────────────
 

@@ -27,7 +27,7 @@ class PasswordResetToken(Base, TimestampMixin):
     )
 
     @classmethod
-    def create(cls, user_id: int, token: str, ttl_hours: int = 2) -> "PasswordResetToken":
+    def create(cls, user_id: int, token: str, ttl_hours: int = 2) -> PasswordResetToken:
         return cls(
             user_id=user_id,
             token=token,

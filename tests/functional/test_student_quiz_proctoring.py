@@ -171,15 +171,15 @@ def _rule(event: str, threshold: int, action: dict) -> dict:
 
 
 def _override_settings(**overrides) -> Settings:
-    base = dict(
-        secret_key="test-secret-key-minimum-32-chars-long",
-        s3_bucket_name="proctor-bucket",
-        s3_endpoint_url="http://localstack:4566",
-        s3_public_base_url=None,
-        aws_access_key_id="ak",
-        aws_secret_access_key="sk",
-        aws_region="us-east-1",
-    )
+    base = {
+        "secret_key": "test-secret-key-minimum-32-chars-long",
+        "s3_bucket_name": "proctor-bucket",
+        "s3_endpoint_url": "http://localstack:4566",
+        "s3_public_base_url": None,
+        "aws_access_key_id": "ak",
+        "aws_secret_access_key": "sk",
+        "aws_region": "us-east-1",
+    }
     base.update(overrides)
     settings = Settings(**base)
     app.dependency_overrides[get_settings] = lambda: settings
@@ -494,7 +494,7 @@ async def test_snapshot_stored_when_capture_enabled_and_storage_configured(
     assert snap.event_type == "facelost"
     assert snap.s3_url == "https://cdn/proctor/1.jpg"
     # key uses sequence 1 and the sanitized event + jpg extension.
-    assert snap.s3_key == "proctoring/attempt-{}/1-facelost.jpg".format(attempt.id)
+    assert snap.s3_key == f"proctoring/attempt-{attempt.id}/1-facelost.jpg"
 
 
 async def test_snapshot_sequence_increments_for_second_capture(

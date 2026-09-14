@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
-    SubmissionStatus,
 )
 from submissions_checker.db.models.group import Group
 from submissions_checker.db.models.outbox import OutboxMessage

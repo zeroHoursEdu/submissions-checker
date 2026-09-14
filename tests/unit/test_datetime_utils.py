@@ -16,7 +16,7 @@ def test_utcnow_is_timezone_aware_utc() -> None:
 def test_to_utc_assumes_naive_is_utc() -> None:
     naive = datetime(2026, 1, 2, 3, 4, 5)
     out = dtutil.to_utc(naive)
-    assert out.tzinfo is timezone.utc
+    assert out.tzinfo is UTC
     # wall-clock unchanged, just tagged as UTC
     assert out.replace(tzinfo=None) == naive
 

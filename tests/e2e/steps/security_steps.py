@@ -17,7 +17,6 @@ import secrets
 from datetime import UTC, datetime
 
 import bcrypt
-from playwright.sync_api import expect
 from pytest_bdd import given, parsers, then, when
 
 from tests.e2e.helpers import db_conn as _db_conn

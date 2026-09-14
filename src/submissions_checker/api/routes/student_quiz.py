@@ -13,6 +13,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.dependencies import AppSettings, DBSession, StudentId, StudentUser
+from submissions_checker.core.state_machine import transition
+from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     OutboxMessage,
     QuizAnswer,
@@ -29,11 +31,8 @@ from submissions_checker.db.models.enums import (
     QuizAttemptStatus,
 )
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
-from submissions_checker.core.state_machine import transition
-from submissions_checker.core.templates import render
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
 )

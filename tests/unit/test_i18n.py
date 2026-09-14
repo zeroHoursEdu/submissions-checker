@@ -46,9 +46,9 @@ def test_load_vocabularies_registers_languages_and_labels(tmp_path: Path) -> Non
 
     i18n.load_vocabularies(tmp_path)
 
-    codes = {l["code"] for l in i18n.AVAILABLE_LANGUAGES}
+    codes = {entry["code"] for entry in i18n.AVAILABLE_LANGUAGES}
     assert codes == {"en", "uk"}
-    labels = {l["code"]: l["label"] for l in i18n.AVAILABLE_LANGUAGES}
+    labels = {entry["code"]: entry["label"] for entry in i18n.AVAILABLE_LANGUAGES}
     assert labels["en"] == "English"
     assert labels["uk"] == "Ukrainian"
     # first sorted file (en) becomes the default

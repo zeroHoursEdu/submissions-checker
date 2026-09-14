@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import secrets
-
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.dependencies import AdminUser, DBSession
-from submissions_checker.db.models import AuditLog, OutboxMessage, User
-from submissions_checker.db.models.enums import OutboxMessageState, UserRole
-from submissions_checker.services.audit import audit
 from submissions_checker.core.templates import render
+from submissions_checker.db.models import AuditLog, OutboxMessage, User
+from submissions_checker.db.models.enums import UserRole
+from submissions_checker.services.audit import audit
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 

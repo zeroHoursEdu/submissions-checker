@@ -9,9 +9,9 @@ from submissions_checker.db.models.enums import (
     OutboxMessageState,
     QuizAttemptStatus,
     QuizQuestionType,
+    SubjectStatus,
     SubmissionSourceType,
     SubmissionStatus,
-    SubjectStatus,
     UserRole,
 )
 from submissions_checker.db.models.feedback_request import FeedbackRequest
@@ -20,11 +20,11 @@ from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.group import Group
 from submissions_checker.db.models.notification import Notification
 from submissions_checker.db.models.notification_preference import NotificationPreference
-from submissions_checker.db.models.semester import Semester
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.models.password_reset import PasswordResetToken
 from submissions_checker.db.models.quiz_attempt_snapshot import QuizAttemptSnapshot
 from submissions_checker.db.models.quiz_template import QuizAnswer, QuizAttempt
+from submissions_checker.db.models.semester import Semester
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents

@@ -4,27 +4,26 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models.enums import NotificationCase, NotificationMethod
+from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
+from submissions_checker.db.models.subject import Subject
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.db.models.user import User
-from submissions_checker.services.notifications.dispatcher import build_dispatcher
 from submissions_checker.services.notification_service import push_notification
-from submissions_checker.db.models.feedback_token import FeedbackToken
-from submissions_checker.db.models.subject import Subject
+from submissions_checker.services.notifications.dispatcher import build_dispatcher
 from submissions_checker.services.notifications.templates import (
     deadline_reminder_template,
     feedback_request_template,
-    new_submission_template,
     quiz_result_template,
     submission_reviewed_template,
 )

@@ -653,6 +653,7 @@ async def test_submit_runs_plagiarism_comparison_against_prior_zip(
     import zipfile
 
     from httpx import ASGITransport
+
     from submissions_checker.main import app
 
     def _zip() -> bytes:

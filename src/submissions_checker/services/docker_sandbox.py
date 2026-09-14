@@ -97,7 +97,7 @@ class DockerSandbox:
                     stdout_bytes, stderr_bytes = await asyncio.wait_for(
                         proc.communicate(), timeout=timeout
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # proc.kill() only stops the local `docker run` CLI wrapper — the
                     # container itself keeps running under the daemon (--rm only removes
                     # it once it stops). Kill the named container directly so a hung
@@ -132,10 +132,10 @@ class DockerSandbox:
                     output_files=output_files,
                 )
 
-            except FileNotFoundError:
+            except FileNotFoundError as exc:
                 raise RuntimeError(
                     "docker command not found — ensure Docker CLI is installed in the app container"
-                )
+                ) from exc
 
     async def _kill_container(self, name: str) -> None:
         """Best-effort `docker kill` on a timed-out sandbox container. Swallow

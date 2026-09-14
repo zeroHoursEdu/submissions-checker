@@ -16,7 +16,7 @@ STRONG_KEY = "f3a1c9e7b5d2486017aa44bc99ee1122aabbccddeeff00112233445566778899"
 
 
 def _settings(**overrides):
-    base = dict(secret_key=STRONG_KEY, database_url=DB_URL)
+    base = {"secret_key": STRONG_KEY, "database_url": DB_URL}
     base.update(overrides)
     return Settings(**base)
 

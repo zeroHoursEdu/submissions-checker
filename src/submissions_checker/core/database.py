@@ -1,7 +1,6 @@
 """Database configuration and session management."""
 
 from collections.abc import AsyncGenerator
-from typing import Any
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,

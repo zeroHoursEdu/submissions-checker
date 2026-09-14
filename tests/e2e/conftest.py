@@ -6,8 +6,8 @@ the step-definition fixtures without each test file re-importing them.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import bcrypt
 import pytest

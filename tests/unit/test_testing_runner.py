@@ -14,7 +14,6 @@ import pytest
 from submissions_checker.services.submission_checker import check_submission
 from submissions_checker.services.testing.runner import TestRunner
 
-
 # ── TestRunner skeleton ────────────────────────────────────────────────────────
 
 

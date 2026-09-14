@@ -26,7 +26,7 @@ async def set_language(
     request: Request,
     lang: str = Form(...),
 ) -> Response:
-    registered_codes = {l["code"] for l in AVAILABLE_LANGUAGES}
+    registered_codes = {entry["code"] for entry in AVAILABLE_LANGUAGES}
     if lang not in registered_codes:
         return Response(status_code=400, content="Unknown language code")
 

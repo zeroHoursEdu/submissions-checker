@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from pytest_bdd import given, parsers, then, when
 
 from tests.e2e.helpers import (
-    TEACHER_PASSWORD,
     TEACHER_USERNAME,
     get_student_credentials_from_outbox,
 )

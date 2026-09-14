@@ -15,7 +15,6 @@ from submissions_checker.services.notifications.dispatcher import (
     build_dispatcher,
 )
 
-
 # ── templates ─────────────────────────────────────────────────────────────────
 
 

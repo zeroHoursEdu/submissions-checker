@@ -32,7 +32,6 @@ from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.user import User
 from submissions_checker.main import app
 
-
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
 
@@ -51,7 +50,7 @@ def _load_i18n() -> None:
 
 
 @pytest.fixture(scope="session")
-def functional_pg() -> "PostgresContainer":
+def functional_pg() -> PostgresContainer:
     with PostgresContainer("postgres:16-alpine") as pg:
         yield pg
 

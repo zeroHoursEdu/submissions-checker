@@ -15,7 +15,6 @@ from jose.exceptions import JWTError
 from submissions_checker.core import security
 from submissions_checker.core.config import get_settings
 
-
 # ── Password hashing ──────────────────────────────────────────────────────────
 
 

@@ -16,6 +16,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.db.models import (
     Student,
     StudentAssignment,
@@ -28,7 +29,6 @@ from submissions_checker.db.models import (
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.outbox import OutboxMessage
-from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.main import app
 
 pytestmark = pytest.mark.asyncio
@@ -168,10 +168,10 @@ async def test_consent_notice_operator_override_takes_precedence(
 ) -> None:
     """A jurisdiction-specific override configured via settings still wins over
     the localized default."""
-    base = dict(
-        secret_key="test-secret-key-minimum-32-chars-long",
-        recording_consent_notice="Custom jurisdiction-specific legal text.",
-    )
+    base = {
+        "secret_key": "test-secret-key-minimum-32-chars-long",
+        "recording_consent_notice": "Custom jurisdiction-specific legal text.",
+    }
     settings = Settings(**base)
     app.dependency_overrides[get_settings] = lambda: settings
     try:

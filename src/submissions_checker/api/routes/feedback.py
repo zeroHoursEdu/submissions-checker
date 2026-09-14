@@ -9,10 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
 from submissions_checker.api.dependencies import DBSession
+from submissions_checker.core.templates import render
 from submissions_checker.db.models.feedback_response import FeedbackResponse
 from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.subject import Subject
-from submissions_checker.core.templates import render
 
 router = APIRouter(tags=["feedback"])
 

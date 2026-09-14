@@ -20,14 +20,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
 from submissions_checker.api.routes.student_quiz import _grade_answer
 from submissions_checker.db.models import (
     QuizAttempt,
-    Student,
     StudentAssignment,
     Subject,
     SubjectsAssignment,

@@ -1,6 +1,5 @@
 """Test execution runner (skeleton)."""
 
-import asyncio
 from pathlib import Path
 
 from submissions_checker.core.logging import get_logger

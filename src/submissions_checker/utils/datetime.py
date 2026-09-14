@@ -1,6 +1,6 @@
 """Datetime utilities."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def utcnow() -> datetime:
@@ -10,7 +10,7 @@ def utcnow() -> datetime:
     Returns:
         Current UTC datetime
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def to_utc(dt: datetime) -> datetime:
@@ -25,8 +25,8 @@ def to_utc(dt: datetime) -> datetime:
     """
     if dt.tzinfo is None:
         # Assume naive datetime is UTC
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def format_iso(dt: datetime) -> str:

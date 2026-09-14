@@ -9,9 +9,7 @@ the cheap wiring (`root`, `create_app`).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, call
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from submissions_checker import main as main_module
 

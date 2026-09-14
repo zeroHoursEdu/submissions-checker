@@ -19,6 +19,8 @@ from submissions_checker.api.schemas.student_portal import (
     ContentFile,
     SubjectCard,
 )
+from submissions_checker.core.i18n import get_vocab
+from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     OutboxMessage,
     QuizAttempt,
@@ -31,7 +33,6 @@ from submissions_checker.db.models import (
     SubmissionSourceType,
     SubmissionStatus,
 )
-from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.enums import (
     NotificationCase,
     NotificationMethod,
@@ -40,11 +41,9 @@ from submissions_checker.db.models.enums import (
     QuizAttemptStatus,
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
+from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.services.audit import audit
-from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import compare_zip_files
-from submissions_checker.core.templates import render
-from submissions_checker.core.i18n import get_vocab
 
 router = APIRouter(prefix="/portal", tags=["student-portal"])
 

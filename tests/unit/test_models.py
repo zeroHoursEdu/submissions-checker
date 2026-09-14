@@ -1,7 +1,5 @@
 """Model unit tests (skeleton)."""
 
-import pytest
-
 
 def test_outbox_message_creation() -> None:
     """

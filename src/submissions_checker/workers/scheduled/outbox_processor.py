@@ -1,9 +1,6 @@
 """Transactional outbox message processor."""
 
-import asyncio
-from datetime import datetime, timezone
-
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.config import get_settings

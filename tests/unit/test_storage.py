@@ -11,22 +11,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from submissions_checker.core.config import Settings
 from submissions_checker.services.storage import StorageService
 
 
 def _settings(**overrides) -> Settings:
-    base = dict(
-        secret_key="test-secret-key-minimum-32-chars-long",
-        s3_bucket_name="my-bucket",
-        s3_endpoint_url=None,
-        s3_public_base_url=None,
-        aws_access_key_id="ak",
-        aws_secret_access_key="sk",
-        aws_region="us-east-1",
-    )
+    base = {
+        "secret_key": "test-secret-key-minimum-32-chars-long",
+        "s3_bucket_name": "my-bucket",
+        "s3_endpoint_url": None,
+        "s3_public_base_url": None,
+        "aws_access_key_id": "ak",
+        "aws_secret_access_key": "sk",
+        "aws_region": "us-east-1",
+    }
     base.update(overrides)
     return Settings(**base)
 

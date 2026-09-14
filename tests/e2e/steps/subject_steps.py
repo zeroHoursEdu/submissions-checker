@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import io
-import zipfile
-
 from playwright.sync_api import expect
 from pytest_bdd import given, parsers, then, when
 
-from tests.e2e.helpers import E2E_DB_URL, db_conn as _db_conn
+from tests.e2e.helpers import db_conn as _db_conn
 from tests.e2e.pages.analytics_page import AnalyticsPage
 from tests.e2e.pages.teacher_dashboard import TeacherDashboard
 
@@ -81,7 +78,7 @@ def upload_invalid_zip(page, app_url: str) -> None:
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
         tmp.write(b"not a real zip file content")
         tmp_path = tmp.name
-    td = TeacherDashboard(page, app_url)
+    TeacherDashboard(page, app_url)
     # Use the file input directly
     file_input = page.locator('input[name="config_zip"]')
     file_input.set_input_files(tmp_path)

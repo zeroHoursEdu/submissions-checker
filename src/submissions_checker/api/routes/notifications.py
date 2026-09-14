@@ -9,8 +9,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
 
 from submissions_checker.api.dependencies import CurrentUser, DBSession
-from submissions_checker.db.models.notification import Notification
 from submissions_checker.core.templates import render
+from submissions_checker.db.models.notification import Notification
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 

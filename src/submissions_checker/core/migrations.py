@@ -12,12 +12,12 @@ replica is killed mid-migration — a crashed deploy cannot wedge the next boot.
 import logging
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from alembic import command
 from submissions_checker.core.config import get_settings
 
 logger = logging.getLogger(__name__)

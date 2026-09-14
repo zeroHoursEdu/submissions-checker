@@ -7,8 +7,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import DebugUndefined
 
-from submissions_checker.core.i18n import AVAILABLE_LANGUAGES, get_vocab
 from submissions_checker.core.config import get_settings
+from submissions_checker.core.i18n import AVAILABLE_LANGUAGES, get_vocab
 
 _settings = get_settings()
 _undefined = DebugUndefined if _settings.is_development else None

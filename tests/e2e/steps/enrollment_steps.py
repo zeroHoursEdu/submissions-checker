@@ -7,9 +7,11 @@ import time
 from pytest_bdd import given, parsers, then, when
 
 from tests.e2e.helpers import (
-    db_conn as _db_conn,
-    get_student_credentials_from_outbox,
     STUDENT_EMAIL,
+    get_student_credentials_from_outbox,
+)
+from tests.e2e.helpers import (
+    db_conn as _db_conn,
 )
 from tests.e2e.pages.subject_page import SubjectPage
 

@@ -20,14 +20,14 @@ from submissions_checker.services.notifications.email import EmailChannel
 
 
 def _channel(**overrides) -> EmailChannel:
-    base = dict(
-        host="smtp.example.com",
-        port=587,
-        username="user",
-        password="pass",
-        from_address="noreply@example.com",
-        use_tls=True,
-    )
+    base = {
+        "host": "smtp.example.com",
+        "port": 587,
+        "username": "user",
+        "password": "pass",
+        "from_address": "noreply@example.com",
+        "use_tls": True,
+    }
     base.update(overrides)
     return EmailChannel(**base)
 

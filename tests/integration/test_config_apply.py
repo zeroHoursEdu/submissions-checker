@@ -14,10 +14,10 @@ NOT duplicate them and instead drives the DB-mutating apply() entry point.
 
 from __future__ import annotations
 
-from pathlib import Path
 import io
 import zipfile
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 

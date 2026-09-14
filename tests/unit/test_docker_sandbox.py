@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from submissions_checker.services.docker_sandbox import (
-    MAX_OUTPUT_FILES,
     DockerSandbox,
     SandboxResult,
 )
