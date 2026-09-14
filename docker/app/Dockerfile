@@ -47,7 +47,7 @@ COPY src ./src
 
 RUN uv pip install --system -e ".[dev]"
 
-COPY migrations ./migrations
+# Migrations live in alembic/versions; alembic.ini points script_location there.
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY templates ./templates
@@ -92,7 +92,7 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /app
 
-COPY migrations ./migrations
+# Migrations live in alembic/versions; alembic.ini points script_location there.
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY templates ./templates
