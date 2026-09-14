@@ -23,9 +23,6 @@ concurrency:
   group: app-image-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/submissions-checker
-
 jobs:
   quality:
     name: Lint, types and tests
@@ -69,9 +66,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Derive tags
+      # A GitHub owner may contain capitals; an OCI repository name may not. Lowercasing
+      # here rather than hardcoding the owner keeps the workflow correct in a fork.
+      - name: Derive image name and tags
         id: tags
-        run: echo "sha=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/submissions-checker"
+            echo "sha=sha-$(git rev-parse --short HEAD)"
+          } >> "$GITHUB_OUTPUT"
 
       # The production host is ARM (Oracle A1.Flex); contributors are predominantly
       # x86-64. One manifest serves both, so the same tag works everywhere.
@@ -99,14 +102,16 @@ jobs:
           # Pull requests validate the build without publishing anything.
           push: ${{ github.event_name == 'push' }}
           tags: |
-            ${{ env.IMAGE }}:main
-            ${{ env.IMAGE }}:${{ steps.tags.outputs.sha }}
+            ${{ steps.tags.outputs.image }}:main
+            ${{ steps.tags.outputs.image }}:${{ steps.tags.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
       - name: Report published tags
         if: github.event_name == 'push'
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
         run: |
           echo "Published:"
           echo "  ${IMAGE}:main            (Watchtower follows this)"
