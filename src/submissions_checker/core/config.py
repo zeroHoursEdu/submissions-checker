@@ -149,4 +149,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
+    # Every field is populated from the environment or its default; the generated
+    # __init__ signature does not model that, hence the ignore.
+    return Settings()  # type: ignore[call-arg]

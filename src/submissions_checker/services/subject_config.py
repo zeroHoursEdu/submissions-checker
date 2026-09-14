@@ -12,11 +12,16 @@ from typing import Any
 import yaml
 
 
-def parse_config(raw: bytes) -> dict[str, Any]:
-    """Parse raw `config.yml` bytes into a plain dict."""
+def parse_config(raw: bytes) -> Any:
+    """Parse raw `config.yml` bytes into whatever YAML document it holds.
+
+    The return type is deliberately `Any`, not `dict`: an empty file parses to
+    `None`, and the runner reuses this to read a test suite whose top level it
+    validates itself. Callers check the shape and report it in their own terms.
+    """
     return yaml.safe_load(raw.decode("utf-8"))
 
 
-def load_config(path: str | Path) -> dict[str, Any]:
-    """Read and parse a `config.yml` file into a plain dict."""
+def load_config(path: str | Path) -> Any:
+    """Read and parse a `config.yml` file. See `parse_config` for the return type."""
     return parse_config(Path(path).read_bytes())

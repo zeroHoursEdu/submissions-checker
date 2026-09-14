@@ -1,6 +1,7 @@
 """Test execution runner (skeleton)."""
 
 from pathlib import Path
+from typing import Any
 
 from submissions_checker.core.logging import get_logger
 
@@ -24,7 +25,7 @@ class TestRunner:
         repo_path: Path,
         test_command: str,
         timeout: int = 300,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Run tests for a submission (skeleton).
 

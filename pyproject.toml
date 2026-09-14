@@ -42,6 +42,9 @@ dev = [
     "redis>=5.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
+    # Stubs for the untyped runtime dependencies mypy checks against.
+    "types-PyYAML>=6.0",
+    "types-aiofiles>=24.1",
 ]
 e2e = [
     "playwright>=1.48.0",

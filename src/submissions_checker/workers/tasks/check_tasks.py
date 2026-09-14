@@ -101,6 +101,14 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         _accept_without_checks(submission, review_mode)
         return
 
+    # An assignment with no plugin key cannot be matched to anything in config.yml.
+    # That is a teacher-facing misconfiguration, not a crash.
+    if assignment_code is None:
+        _fail_validation(
+            submission, "This assignment has no plugin code set, so no check can be selected."
+        )
+        return
+
     # Resolve the check plan from config (DB-free core). Misconfiguration → validation fail.
     # Bounds come from application settings on this path (the standalone runner, which
     # never instantiates Settings, falls back to the environment inside the core).

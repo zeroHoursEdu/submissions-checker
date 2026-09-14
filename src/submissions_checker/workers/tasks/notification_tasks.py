@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,7 +49,7 @@ async def _is_email_enabled(db: AsyncSession, student_id: int, case: Notificatio
     return pref is None or pref.enabled
 
 
-async def execute_feedback_request_task(db: AsyncSession, payload: dict) -> None:
+async def execute_feedback_request_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     """Email a student their personal feedback link.
 
     Payload: feedback_token_id
@@ -121,7 +123,7 @@ async def execute_feedback_request_task(db: AsyncSession, payload: dict) -> None
     logger.info("feedback_request_email_sent", token_id=token_id, student_email=student.email)
 
 
-async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> None:
+async def execute_submission_reviewed_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     """Email student when their submission is approved or rejected by a teacher.
 
     Payload: submission_id, action ('approve'|'reject'), reason
@@ -201,7 +203,7 @@ async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> N
     )
 
 
-async def execute_quiz_result_task(db: AsyncSession, payload: dict) -> None:
+async def execute_quiz_result_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     """Email student their quiz result after completing a quiz attempt.
 
     Payload: submission_id, score, max_score, is_passed, attempts_left, attempt_id
@@ -254,7 +256,7 @@ async def execute_quiz_result_task(db: AsyncSession, payload: dict) -> None:
     logger.info("quiz_result_email_sent", submission_id=submission_id, attempt_id=attempt_id)
 
 
-async def execute_deadline_reminder_task(db: AsyncSession, payload: dict) -> None:
+async def execute_deadline_reminder_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     """Email student with a deadline reminder.
 
     Payload: student_id, subjects_assignment_id, deadline_str
@@ -360,7 +362,7 @@ async def enqueue_teacher_review_notification(db: AsyncSession, submission_id: i
     )
 
 
-async def execute_new_submission_task(db: AsyncSession, payload: dict) -> None:
+async def execute_new_submission_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     """DEPRECATED no-op handler.
 
     Teacher review notifications now go through enqueue_teacher_review_notification +

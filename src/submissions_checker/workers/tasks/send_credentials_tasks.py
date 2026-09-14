@@ -1,5 +1,7 @@
 """Task: send account credentials email to a newly registered student."""
 
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.config import get_settings
@@ -10,7 +12,7 @@ from submissions_checker.services.notifications.templates import credentials_tem
 logger = get_logger(__name__)
 
 
-async def execute_send_credentials_task(db: AsyncSession, payload: dict) -> None:
+async def execute_send_credentials_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     """Send login credentials to a newly registered student.
 
     Payload keys:

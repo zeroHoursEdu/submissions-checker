@@ -8,11 +8,12 @@ import secrets
 import urllib.parse
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
-from sqlalchemy import and_, cast, false, func, nullsfirst, select, text
+from sqlalchemy import Select, and_, cast, false, func, nullsfirst, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -68,7 +69,7 @@ def _generate_password() -> str:
     return secrets.token_urlsafe(9)
 
 
-async def _generate_username(base: str, db: DBSession) -> str:  # type: ignore[valid-type]
+async def _generate_username(base: str, db: DBSession) -> str:
     """Return base username if available, else base_2, base_3, …"""
     candidate = base
     suffix = 2
@@ -216,11 +217,11 @@ async def provision_test_student(
     )
     for sa_id_val, sa_code, sa_config in sa_rows_result:
         sa_config = sa_config or {}
-        variants: dict = sa_config.get("variants") or {}
+        variants: dict[str, Any] = sa_config.get("variants") or {}
         variant: str | None = None
         if variants:
             submitted = form.get(f"variant_{sa_code}")
-            if submitted in variants:
+            if isinstance(submitted, str) and submitted in variants:
                 variant = submitted
             elif sa_config.get("variants_required"):
                 # Always assign a valid variant for required assignments, even if the
@@ -414,7 +415,7 @@ async def teacher_assignment(
 
     # Load violation flags: for each student_assignment, find if any attempt has violations
     sa_id_list = [r["student_assignment_id"] for r in rows if r["student_assignment_id"]]
-    violation_flags: dict[int, dict] = {}
+    violation_flags: dict[int, dict[str, Any]] = {}
     if sa_id_list:
         viol_result = await db.execute(
             select(
@@ -437,7 +438,7 @@ async def teacher_assignment(
                 violation_flags[sa_id_val] = vr.violations or {}
 
     # Load proctoring snapshot thumbnails grouped by student_assignment.
-    snapshot_flags: dict[int, list[dict]] = {}
+    snapshot_flags: dict[int, list[dict[str, Any]]] = {}
     if sa_id_list:
         snap_result = await db.execute(
             select(
@@ -724,16 +725,16 @@ async def import_subject_students(
             variant_value = row.get(col_name, "").strip()
             if not variant_value:
                 continue
-            sa = assignments_by_code.get(assignment_code)
-            if sa is None:
+            subject_assignment = assignments_by_code.get(assignment_code)
+            if subject_assignment is None:
                 continue
-            sa_result = await db.execute(
+            student_sa_result = await db.execute(
                 select(StudentAssignment).where(
                     StudentAssignment.student_id == student.id,
-                    StudentAssignment.subjects_assignment_id == sa.id,
+                    StudentAssignment.subjects_assignment_id == subject_assignment.id,
                 )
             )
-            student_assignment = sa_result.scalar_one_or_none()
+            student_assignment = student_sa_result.scalar_one_or_none()
             if student_assignment is not None:
                 student_assignment.variant = variant_value
                 variants_updated += 1
@@ -1296,7 +1297,7 @@ async def add_student(
                 "success": None,
             },
             status_code=422,
-        )  # type: ignore[return-value]
+        )
 
     group_result = await db.execute(select(Group).where(Group.name == group_name))
     group = group_result.scalar_one_or_none()
@@ -1359,7 +1360,7 @@ async def add_student(
 # ---------------------------------------------------------------------------
 
 
-def _current_semester_query():
+def _current_semester_query() -> Select[tuple[Semester]]:
     today = date.today()
     return select(Semester).where(Semester.start_date <= today, Semester.end_date >= today)
 

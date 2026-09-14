@@ -1,5 +1,7 @@
 """User service for business logic (skeleton)."""
 
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.logging import get_logger
@@ -27,7 +29,7 @@ class UserService:
         """
         self.db = db
 
-    async def create_user(self, email: str, username: str) -> dict:
+    async def create_user(self, email: str, username: str) -> dict[str, Any]:
         """
         Create a new user (skeleton).
 
@@ -49,7 +51,7 @@ class UserService:
 
         raise NotImplementedError("create_user not yet implemented")
 
-    async def get_user_by_id(self, user_id: int) -> dict | None:
+    async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         """
         Get user by ID (skeleton).
 
@@ -69,7 +71,7 @@ class UserService:
 
         raise NotImplementedError("get_user_by_id not yet implemented")
 
-    async def get_user_by_username(self, username: str) -> dict | None:
+    async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         """
         Get user by username (skeleton).
 

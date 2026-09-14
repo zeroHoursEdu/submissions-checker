@@ -79,7 +79,7 @@ def _is_timed_out(attempt: QuizAttempt) -> bool:
     limit = attempt.config_snapshot.get("time_limit_minutes")
     if not limit:
         return False
-    effective_seconds = limit * 60 - _time_penalty(attempt)
+    effective_seconds = int(limit) * 60 - _time_penalty(attempt)
     return _elapsed_seconds(attempt) > effective_seconds
 
 
@@ -253,13 +253,15 @@ def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any
             random.shuffle(indices)
             shuffled_options = [options[i] for i in indices]
             if q_type == "SINGLE_CHOICE":
-                original_correct = q_config.get("correct", 0)
-                new_correct = indices.index(original_correct)
-                q_snap["config"] = {"options": shuffled_options, "correct": new_correct}
+                correct_index = q_config.get("correct", 0)
+                q_snap["config"] = {
+                    "options": shuffled_options,
+                    "correct": indices.index(correct_index),
+                }
             else:
-                original_correct = set(q_config.get("correct", []))
-                new_correct = [i for i, orig in enumerate(indices) if orig in original_correct]
-                q_snap["config"] = {"options": shuffled_options, "correct": sorted(new_correct)}
+                correct_indices = set(q_config.get("correct", []))
+                remapped = [i for i, orig in enumerate(indices) if orig in correct_indices]
+                q_snap["config"] = {"options": shuffled_options, "correct": sorted(remapped)}
 
         snapshot.append(q_snap)
     return snapshot
@@ -268,8 +270,12 @@ def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any
 def _grade_answer(
     q_snap: dict[str, Any],
     raw_answer: Any,
-) -> tuple[dict[str, Any], bool, int]:
-    """Grade a single answer. Returns (answer_jsonb, is_correct, points_earned)."""
+) -> tuple[dict[str, Any], bool | None, int]:
+    """Grade a single answer. Returns (answer_jsonb, is_correct, points_earned).
+
+    ``is_correct`` is ``None`` for SHORT_ANSWER, which no rule can grade and a
+    teacher marks by hand; the column is nullable for exactly that case.
+    """
     q_type = q_snap["type"]
     q_config = q_snap["config"]
     q_points = q_snap["points"]
@@ -289,12 +295,13 @@ def _grade_answer(
             values = [raw_answer]
         else:
             values = []
+        selected_values: list[int]
         try:
-            selected = sorted(int(v) for v in values)
+            selected_values = sorted(int(v) for v in values)
         except (ValueError, TypeError):
-            selected = []
-        is_correct = selected == sorted(q_config.get("correct", []))
-        return {"selected": selected}, is_correct, q_points if is_correct else 0
+            selected_values = []
+        is_correct = selected_values == sorted(q_config.get("correct", []))
+        return {"selected": selected_values}, is_correct, q_points if is_correct else 0
 
     elif q_type == "ORDERING":
         raw_str = raw_answer or ""
@@ -312,12 +319,12 @@ def _grade_answer(
 
     elif q_type == "SHORT_ANSWER":
         text_answer = str(raw_answer).strip() if raw_answer else ""
-        return {"text": text_answer}, None, 0  # type: ignore[return-value]
+        return {"text": text_answer}, None, 0
 
     return {"raw": str(raw_answer)}, False, 0
 
 
-async def _count_used_attempts(db: DBSession, submission_id: int, exclude_id: int) -> int:  # type: ignore[valid-type]
+async def _count_used_attempts(db: DBSession, submission_id: int, exclude_id: int) -> int:
     """Count finished (non-passing) attempts for a submission, excluding the given id."""
     result = await db.execute(
         select(func.count(QuizAttempt.id)).where(
@@ -337,7 +344,7 @@ async def _count_used_attempts(db: DBSession, submission_id: int, exclude_id: in
 
 async def _grade_and_finalize(
     attempt: QuizAttempt,
-    db: DBSession,  # type: ignore[valid-type]
+    db: DBSession,
     status: QuizAttemptStatus = QuizAttemptStatus.COMPLETED,
 ) -> None:
     force_fail = (attempt.violations or {}).get("_force_fail", False)
@@ -913,6 +920,9 @@ async def submit_quiz(
         q_id = q_snap["id"]
         q_type = q_snap["type"]
 
+        # A multi-choice field arrives as a list, the rest as a single value;
+        # `_grade_answer` accepts either and normalises per question type.
+        raw: Any
         if q_type == "MULTIPLE_CHOICE":
             raw = list(form.getlist(f"answer_{q_id}"))
         elif q_type == "ORDERING":
@@ -939,7 +949,7 @@ async def submit_quiz(
     attempt_answers_result = await db.execute(
         select(QuizAnswer).where(QuizAnswer.attempt_id == attempt_id)
     )
-    attempt.answers = list(attempt_answers_result.scalars().all())  # type: ignore[assignment]
+    attempt.answers = list(attempt_answers_result.scalars().all())
 
     await _grade_and_finalize(attempt, db, status=final_status)
     return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)

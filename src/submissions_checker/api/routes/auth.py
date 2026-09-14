@@ -128,14 +128,15 @@ async def forgot_password(
 
         # Resolve email address
         email: str | None = None
+        full_name = user.username
         if user.student_id:
             student = await db.get(Student, user.student_id)
             if student:
                 email = student.email
+                full_name = student.full_name
 
         if email:
             reset_url = f"{settings.app_base_url.rstrip('/')}/auth/reset-password?token={token_str}"
-            full_name = student.full_name if user.student_id else user.username  # type: ignore[possibly-undefined]
             subj, body = password_reset_template(full_name, reset_url)
             dispatcher = build_dispatcher(settings)
             if dispatcher._channels:

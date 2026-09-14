@@ -493,10 +493,10 @@ class ConfigApplyService:
                     SubjectsAssignment.code == code,
                 )
             )
-            sa = result.scalar_one_or_none()
-            if sa is not None:
+            existing = result.scalar_one_or_none()
+            if existing is not None:
                 self._apply_assignment_fields(
-                    changed_fields, sa, a_cfg, url_map, subject_code, code
+                    changed_fields, existing, a_cfg, url_map, subject_code, code
                 )
 
         for code in plan.assignments_to_delete:
@@ -506,9 +506,9 @@ class ConfigApplyService:
                     SubjectsAssignment.code == code,
                 )
             )
-            sa = result.scalar_one_or_none()
-            if sa is not None:
-                await db.delete(sa)
+            doomed = result.scalar_one_or_none()
+            if doomed is not None:
+                await db.delete(doomed)
 
         # Insert new SubjectPluginConfig version
         version = await self._next_version(db, subject.id)

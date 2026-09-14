@@ -39,7 +39,8 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
         "role": role,
         "exp": expire,
     }
-    return jwt.encode(payload, get_settings().secret_key, algorithm=JWT_ALGORITHM)
+    token: str = jwt.encode(payload, get_settings().secret_key, algorithm=JWT_ALGORITHM)
+    return token
 
 
 def decode_access_token(token: str) -> dict[str, Any]:

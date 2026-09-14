@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select, text, update
 
@@ -86,7 +87,7 @@ async def flush_teacher_digests() -> None:
                     )
                 ).all()
 
-                by_teacher: dict[int, list] = defaultdict(list)
+                by_teacher: dict[int, list[Any]] = defaultdict(list)
                 for row in rows:
                     by_teacher[row.teacher_id].append(row)
 

@@ -389,4 +389,7 @@ async def _run_one_check(
         raise CheckExecutionError(
             f"result.json from {script_path} is not valid JSON: {exc}"
         ) from exc
-    return parsed.get("tests", [])
+    tests = parsed.get("tests", [])
+    if not isinstance(tests, list):
+        raise CheckExecutionError(f"result.json from {script_path} has a non-list 'tests' key")
+    return tests

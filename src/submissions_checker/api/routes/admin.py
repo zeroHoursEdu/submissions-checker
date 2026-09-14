@@ -88,7 +88,7 @@ async def create_teacher(
             "admin_create_teacher.html",
             {"current_user": current_user, "error": "Password must be at least 8 characters."},
             status_code=422,
-        )  # type: ignore[return-value]
+        )
     existing = await db.execute(select(User.id).where(User.username == username))
     if existing.scalar_one_or_none() is not None:
         return render(
@@ -96,7 +96,7 @@ async def create_teacher(
             "admin_create_teacher.html",
             {"current_user": current_user, "error": "Username already taken."},
             status_code=422,
-        )  # type: ignore[return-value]
+        )
 
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
     user = User(username=username, password_hash=password_hash, role=UserRole.TEACHER)

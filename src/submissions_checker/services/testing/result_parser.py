@@ -1,5 +1,7 @@
 """Test result parsing utilities (skeleton)."""
 
+from typing import Any
+
 from submissions_checker.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,7 +20,7 @@ class TestResultParser:
     """
 
     @staticmethod
-    def parse_pytest_output(output: str) -> dict:
+    def parse_pytest_output(output: str) -> dict[str, Any]:
         """
         Parse pytest output (skeleton).
 
@@ -42,7 +44,7 @@ class TestResultParser:
         raise NotImplementedError("parse_pytest_output not yet implemented")
 
     @staticmethod
-    def parse_junit_xml(xml_content: str) -> dict:
+    def parse_junit_xml(xml_content: str) -> dict[str, Any]:
         """
         Parse JUnit XML test results (skeleton).
 
