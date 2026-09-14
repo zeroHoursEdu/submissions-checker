@@ -53,9 +53,7 @@ class StudentFeedbackPage:
     ) -> None:
         self.page.wait_for_load_state("networkidle")
         # Star inputs are display:none — set value via JS
-        self.page.evaluate(
-            f"document.querySelector('#star{rating}').checked = true;"
-        )
+        self.page.evaluate(f"document.querySelector('#star{rating}').checked = true;")
         self.page.fill('textarea[name="went_well"]', went_well)
         self.page.fill('textarea[name="went_bad"]', went_bad)
         self.page.fill('textarea[name="to_change"]', to_change)

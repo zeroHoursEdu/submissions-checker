@@ -49,15 +49,15 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     },
     # ── Legacy flow (kept for backward compat with existing data) ─────────────
     SubmissionStatus.CHECKING: {
-        "check_passed_quiz":           SubmissionStatus.QUIZ_SENT,
+        "check_passed_quiz": SubmissionStatus.QUIZ_SENT,
         "check_passed_teacher_review": SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
-        "check_passed_none":           SubmissionStatus.COMPLETED,
-        "check_failed":                SubmissionStatus.CHECK_FAILED,
+        "check_passed_none": SubmissionStatus.COMPLETED,
+        "check_failed": SubmissionStatus.CHECK_FAILED,
     },
     SubmissionStatus.WAITING_FOR_TEACHER_REVIEW: {
-        "teacher_approve_quiz":  SubmissionStatus.QUIZ_SENT,
-        "teacher_approve_done":  SubmissionStatus.COMPLETED,
-        "teacher_reject":        SubmissionStatus.CHECK_FAILED,
+        "teacher_approve_quiz": SubmissionStatus.QUIZ_SENT,
+        "teacher_approve_done": SubmissionStatus.COMPLETED,
+        "teacher_reject": SubmissionStatus.CHECK_FAILED,
     },
 }
 

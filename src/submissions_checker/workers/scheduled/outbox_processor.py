@@ -65,15 +65,14 @@ async def process_outbox_messages() -> None:
             # Try to acquire PostgreSQL advisory lock (non-blocking)
             # This ensures only one outbox processor runs at a time
             lock_result = await db.execute(
-                text("SELECT pg_try_advisory_lock(:lock_id)"),
-                {"lock_id": OUTBOX_PROCESSOR_LOCK_ID}
+                text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": OUTBOX_PROCESSOR_LOCK_ID}
             )
             lock_acquired = lock_result.scalar()
 
             if not lock_acquired:
                 logger.info(
                     "outbox_processor_lock_not_acquired",
-                    message="Another processor is already running, skipping this execution"
+                    message="Another processor is already running, skipping this execution",
                 )
                 return
 
@@ -85,7 +84,9 @@ async def process_outbox_messages() -> None:
                 result = await db.execute(
                     select(OutboxMessage)
                     .where(
-                        OutboxMessage.state.in_([OutboxMessageState.PENDING, OutboxMessageState.ERROR])
+                        OutboxMessage.state.in_(
+                            [OutboxMessageState.PENDING, OutboxMessageState.ERROR]
+                        )
                     )
                     .where(OutboxMessage.retry_count < settings.outbox_max_retries)
                     .order_by(OutboxMessage.created_at.asc())
@@ -132,7 +133,7 @@ async def process_outbox_messages() -> None:
                 # Always release the advisory lock
                 await db.execute(
                     text("SELECT pg_advisory_unlock(:lock_id)"),
-                    {"lock_id": OUTBOX_PROCESSOR_LOCK_ID}
+                    {"lock_id": OUTBOX_PROCESSOR_LOCK_ID},
                 )
                 logger.debug("outbox_processor_lock_released", lock_id=OUTBOX_PROCESSOR_LOCK_ID)
 

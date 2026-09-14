@@ -29,9 +29,7 @@ def _fake_scheduler() -> MagicMock:
 
 
 def _install_fake_scheduler(monkeypatch, sched: MagicMock) -> None:
-    monkeypatch.setattr(
-        scheduler_module, "AsyncIOScheduler", lambda *a, **k: sched
-    )
+    monkeypatch.setattr(scheduler_module, "AsyncIOScheduler", lambda *a, **k: sched)
 
 
 def test_get_scheduler_before_init_raises() -> None:
@@ -44,9 +42,7 @@ def test_init_scheduler_registers_jobs_with_intervals(monkeypatch) -> None:
     _install_fake_scheduler(monkeypatch, sched)
 
     fake_settings = MagicMock(teacher_digest_flush_interval=45)
-    monkeypatch.setattr(
-        "submissions_checker.core.config.get_settings", lambda: fake_settings
-    )
+    monkeypatch.setattr("submissions_checker.core.config.get_settings", lambda: fake_settings)
 
     result = scheduler_module.init_scheduler()
 

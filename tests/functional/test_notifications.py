@@ -25,9 +25,7 @@ pytestmark = pytest.mark.asyncio
 async def _make_notification(
     db, *, user_id: int, title: str = "Hi", is_read: bool = False
 ) -> Notification:
-    notification = Notification(
-        user_id=user_id, title=title, body="body text", is_read=is_read
-    )
+    notification = Notification(user_id=user_id, title=title, body="body text", is_read=is_read)
     db.add(notification)
     await db.commit()
     await db.refresh(notification)
@@ -48,9 +46,7 @@ async def test_notifications_endpoints_require_auth(client: AsyncClient) -> None
 # ── Ownership: list / unread-count are scoped to the caller ───────────────────
 
 
-async def test_list_shows_only_own_notifications(
-    client: AsyncClient, make_user, db
-) -> None:
+async def test_list_shows_only_own_notifications(client: AsyncClient, make_user, db) -> None:
     user_a = await make_user(role=UserRole.TEACHER, username="a")
     user_b = await make_user(role=UserRole.TEACHER, username="b")
 
@@ -64,9 +60,7 @@ async def test_list_shows_only_own_notifications(
     assert "B-only-secret" not in resp.text
 
 
-async def test_unread_count_counts_only_own(
-    client: AsyncClient, make_user, db
-) -> None:
+async def test_unread_count_counts_only_own(client: AsyncClient, make_user, db) -> None:
     user_a = await make_user(role=UserRole.TEACHER, username="a")
     user_b = await make_user(role=UserRole.TEACHER, username="b")
 
@@ -96,9 +90,7 @@ async def test_cannot_mark_other_users_notification_read(
     authenticate(client, user_a)
     # Handler raises HTTPException(404) when the notification belongs to someone
     # else (it treats it as non-existent for the caller).
-    resp = await client.post(
-        f"/notifications/{b_notification.id}/read", follow_redirects=False
-    )
+    resp = await client.post(f"/notifications/{b_notification.id}/read", follow_redirects=False)
     assert resp.status_code == 404
 
     # B's notification must remain unread in the DB.
@@ -144,9 +136,7 @@ async def test_mark_read_flips_state_and_decrements_count(
 # ── read-all only affects the caller's own notifications ──────────────────────
 
 
-async def test_read_all_only_affects_caller(
-    client: AsyncClient, make_user, db
-) -> None:
+async def test_read_all_only_affects_caller(client: AsyncClient, make_user, db) -> None:
     user_a = await make_user(role=UserRole.TEACHER, username="a")
     user_b = await make_user(role=UserRole.TEACHER, username="b")
 

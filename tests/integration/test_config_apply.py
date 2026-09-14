@@ -131,10 +131,14 @@ async def test_fresh_apply_creates_subject_assignment_and_config(
     assert subject.status == SubjectStatus.ACTIVE
 
     assignments = (
-        await db_session.execute(
-            select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject.id)
+        (
+            await db_session.execute(
+                select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(assignments) == 1
     a = assignments[0]
     assert a.code == "lab1"
@@ -200,8 +204,8 @@ async def test_reapply_updates_subject_assignments_and_bumps_version(
 
     # Same subject row (upsert by code), not a new one
     all_subjects = (
-        await db_session.execute(select(Subject).where(Subject.code == "demo101"))
-    ).scalars().all()
+        (await db_session.execute(select(Subject).where(Subject.code == "demo101"))).scalars().all()
+    )
     assert len(all_subjects) == 1
     assert all_subjects[0].id == subject_id
     await db_session.refresh(all_subjects[0])
@@ -214,7 +218,9 @@ async def test_reapply_updates_subject_assignments_and_bumps_version(
             await db_session.execute(
                 select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject_id)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     }
     assert set(assignments) == {"lab1", "lab2"}
     assert assignments["lab1"].title == "Lab 1 Renamed"
@@ -225,12 +231,16 @@ async def test_reapply_updates_subject_assignments_and_bumps_version(
 
     # A second plugin-config version was created
     versions = (
-        await db_session.execute(
-            select(SubjectPluginConfig.version)
-            .where(SubjectPluginConfig.subject_id == subject_id)
-            .order_by(SubjectPluginConfig.version)
+        (
+            await db_session.execute(
+                select(SubjectPluginConfig.version)
+                .where(SubjectPluginConfig.subject_id == subject_id)
+                .order_by(SubjectPluginConfig.version)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert versions == [1, 2]
 
     # Exactly one ACTIVE subject for this code (partial unique index honoured)
@@ -269,12 +279,14 @@ async def test_reapply_removes_deleted_assignment(db_session: AsyncSession, tmp_
     await svc.apply(_make_zip(cfg2), owner_id=owner.id, db=db_session)
 
     remaining = (
-        await db_session.execute(
-            select(SubjectsAssignment.code).where(
-                SubjectsAssignment.subject_id == subject.id
+        (
+            await db_session.execute(
+                select(SubjectsAssignment.code).where(SubjectsAssignment.subject_id == subject.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert remaining == ["lab1"]
 
 
@@ -373,12 +385,14 @@ async def test_create_then_enrolled_students_get_student_assignments(
         )
     ).scalar_one()
     student_assignments = (
-        await db_session.execute(
-            select(StudentAssignment).where(
-                StudentAssignment.subjects_assignment_id == sa.id
+        (
+            await db_session.execute(
+                select(StudentAssignment).where(StudentAssignment.subjects_assignment_id == sa.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(student_assignments) == 1
     assert student_assignments[0].student_id == student.id
 
@@ -428,7 +442,9 @@ async def test_apply_rejects_oversize_zip(db_session: AsyncSession, tmp_path: Pa
         await svc.apply(big, owner_id=owner.id, db=db_session)
 
 
-async def test_apply_with_storage_uploads_content_files(db_session: AsyncSession, tmp_path: Path) -> None:
+async def test_apply_with_storage_uploads_content_files(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
 
@@ -438,12 +454,8 @@ async def test_apply_with_storage_uploads_content_files(db_session: AsyncSession
     svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
-    cfg["assignments"]["lab1"]["contentFiles"] = [
-        {"filename": "spec.pdf", "displayName": "Spec"}
-    ]
-    zip_bytes = _make_zip(
-        cfg, extra_files={"assignments/lab1/spec.pdf": b"%PDF-1.4 fake"}
-    )
+    cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "spec.pdf", "displayName": "Spec"}]
+    zip_bytes = _make_zip(cfg, extra_files={"assignments/lab1/spec.pdf": b"%PDF-1.4 fake"})
 
     await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
 
@@ -571,9 +583,9 @@ async def test_duplicate_zip_with_missing_disk_dir_still_extracts(
     ).scalar_one()
     version_count = (
         await db_session.execute(
-            select(func.count()).select_from(SubjectPluginConfig).where(
-                SubjectPluginConfig.subject_id == subject.id
-            )
+            select(func.count())
+            .select_from(SubjectPluginConfig)
+            .where(SubjectPluginConfig.subject_id == subject.id)
         )
     ).scalar_one()
     assert version_count == 1, "self-heal must not insert a duplicate SubjectPluginConfig row"

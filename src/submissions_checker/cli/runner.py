@@ -75,18 +75,23 @@ def _evaluate(
     )
 
     if outcome.status == "config_error":
-        return CaseResult(label, expect, expect_score, outcome, False,
-                          f"config error: {outcome.reason}")
+        return CaseResult(
+            label, expect, expect_score, outcome, False, f"config error: {outcome.reason}"
+        )
 
     if expect not in ("pass", "fail"):
-        return CaseResult(label, expect, expect_score, outcome, False,
-                          f"invalid expect={expect!r} (use pass|fail)")
+        return CaseResult(
+            label,
+            expect,
+            expect_score,
+            outcome,
+            False,
+            f"invalid expect={expect!r} (use pass|fail)",
+        )
 
     want_pass = expect == "pass"
     ok = outcome.passed == want_pass
-    detail = (
-        f"status={outcome.status} score={outcome.score}/{outcome.max_score}"
-    )
+    detail = f"status={outcome.status} score={outcome.score}/{outcome.max_score}"
     if ok and expect_score is not None and outcome.score != expect_score:
         ok = False
         detail += f" (expected score {expect_score})"
@@ -182,9 +187,12 @@ def _cmd_run_suite(args: argparse.Namespace) -> int:
         if not submission_dir.exists():
             results.append(
                 CaseResult(
-                    label, case["expect"], case.get("expect_score"),
+                    label,
+                    case["expect"],
+                    case.get("expect_score"),
                     check_core.CheckOutcome("config_error", 0, 0, [], "fixture dir missing"),
-                    False, f"fixture not found: {submission_dir}",
+                    False,
+                    f"fixture not found: {submission_dir}",
                 )
             )
             continue
@@ -219,7 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--variant", default=None, help="variant id (optional)")
     p_run.add_argument("--submission", required=True, help="submission/fixture directory")
     p_run.add_argument(
-        "--expect", default="pass", choices=("pass", "fail"),
+        "--expect",
+        default="pass",
+        choices=("pass", "fail"),
         help="expected outcome (default: pass)",
     )
     p_run.add_argument("--expect-score", type=int, default=None, dest="expect_score")

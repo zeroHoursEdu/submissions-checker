@@ -17,6 +17,7 @@ from submissions_checker.services.testing.runner import TestRunner
 
 # ── TestRunner skeleton ────────────────────────────────────────────────────────
 
+
 async def test_run_tests_not_implemented() -> None:
     runner = TestRunner()
     with pytest.raises(NotImplementedError):
@@ -36,6 +37,7 @@ async def test_install_dependencies_not_implemented() -> None:
 
 
 # ── submission_checker stub ────────────────────────────────────────────────────
+
 
 def test_check_submission_currently_always_passes(tmp_path: Path) -> None:
     # NOTE: stub implementation — always returns (True, "") regardless of input.

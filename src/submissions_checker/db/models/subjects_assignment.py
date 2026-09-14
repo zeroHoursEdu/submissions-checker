@@ -72,7 +72,9 @@ class SubjectsAssignment(Base, TimestampMixin):
     )
 
     __table_args__ = (
-        CheckConstraint("min_grade >= 0 AND max_grade >= min_grade", name="ck_subjects_assignments_grade_range"),
+        CheckConstraint(
+            "min_grade >= 0 AND max_grade >= min_grade", name="ck_subjects_assignments_grade_range"
+        ),
         UniqueConstraint("subject_id", "code", name="uq_subjects_assignments_subject_code"),
         Index("ix_subjects_assignments_subject_id", "subject_id"),
     )

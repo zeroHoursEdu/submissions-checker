@@ -19,7 +19,12 @@ class ResendChannel(NotificationChannel):
             response = await client.post(
                 RESEND_API_URL,
                 headers={"Authorization": f"Bearer {self._api_key}"},
-                json={"from": self._from_address, "to": [recipient], "subject": subject, "text": body},
+                json={
+                    "from": self._from_address,
+                    "to": [recipient],
+                    "subject": subject,
+                    "text": body,
+                },
                 timeout=15,
             )
             response.raise_for_status()

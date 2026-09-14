@@ -15,9 +15,7 @@ class FeedbackRequest(Base, TimestampMixin):
     subject_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False
     )
-    semester_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("semesters.id"), nullable=False
-    )
+    semester_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("semesters.id"), nullable=False)
     created_by_teacher_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id"), nullable=False
     )

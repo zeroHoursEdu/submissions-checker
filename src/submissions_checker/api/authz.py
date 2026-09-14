@@ -17,9 +17,7 @@ async def require_subject_access(
         await db.execute(select(Subject).where(Subject.id == subject_id))
     ).scalar_one_or_none()
     if subject is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
     if current_user.role != UserRole.ADMIN and subject.owner_id != current_user.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

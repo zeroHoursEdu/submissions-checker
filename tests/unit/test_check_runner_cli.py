@@ -17,8 +17,19 @@ from submissions_checker.services.docker_sandbox import SandboxResult
 class _FakeSandbox:
     """Full marks for fixtures under correct/, zero for wrong/."""
 
-    async def run(self, *, image, tool, script_path, student_files_dir, plugin_dir,
-                  env=None, memory="256m", cpus=0.5, timeout=30):
+    async def run(
+        self,
+        *,
+        image,
+        tool,
+        script_path,
+        student_files_dir,
+        plugin_dir,
+        env=None,
+        memory="256m",
+        cpus=0.5,
+        timeout=30,
+    ):
         good = "correct" in str(student_files_dir)
         pts = 100 if good else 0
         tests = [{"name": "t", "passed": good, "points_earned": pts, "max_points": 100}]
@@ -26,7 +37,8 @@ class _FakeSandbox:
 
 
 def _make_subject(root) -> None:
-    (root / "config.yml").write_text(textwrap.dedent("""
+    (root / "config.yml").write_text(
+        textwrap.dedent("""
         subjectCode: demo
         name: Demo
         assignments:
@@ -35,9 +47,13 @@ def _make_subject(root) -> None:
               image: demo:local
               check_command: assignments/lab1/check.py
               min_pass_score: 50
-    """).strip() + "\n", encoding="utf-8")
+    """).strip()
+        + "\n",
+        encoding="utf-8",
+    )
     (root / "tests").mkdir()
-    (root / "tests" / "suite.yml").write_text(textwrap.dedent("""
+    (root / "tests" / "suite.yml").write_text(
+        textwrap.dedent("""
         cases:
           - assignment: lab1
             submission: tests/fixtures/correct
@@ -46,7 +62,10 @@ def _make_subject(root) -> None:
           - assignment: lab1
             submission: tests/fixtures/wrong
             expect: fail
-    """).strip() + "\n", encoding="utf-8")
+    """).strip()
+        + "\n",
+        encoding="utf-8",
+    )
     for kind in ("correct", "wrong"):
         d = root / "tests" / "fixtures" / kind
         d.mkdir(parents=True)

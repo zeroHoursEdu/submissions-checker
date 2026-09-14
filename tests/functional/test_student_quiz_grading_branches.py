@@ -98,7 +98,9 @@ def test_grade_unknown_question_type_falls_through() -> None:
 
 
 async def _arrange_in_progress_attempt(
-    db, student_id: int, questions_snapshot: list,
+    db,
+    student_id: int,
+    questions_snapshot: list,
 ) -> QuizAttempt:
     subject = Subject(name="GradeBranches")
     db.add(subject)
@@ -109,7 +111,9 @@ async def _arrange_in_progress_attempt(
     await db.commit()
 
     cfg = SubjectPluginConfig(
-        subject_id=subject.id, version=1, content_hash=f"h-{subject.id}",
+        subject_id=subject.id,
+        version=1,
+        content_hash=f"h-{subject.id}",
         config={"assignments": {"hw1": {"quiz": {}}}},
     )
     db.add(cfg)
@@ -160,21 +164,39 @@ async def test_submit_with_malformed_answers_grades_to_zero(
     # with non-numeric / freeform values. The submit route must finalize the
     # attempt (303 → result) with every answer graded to 0.
     snapshot = [
-        {"id": 0, "type": "MULTIPLE_CHOICE", "text": "pick", "points": 2,
-         "is_required": False, "config": {"options": ["a", "b"], "correct": [0]}},
-        {"id": 1, "type": "ORDERING", "text": "order", "points": 3,
-         "is_required": False, "config": {"correct_order": [0, 1]}},
-        {"id": 2, "type": "ESSAY", "text": "essay", "points": 5,
-         "is_required": False, "config": {}},
+        {
+            "id": 0,
+            "type": "MULTIPLE_CHOICE",
+            "text": "pick",
+            "points": 2,
+            "is_required": False,
+            "config": {"options": ["a", "b"], "correct": [0]},
+        },
+        {
+            "id": 1,
+            "type": "ORDERING",
+            "text": "order",
+            "points": 3,
+            "is_required": False,
+            "config": {"correct_order": [0, 1]},
+        },
+        {
+            "id": 2,
+            "type": "ESSAY",
+            "text": "essay",
+            "points": 5,
+            "is_required": False,
+            "config": {},
+        },
     ]
     attempt = await _arrange_in_progress_attempt(db, student_user.student_id, snapshot)
 
     resp = await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
         data={
-            "answer_0": "not-a-number",      # MULTIPLE_CHOICE → getlist → ["not-a-number"]
-            "answer_ordering_1": "x,y,z",    # ORDERING → non-numeric tokens
-            "answer_2": "some prose",        # unknown type → raw fallback
+            "answer_0": "not-a-number",  # MULTIPLE_CHOICE → getlist → ["not-a-number"]
+            "answer_ordering_1": "x,y,z",  # ORDERING → non-numeric tokens
+            "answer_2": "some prose",  # unknown type → raw fallback
         },
         follow_redirects=False,
     )
@@ -182,11 +204,16 @@ async def test_submit_with_malformed_answers_grades_to_zero(
     assert resp.headers["location"] == f"/portal/quiz/{attempt.id}/result"
 
     answers = (
-        await db.execute(
-            select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)
-            .order_by(QuizAnswer.question_id)
+        (
+            await db.execute(
+                select(QuizAnswer)
+                .where(QuizAnswer.attempt_id == attempt.id)
+                .order_by(QuizAnswer.question_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(answers) == 3
     mc, ordering, essay = answers
     assert mc.answer == {"selected": []}

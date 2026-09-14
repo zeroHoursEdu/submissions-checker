@@ -108,12 +108,16 @@ async def teacher_dashboard(
     if apply_error:
         apply_error = urllib.parse.unquote(apply_error)
 
-    return render(request, "teacher_dashboard.html", {
-        "current_user": current_user,
-        "subjects": subjects,
-        "apply_result": apply_result,
-        "apply_error": apply_error,
-    })
+    return render(
+        request,
+        "teacher_dashboard.html",
+        {
+            "current_user": current_user,
+            "subjects": subjects,
+            "apply_result": apply_result,
+            "apply_error": apply_error,
+        },
+    )
 
 
 @router.post("/subjects/apply-config")
@@ -141,6 +145,7 @@ async def apply_subject_config(
         return RedirectResponse(f"/teacher?apply_error={encoded}", status_code=303)
     except Exception as exc:
         from submissions_checker.core.logging import get_logger
+
         get_logger(__name__).error("config_apply_unexpected_error", error=str(exc))
         encoded = urllib.parse.quote("An unexpected error occurred while applying the config.")
         return RedirectResponse(f"/teacher?apply_error={encoded}", status_code=303)
@@ -171,7 +176,9 @@ async def provision_test_student(
         select(SubjectTestStudent).where(SubjectTestStudent.subject_id == subject_id)
     )
     if existing.scalar_one_or_none() is not None:
-        return RedirectResponse(f"/teacher/subjects/{subject_id}?test_student=existing", status_code=303)
+        return RedirectResponse(
+            f"/teacher/subjects/{subject_id}?test_student=existing", status_code=303
+        )
 
     test_group_result = await db.execute(select(Group).where(Group.name == "__TEST__"))
     test_group = test_group_result.scalar_one()
@@ -203,8 +210,9 @@ async def provision_test_student(
 
     form = await request.form()
     sa_rows_result = await db.execute(
-        select(SubjectsAssignment.id, SubjectsAssignment.code, SubjectsAssignment.config)
-        .where(SubjectsAssignment.subject_id == subject_id)
+        select(SubjectsAssignment.id, SubjectsAssignment.code, SubjectsAssignment.config).where(
+            SubjectsAssignment.subject_id == subject_id
+        )
     )
     for sa_id_val, sa_code, sa_config in sa_rows_result:
         sa_config = sa_config or {}
@@ -219,11 +227,15 @@ async def provision_test_student(
                 # teacher didn't touch the selector — otherwise the test student can't
                 # submit at all (docs/known_bugs.md #12b).
                 variant = sorted(variants)[0]
-        db.add(StudentAssignment(
-            student_id=student.id, subjects_assignment_id=sa_id_val, variant=variant
-        ))
+        db.add(
+            StudentAssignment(
+                student_id=student.id, subjects_assignment_id=sa_id_val, variant=variant
+            )
+        )
 
-    db.add(SubjectTestStudent(subject_id=subject_id, student_id=student.id, plain_password=password))
+    db.add(
+        SubjectTestStudent(subject_id=subject_id, student_id=student.id, plain_password=password)
+    )
     await db.commit()
 
     return RedirectResponse(f"/teacher/subjects/{subject_id}?test_student=created", status_code=303)
@@ -314,7 +326,10 @@ async def teacher_subject(
 
     test_student_flash = request.query_params.get("test_student")
 
-    return render(request, "teacher_subject.html", {
+    return render(
+        request,
+        "teacher_subject.html",
+        {
             "current_user": current_user,
             "subject": subject,
             "students": students,
@@ -325,7 +340,8 @@ async def teacher_subject(
             "feedback_error": feedback_error,
             "test_student_info": test_student_info,
             "test_student_flash": test_student_flash,
-        })
+        },
+    )
 
 
 @router.get("/subjects/{subject_id}/assignments/{sa_id}", response_class=HTMLResponse)
@@ -442,14 +458,18 @@ async def teacher_assignment(
                 {"event_type": sr.event_type, "url": f"/teacher/proctoring/snapshots/{sr.id}"}
             )
 
-    return render(request, "teacher_assignment.html", {
+    return render(
+        request,
+        "teacher_assignment.html",
+        {
             "current_user": current_user,
             "assignment": assignment,
             "subject_id": subject_id,
             "rows": rows,
             "violation_flags": violation_flags,
             "snapshot_flags": snapshot_flags,
-        })
+        },
+    )
 
 
 _SNAPSHOT_CONTENT_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
@@ -494,9 +514,7 @@ async def proctoring_snapshot(
     try:
         data = await storage.download_bytes(snapshot.s3_key)
     except Exception as exc:  # object missing or storage unreachable
-        logger.warning(
-            "proctoring_snapshot_unreadable", snapshot_id=snapshot_id, error=str(exc)
-        )
+        logger.warning("proctoring_snapshot_unreadable", snapshot_id=snapshot_id, error=str(exc))
         raise HTTPException(status_code=404, detail="Snapshot is no longer available") from exc
 
     extension = snapshot.s3_key.rsplit(".", 1)[-1].lower()
@@ -539,9 +557,7 @@ async def download_subject_enrollment_template(
     assignments = assignments_result.scalars().all()
 
     variant_columns = [
-        f"variant_{sa.code}"
-        for sa in assignments
-        if sa.code and sa.config.get("variants_required")
+        f"variant_{sa.code}" for sa in assignments if sa.code and sa.config.get("variants_required")
     ]
 
     output = io.StringIO()
@@ -598,13 +614,15 @@ async def import_subject_students(
     fieldnames = set(reader.fieldnames or [])
     if not required.issubset(fieldnames):
         missing = required - fieldnames
-        raise HTTPException(status_code=422, detail=f"Missing CSV columns: {', '.join(sorted(missing))}")
+        raise HTTPException(
+            status_code=422, detail=f"Missing CSV columns: {', '.join(sorted(missing))}"
+        )
 
     # Identify variant columns and their assignment codes
     variant_col_map: dict[str, str] = {}  # col_name → assignment_code
     for col in fieldnames:
         if col.startswith("variant_"):
-            variant_col_map[col] = col[len("variant_"):]
+            variant_col_map[col] = col[len("variant_") :]
 
     # Load subject assignments by code for variant validation
     assignments_by_code: dict[str, SubjectsAssignment] = {}
@@ -660,16 +678,18 @@ async def import_subject_students(
             db.add(user)
             await db.flush()
 
-            db.add(OutboxMessage(
-                event_type=OutboxEventType.SEND_CREDENTIALS,
-                state=OutboxMessageState.PENDING,
-                payload={
-                    "student_email": email,
-                    "full_name": full_name,
-                    "username": username,
-                    "password": password,
-                },
-            ))
+            db.add(
+                OutboxMessage(
+                    event_type=OutboxEventType.SEND_CREDENTIALS,
+                    state=OutboxMessageState.PENDING,
+                    payload={
+                        "student_email": email,
+                        "full_name": full_name,
+                        "username": username,
+                        "password": password,
+                    },
+                )
+            )
             imported_count += 1
         else:
             skipped_count += 1
@@ -694,7 +714,9 @@ async def import_subject_students(
                     )
                 )
                 if existing_sa.scalar_one_or_none() is None:
-                    db.add(StudentAssignment(student_id=student.id, subjects_assignment_id=sa_id_val))
+                    db.add(
+                        StudentAssignment(student_id=student.id, subjects_assignment_id=sa_id_val)
+                    )
             await db.flush()
 
         # Set variants from variant_ columns
@@ -757,9 +779,7 @@ async def teacher_students(
         .outerjoin(UserLogin, UserLogin.user_id == User.id)
     )
     if current_user.role != UserRole.ADMIN:
-        query = query.join(
-            SubjectsStudents, SubjectsStudents.student_id == Student.id
-        ).join(
+        query = query.join(SubjectsStudents, SubjectsStudents.student_id == Student.id).join(
             Subject,
             and_(
                 Subject.id == SubjectsStudents.subject_id,
@@ -772,12 +792,16 @@ async def teacher_students(
     rows_result = await db.execute(query)
     students = [row._asdict() for row in rows_result]
 
-    return render(request, "teacher_students.html", {
+    return render(
+        request,
+        "teacher_students.html",
+        {
             "current_user": current_user,
             "students": students,
             "imported": imported,
             "skipped": skipped,
-        })
+        },
+    )
 
 
 @router.post("/students/import")
@@ -801,7 +825,9 @@ async def import_students(
     required = {"student_group", "student_name", "student_surname", "email"}
     if not required.issubset(set(reader.fieldnames or [])):
         missing = required - set(reader.fieldnames or [])
-        raise HTTPException(status_code=422, detail=f"Missing CSV columns: {', '.join(sorted(missing))}")
+        raise HTTPException(
+            status_code=422, detail=f"Missing CSV columns: {', '.join(sorted(missing))}"
+        )
 
     imported_count = 0
     skipped_count = 0
@@ -884,12 +910,10 @@ async def teacher_review_submission(
         select(Submission)
         .where(Submission.id == submission_id)
         .options(
-            selectinload(Submission.students_assignment).selectinload(
-                StudentAssignment.subjects_assignment
-            ).selectinload(SubjectsAssignment.subject),
-            selectinload(Submission.students_assignment).selectinload(
-                StudentAssignment.student
-            ),
+            selectinload(Submission.students_assignment)
+            .selectinload(StudentAssignment.subjects_assignment)
+            .selectinload(SubjectsAssignment.subject),
+            selectinload(Submission.students_assignment).selectinload(StudentAssignment.student),
         )
     )
     submission = result.scalar_one_or_none()
@@ -907,13 +931,17 @@ async def teacher_review_submission(
     if current_user.role != UserRole.ADMIN and subject.owner_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Not authorized for this subject")
 
-    return render(request, "teacher_submission_review.html", {
+    return render(
+        request,
+        "teacher_submission_review.html",
+        {
             "current_user": current_user,
             "submission": submission,
             "student": sa.student,
             "assignment": subjects_assignment,
             "subject": subjects_assignment.subject,
-        })
+        },
+    )
 
 
 @router.get("/submissions/{submission_id}/download")
@@ -998,10 +1026,8 @@ async def teacher_review_submission_action(
     if action == "approve":
         has_quiz = False
         if submission.plugin_config and subjects_assignment.code:
-            asgn_cfg = (
-                submission.plugin_config.config
-                .get("assignments", {})
-                .get(subjects_assignment.code, {})
+            asgn_cfg = submission.plugin_config.config.get("assignments", {}).get(
+                subjects_assignment.code, {}
             )
             has_quiz = bool(asgn_cfg.get("quiz", {}).get("questions"))
         if has_quiz:
@@ -1037,15 +1063,17 @@ async def teacher_review_submission_action(
         await finalize_grade(db, submission)
 
     # Queue email notification to student
-    db.add(OutboxMessage(
-        event_type=OutboxEventType.SUBMISSION_REVIEWED,
-        state=OutboxMessageState.PENDING,
-        payload={
-            "submission_id": submission_id,
-            "action": action,
-            "reason": clean_reason,
-        },
-    ))
+    db.add(
+        OutboxMessage(
+            event_type=OutboxEventType.SUBMISSION_REVIEWED,
+            state=OutboxMessageState.PENDING,
+            payload={
+                "submission_id": submission_id,
+                "action": action,
+                "reason": clean_reason,
+            },
+        )
+    )
 
     await audit(
         db,
@@ -1068,6 +1096,7 @@ async def teacher_review_submission_action(
 # ─────────────────────────────────────────────────────────────────────────────
 # Student enrollment management
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/subjects/{subject_id}/enroll/{student_id_param}")
 async def enroll_student(
@@ -1100,8 +1129,12 @@ async def enroll_student(
             if existing_sa.scalar_one_or_none() is None:
                 db.add(StudentAssignment(student_id=student_id_param, subjects_assignment_id=sa_id))
         await audit(
-            db, action="enroll_student", actor_id=current_user.user_id,
-            actor_username=current_user.username, subject_id=subject_id, student_id=student_id_param,
+            db,
+            action="enroll_student",
+            actor_id=current_user.user_id,
+            actor_username=current_user.username,
+            subject_id=subject_id,
+            student_id=student_id_param,
         )
         await db.commit()
     return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
@@ -1125,8 +1158,12 @@ async def unenroll_student(
     if enrollment:
         await db.delete(enrollment)
         await audit(
-            db, action="unenroll_student", actor_id=current_user.user_id,
-            actor_username=current_user.username, subject_id=subject_id, student_id=student_id_param,
+            db,
+            action="unenroll_student",
+            actor_id=current_user.user_id,
+            actor_username=current_user.username,
+            subject_id=subject_id,
+            student_id=student_id_param,
         )
         await db.commit()
     return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
@@ -1135,6 +1172,7 @@ async def unenroll_student(
 # ─────────────────────────────────────────────────────────────────────────────
 # Grade export (CSV)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/subjects/{subject_id}/export.csv")
 async def export_grades_csv(
@@ -1171,7 +1209,8 @@ async def export_grades_csv(
             Submission,
             and_(
                 Submission.students_assignment_id == StudentAssignment.id,
-                Submission.created_at == select(func.max(Submission.created_at))
+                Submission.created_at
+                == select(func.max(Submission.created_at))
                 .where(Submission.students_assignment_id == StudentAssignment.id)
                 .correlate(StudentAssignment)
                 .scalar_subquery(),
@@ -1184,18 +1223,22 @@ async def export_grades_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Student", "Email", "Group", "Assignment", "Grade", "Max Grade", "Status", "Submitted At"])
+    writer.writerow(
+        ["Student", "Email", "Group", "Assignment", "Grade", "Max Grade", "Status", "Submitted At"]
+    )
     for r in rows:
-        writer.writerow([
-            r.full_name,
-            r.email,
-            r.group_name,
-            r.assignment_title,
-            r.grade if r.grade is not None else "",
-            r.max_grade,
-            r.submission_status or "",
-            r.submitted_at.strftime("%Y-%m-%d %H:%M") if r.submitted_at else "",
-        ])
+        writer.writerow(
+            [
+                r.full_name,
+                r.email,
+                r.group_name,
+                r.assignment_title,
+                r.grade if r.grade is not None else "",
+                r.max_grade,
+                r.submission_status or "",
+                r.submitted_at.strftime("%Y-%m-%d %H:%M") if r.submitted_at else "",
+            ]
+        )
     output.seek(0)
 
     filename = f"{subject.name.replace(' ', '_')}_grades.csv"
@@ -1210,6 +1253,7 @@ async def export_grades_csv(
 # Add individual student
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/students/add", response_class=HTMLResponse)
 async def add_student_page(
     request: Request,
@@ -1218,7 +1262,11 @@ async def add_student_page(
 ) -> HTMLResponse:
     groups_result = await db.execute(select(Group).order_by(Group.name))
     groups = groups_result.scalars().all()
-    return render(request, "teacher_add_student.html", {"current_user": current_user, "groups": groups, "error": None, "success": None})
+    return render(
+        request,
+        "teacher_add_student.html",
+        {"current_user": current_user, "groups": groups, "error": None, "success": None},
+    )
 
 
 @router.post("/students/add", response_model=None)
@@ -1238,12 +1286,17 @@ async def add_student(
     existing = await db.execute(select(Student.id).where(Student.email == email))
     if existing.scalar_one_or_none() is not None:
         groups_result = await db.execute(select(Group).order_by(Group.name))
-        return render(request, "teacher_add_student.html", {
+        return render(
+            request,
+            "teacher_add_student.html",
+            {
                 "current_user": current_user,
                 "groups": groups_result.scalars().all(),
                 "error": "A student with this email already exists.",
                 "success": None,
-            }, status_code=422)  # type: ignore[return-value]
+            },
+            status_code=422,
+        )  # type: ignore[return-value]
 
     group_result = await db.execute(select(Group).where(Group.name == group_name))
     group = group_result.scalar_one_or_none()
@@ -1276,20 +1329,25 @@ async def add_student(
     db.add(user)
     await db.flush()
 
-    db.add(OutboxMessage(
-        event_type=OutboxEventType.SEND_CREDENTIALS,
-        state=OutboxMessageState.PENDING,
-        payload={
-            "student_email": email,
-            "full_name": full_name,
-            "username": username,
-            "password": password,
-        },
-    ))
+    db.add(
+        OutboxMessage(
+            event_type=OutboxEventType.SEND_CREDENTIALS,
+            state=OutboxMessageState.PENDING,
+            payload={
+                "student_email": email,
+                "full_name": full_name,
+                "username": username,
+                "password": password,
+            },
+        )
+    )
 
     await audit(
-        db, action="add_student", actor_id=current_user.user_id,
-        actor_username=current_user.username, student_email=email,
+        db,
+        action="add_student",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        student_email=email,
     )
     await db.commit()
 
@@ -1299,6 +1357,7 @@ async def add_student(
 # ---------------------------------------------------------------------------
 # Feedback
 # ---------------------------------------------------------------------------
+
 
 def _current_semester_query():
     today = date.today()
@@ -1346,21 +1405,25 @@ async def request_feedback(
 
     for student in students:
         token_str = secrets.token_urlsafe(32)
-        db.add(FeedbackToken(
-            feedback_request_id=feedback_request.id,
-            student_id=student.id,
-            token=token_str,
-        ))
+        db.add(
+            FeedbackToken(
+                feedback_request_id=feedback_request.id,
+                student_id=student.id,
+                token=token_str,
+            )
+        )
         await db.flush()
         token_result = await db.execute(
             select(FeedbackToken).where(FeedbackToken.token == token_str)
         )
         saved_token = token_result.scalar_one()
-        db.add(OutboxMessage(
-            event_type=OutboxEventType.FEEDBACK_REQUEST_SENT,
-            state=OutboxMessageState.PENDING,
-            payload={"feedback_token_id": saved_token.id},
-        ))
+        db.add(
+            OutboxMessage(
+                event_type=OutboxEventType.FEEDBACK_REQUEST_SENT,
+                state=OutboxMessageState.PENDING,
+                payload={"feedback_token_id": saved_token.id},
+            )
+        )
 
     await db.commit()
     return RedirectResponse(
@@ -1410,14 +1473,18 @@ async def view_feedback(
         if responses:
             avg_rating = round(sum(row["response"].rating for row in responses) / len(responses), 1)
 
-    return render(request, "teacher_feedback_view.html", {
+    return render(
+        request,
+        "teacher_feedback_view.html",
+        {
             "current_user": current_user,
             "subject": subject,
             "feedback_request": feedback_request,
             "responses": responses,
             "avg_rating": avg_rating,
             "current_semester": current_semester,
-        })
+        },
+    )
 
 
 @router.get("/subjects/{subject_id}/feedback/export.csv")
@@ -1439,17 +1506,29 @@ async def export_feedback_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["student_name", "student_email", "rating", "went_well", "went_bad", "to_change", "submitted_at"])
+    writer.writerow(
+        [
+            "student_name",
+            "student_email",
+            "rating",
+            "went_well",
+            "went_bad",
+            "to_change",
+            "submitted_at",
+        ]
+    )
     for resp, student in rows:
-        writer.writerow([
-            student.full_name,
-            student.email,
-            resp.rating,
-            resp.went_well,
-            resp.went_bad,
-            resp.to_change,
-            resp.submitted_at.isoformat(),
-        ])
+        writer.writerow(
+            [
+                student.full_name,
+                student.email,
+                resp.rating,
+                resp.went_well,
+                resp.went_bad,
+                resp.to_change,
+                resp.submitted_at.isoformat(),
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(

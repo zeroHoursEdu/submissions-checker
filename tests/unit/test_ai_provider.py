@@ -45,8 +45,6 @@ def test_anthropic_missing_key_raises() -> None:
 
 def test_anthropic_selected_when_key_present() -> None:
     pytest.importorskip("anthropic")
-    provider = get_ai_provider(
-        _settings(ai_provider="anthropic", anthropic_api_key="sk-ant-test")
-    )
+    provider = get_ai_provider(_settings(ai_provider="anthropic", anthropic_api_key="sk-ant-test"))
     assert isinstance(provider, AnthropicProvider)
     assert provider.name == "anthropic"

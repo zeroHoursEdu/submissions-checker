@@ -67,9 +67,7 @@ async def test_run_migrations_invokes_upgrade_head(monkeypatch) -> None:
         return fake_config
 
     _patch_engine(monkeypatch, [])
-    monkeypatch.setattr(
-        migrations_module.command, "upgrade", fake_upgrade
-    )
+    monkeypatch.setattr(migrations_module.command, "upgrade", fake_upgrade)
     monkeypatch.setattr(migrations_module, "Config", fake_config_ctor)
     monkeypatch.delenv("_ALEMBIC_SKIP_FILECONFIG", raising=False)
 

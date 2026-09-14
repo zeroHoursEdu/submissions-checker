@@ -47,14 +47,17 @@ _MAX_ZIP_BYTES = 50 * 1024 * 1024  # 50 MB
 # Data transfer objects
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ConfigApplyPlan:
     subject_action: Literal["create", "update", "none"]
     subject_fields_changed: list[str] = field(default_factory=list)
-    new_s3_files: list[tuple[Path, str]] = field(default_factory=list)   # (local_path, s3_key)
+    new_s3_files: list[tuple[Path, str]] = field(default_factory=list)  # (local_path, s3_key)
     removed_s3_keys: list[str] = field(default_factory=list)
-    assignments_to_create: list[str] = field(default_factory=list)       # assignment codes
-    assignments_to_update: list[tuple[str, list[str]]] = field(default_factory=list)  # (code, changed_fields)
+    assignments_to_create: list[str] = field(default_factory=list)  # assignment codes
+    assignments_to_update: list[tuple[str, list[str]]] = field(
+        default_factory=list
+    )  # (code, changed_fields)
     assignments_to_delete: list[str] = field(default_factory=list)
 
 
@@ -68,6 +71,7 @@ class ApplyResult:
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
+
 
 class ConfigApplyService:
     def __init__(self, storage: StorageService | None, plugins_dir: Path) -> None:
@@ -85,7 +89,9 @@ class ConfigApplyService:
         db: AsyncSession,
     ) -> ApplyResult:
         if len(zip_bytes) > _MAX_ZIP_BYTES:
-            raise ValueError(f"ZIP file exceeds the 50 MB limit ({len(zip_bytes) // (1024 * 1024)} MB received)")
+            raise ValueError(
+                f"ZIP file exceeds the 50 MB limit ({len(zip_bytes) // (1024 * 1024)} MB received)"
+            )
 
         if not zipfile.is_zipfile(io.BytesIO(zip_bytes)):
             raise ValueError("Uploaded file is not a valid ZIP archive")
@@ -132,7 +138,9 @@ class ConfigApplyService:
 
             self._log_plan(subject_code, plan)
 
-            return await self._execute_plan(plan, new_cfg, zip_bytes, sha256, subject, owner_id, subject_code, db, tmp_dir)
+            return await self._execute_plan(
+                plan, new_cfg, zip_bytes, sha256, subject, owner_id, subject_code, db, tmp_dir
+            )
 
     # ------------------------------------------------------------------
     # Helpers: pre-flight checks
@@ -264,7 +272,10 @@ class ConfigApplyService:
         prev_assignments_cfg: dict[str, Any] = prev_cfg.get("assignments", {})
 
         # --- S3 image diff ---
-        for cfg_key, s3_suffix in (("gridPicture", "grid_picture_url"), ("mainPicture", "main_picture_url")):
+        for cfg_key, s3_suffix in (
+            ("gridPicture", "grid_picture_url"),
+            ("mainPicture", "main_picture_url"),
+        ):
             new_filename: str | None = new_cfg.get(cfg_key)
             prev_filename: str | None = prev_cfg.get(cfg_key)
             current_url: str | None = getattr(subject, s3_suffix, None) if subject else None
@@ -294,8 +305,12 @@ class ConfigApplyService:
                 changed_fields = self._diff_assignment(new_a_cfg, prev_assignments_cfg[code])
                 # Content file diff
                 self._collect_new_content_files(
-                    tmp_dir, new_cfg["subjectCode"], code, new_a_cfg,
-                    prev_assignments_cfg[code].get("contentFiles", []), plan
+                    tmp_dir,
+                    new_cfg["subjectCode"],
+                    code,
+                    new_a_cfg,
+                    prev_assignments_cfg[code].get("contentFiles", []),
+                    plan,
                 )
                 # Old content files no longer referenced
                 for old_entry in prev_assignments_cfg[code].get("contentFiles", []):
@@ -339,8 +354,17 @@ class ConfigApplyService:
                 changed.append(f)
 
         # Config JSONB fields
-        config_keys = ["review_mode", "late_policy", "max_submissions", "download_links",
-                       "variants_required", "sandbox", "variants", "ai_review", "grading"]
+        config_keys = [
+            "review_mode",
+            "late_policy",
+            "max_submissions",
+            "download_links",
+            "variants_required",
+            "sandbox",
+            "variants",
+            "ai_review",
+            "grading",
+        ]
         new_config = {k: new_a[k] for k in config_keys if k in new_a}
         prev_config = {k: prev_a[k] for k in config_keys if k in prev_a}
         if new_config != prev_config:
@@ -437,7 +461,10 @@ class ConfigApplyService:
 
         # Apply image URLs for new uploads (if subject was just created)
         if subject_created:
-            for cfg_key, attr in (("gridPicture", "grid_picture_url"), ("mainPicture", "main_picture_url")):
+            for cfg_key, attr in (
+                ("gridPicture", "grid_picture_url"),
+                ("mainPicture", "main_picture_url"),
+            ):
                 filename: str | None = new_cfg.get(cfg_key)
                 if filename:
                     s3_key = f"subjects/{subject_code}/images/{filename}"
@@ -453,9 +480,7 @@ class ConfigApplyService:
             await db.flush()
             # Create StudentAssignment rows for all currently enrolled students
             enrolled = await db.execute(
-                select(SubjectsStudents.student_id).where(
-                    SubjectsStudents.subject_id == subject.id
-                )
+                select(SubjectsStudents.student_id).where(SubjectsStudents.subject_id == subject.id)
             )
             for (student_id,) in enrolled:
                 db.add(StudentAssignment(student_id=student_id, subjects_assignment_id=sa.id))
@@ -470,7 +495,9 @@ class ConfigApplyService:
             )
             sa = result.scalar_one_or_none()
             if sa is not None:
-                self._apply_assignment_fields(changed_fields, sa, a_cfg, url_map, subject_code, code)
+                self._apply_assignment_fields(
+                    changed_fields, sa, a_cfg, url_map, subject_code, code
+                )
 
         for code in plan.assignments_to_delete:
             result = await db.execute(
@@ -485,14 +512,16 @@ class ConfigApplyService:
 
         # Insert new SubjectPluginConfig version
         version = await self._next_version(db, subject.id)
-        db.add(SubjectPluginConfig(
-            subject_id=subject.id,
-            version=version,
-            content_hash=sha256,
-            config=new_cfg,
-            zip_data=zip_bytes,
-            loaded_from=None,
-        ))
+        db.add(
+            SubjectPluginConfig(
+                subject_id=subject.id,
+                version=version,
+                content_hash=sha256,
+                config=new_cfg,
+                zip_data=zip_bytes,
+                loaded_from=None,
+            )
+        )
 
         await db.commit()
         logger.info(
@@ -515,7 +544,11 @@ class ConfigApplyService:
                 except Exception as exc:
                     logger.warning("config_apply_s3_delete_failed", key=key, error=str(exc))
 
-        action = "created" if subject_created else ("updated" if plan.subject_action != "none" else "unchanged")
+        action = (
+            "created"
+            if subject_created
+            else ("updated" if plan.subject_action != "none" else "unchanged")
+        )
         return ApplyResult(changed=True, subject_action=action, subject_name=subject.name)
 
     def _apply_subject_fields(
@@ -570,7 +603,9 @@ class ConfigApplyService:
             elif f == "config":
                 sa.config = self._build_assignment_config(a_cfg)
             elif f == "content_files":
-                sa.content_files = self._build_content_files(a_cfg, url_map, subject_code, assignment_code)
+                sa.content_files = self._build_content_files(
+                    a_cfg, url_map, subject_code, assignment_code
+                )
 
     async def _create_assignment(
         self,
@@ -599,8 +634,15 @@ class ConfigApplyService:
     def _build_assignment_config(self, a_cfg: dict[str, Any]) -> dict[str, Any]:
         config: dict[str, Any] = {}
         for key in (
-            "review_mode", "late_policy", "max_submissions", "download_links",
-            "variants_required", "sandbox", "variants", "ai_review", "grading",
+            "review_mode",
+            "late_policy",
+            "max_submissions",
+            "download_links",
+            "variants_required",
+            "sandbox",
+            "variants",
+            "ai_review",
+            "grading",
         ):
             if key in a_cfg:
                 config[key] = a_cfg[key]

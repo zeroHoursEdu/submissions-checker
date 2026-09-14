@@ -154,9 +154,7 @@ async def test_forgot_password_token_in_email_matches_persisted_token(
     assert resp.status_code == 200
 
     prt = (
-        await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
-        )
+        await db.execute(select(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
     ).scalar_one()
 
     assert len(channel.sent) == 1
@@ -183,19 +181,17 @@ async def test_forgot_password_no_channels_configured_sends_nothing(
         async def notify(self, *args: object) -> None:  # pragma: no cover - must not run
             notified.append(args)
 
-    monkeypatch.setattr(
-        auth_module, "build_dispatcher", lambda settings: _EmptyDispatcher([])
-    )
+    monkeypatch.setattr(auth_module, "build_dispatcher", lambda settings: _EmptyDispatcher([]))
 
     resp = await client.post("/auth/forgot-password", data={"username": "nochan"})
     assert resp.status_code == 200
     assert notified == []  # notify never called when there are no channels
 
     token_count = (
-        await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert len(token_count) == 1  # token still created
 
 
@@ -224,10 +220,10 @@ async def test_forgot_password_user_without_email_sends_nothing(
     assert built == []
 
     tokens = (
-        await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert len(tokens) == 1
 
 
@@ -256,9 +252,7 @@ async def test_reset_password_get_renders_form_for_valid_token(
     assert "new_password" in resp.text
 
 
-async def test_reset_password_get_invalid_token_renders_notice(
-    client: AsyncClient
-) -> None:
+async def test_reset_password_get_invalid_token_renders_notice(client: AsyncClient) -> None:
     """GET with an unknown token still renders the page (valid=False branch)."""
     resp = await client.get("/auth/reset-password", params={"token": "does-not-exist"})
     assert resp.status_code == 200
@@ -445,9 +439,7 @@ async def test_portal_assignment_detail_404_for_foreign_student_assignment(
     from tests.functional.conftest import authenticate
 
     authenticate(client, user)
-    resp = await client.get(
-        "/portal/subjects/1/assignments/99999", follow_redirects=False
-    )
+    resp = await client.get("/portal/subjects/1/assignments/99999", follow_redirects=False)
     assert resp.status_code == 404
 
 
@@ -493,12 +485,16 @@ async def test_portal_toggle_notification_preference_creates_disabled_row(
     assert resp.status_code == 303
 
     rows = (
-        await db.execute(
-            select(NotificationPreference).where(
-                NotificationPreference.student_id == student.id
+        (
+            await db.execute(
+                select(NotificationPreference).where(
+                    NotificationPreference.student_id == student.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert rows[0].enabled is False
 

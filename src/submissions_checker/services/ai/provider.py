@@ -107,7 +107,11 @@ class AnthropicProvider:
             output_config={"format": {"type": "json_schema", "schema": schema}},
         )
         text = next(
-            (getattr(b, "text", "") for b in response.content if getattr(b, "type", None) == "text"),
+            (
+                getattr(b, "text", "")
+                for b in response.content
+                if getattr(b, "type", None) == "text"
+            ),
             "",
         )
         return _parse_json(text)

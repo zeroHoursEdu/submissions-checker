@@ -117,9 +117,7 @@ def _stub_storage(content: bytes = IMAGE_BYTES):
 async def test_owning_teacher_receives_the_image(
     teacher_client: AsyncClient, db, teacher: User, student_user: User
 ) -> None:
-    snapshot = await _arrange_snapshot(
-        db, owner_id=teacher.id, student_id=student_user.student_id
-    )
+    snapshot = await _arrange_snapshot(db, owner_id=teacher.id, student_id=student_user.student_id)
 
     patcher, storage = _stub_storage()
     with patcher:
@@ -151,9 +149,7 @@ async def test_teacher_of_another_subject_is_refused(
 async def test_student_is_refused(
     student_client: AsyncClient, db, teacher: User, student_user: User
 ) -> None:
-    snapshot = await _arrange_snapshot(
-        db, owner_id=teacher.id, student_id=student_user.student_id
-    )
+    snapshot = await _arrange_snapshot(db, owner_id=teacher.id, student_id=student_user.student_id)
 
     patcher, storage = _stub_storage()
     with patcher:
@@ -166,9 +162,7 @@ async def test_student_is_refused(
 async def test_anonymous_request_is_refused(
     client: AsyncClient, db, teacher: User, student_user: User
 ) -> None:
-    snapshot = await _arrange_snapshot(
-        db, owner_id=teacher.id, student_id=student_user.student_id
-    )
+    snapshot = await _arrange_snapshot(db, owner_id=teacher.id, student_id=student_user.student_id)
 
     patcher, storage = _stub_storage()
     with patcher:
@@ -189,9 +183,7 @@ async def test_unknown_snapshot_is_not_found(teacher_client: AsyncClient) -> Non
 async def test_admin_may_view_any_snapshot(
     admin_client: AsyncClient, db, teacher: User, student_user: User
 ) -> None:
-    snapshot = await _arrange_snapshot(
-        db, owner_id=teacher.id, student_id=student_user.student_id
-    )
+    snapshot = await _arrange_snapshot(db, owner_id=teacher.id, student_id=student_user.student_id)
 
     patcher, storage = _stub_storage()
     with patcher:
@@ -288,9 +280,7 @@ async def test_unreadable_object_is_reported_not_crashed(
     teacher_client: AsyncClient, db, teacher: User, student_user: User
 ) -> None:
     """A missing or unreachable object must 404, not raise out of the handler."""
-    snapshot = await _arrange_snapshot(
-        db, owner_id=teacher.id, student_id=student_user.student_id
-    )
+    snapshot = await _arrange_snapshot(db, owner_id=teacher.id, student_id=student_user.student_id)
 
     storage = AsyncMock()
     storage.download_bytes = AsyncMock(side_effect=RuntimeError("NoSuchKey"))

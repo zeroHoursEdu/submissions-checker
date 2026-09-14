@@ -32,7 +32,13 @@ from submissions_checker.db.models import (
     SubmissionStatus,
 )
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.db.models.enums import NotificationCase, NotificationMethod, OutboxEventType, OutboxMessageState, QuizAttemptStatus
+from submissions_checker.db.models.enums import (
+    NotificationCase,
+    NotificationMethod,
+    OutboxEventType,
+    OutboxMessageState,
+    QuizAttemptStatus,
+)
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.services.audit import audit
 from submissions_checker.services.notification_service import push_notification
@@ -56,16 +62,24 @@ async def student_needs_consent(db: DBSession, student_id: int) -> bool:
 
 @router.get("/consent", response_class=HTMLResponse, response_model=None)
 async def show_consent(
-    request: Request, db: DBSession, current_user: StudentUser, student_id: StudentId, settings: AppSettings
+    request: Request,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+    settings: AppSettings,
 ) -> HTMLResponse | RedirectResponse:
     if not await student_needs_consent(db, student_id):
         return RedirectResponse(url="/portal", status_code=303)
     vocab = get_vocab(request.cookies.get("lang"))
     notice = settings.recording_consent_notice or vocab["consent"]["notice_text"]
-    return render(request, "student_consent.html", {
-        "current_user": current_user,
-        "notice": notice,
-    })
+    return render(
+        request,
+        "student_consent.html",
+        {
+            "current_user": current_user,
+            "notice": notice,
+        },
+    )
 
 
 @router.post("/consent")
@@ -113,7 +127,9 @@ async def subjects_grid(
 
         done_result = await db.execute(
             select(SubjectsAssignment.subject_id, func.count().label("done"))
-            .join(StudentAssignment, StudentAssignment.subjects_assignment_id == SubjectsAssignment.id)
+            .join(
+                StudentAssignment, StudentAssignment.subjects_assignment_id == SubjectsAssignment.id
+            )
             .where(
                 StudentAssignment.student_id == student_id,
                 SubjectsAssignment.subject_id.in_(subject_ids),
@@ -135,7 +151,11 @@ async def subjects_grid(
         for s in subjects
     ]
 
-    return render(request, "subjects.html", {"current_user": current_user, "student": student, "subjects": subject_cards})
+    return render(
+        request,
+        "subjects.html",
+        {"current_user": current_user, "student": student, "subjects": subject_cards},
+    )
 
 
 @router.get("/subjects/{subject_id}", response_class=HTMLResponse)
@@ -180,9 +200,7 @@ async def assignments_list(
 
     assignment_rows = []
     for sa in student_assignments:
-        latest_sub = (
-            max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None
-        )
+        latest_sub = max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None
         assignment_rows.append(
             AssignmentRow(
                 student_assignment_id=sa.id,
@@ -195,12 +213,16 @@ async def assignments_list(
             )
         )
 
-    return render(request, "assignments.html", {
+    return render(
+        request,
+        "assignments.html",
+        {
             "current_user": current_user,
             "student": student,
             "subject": subject,
             "assignments": assignment_rows,
-        })
+        },
+    )
 
 
 @router.get("/subjects/{subject_id}/assignments/{sa_id}", response_class=HTMLResponse)
@@ -227,9 +249,7 @@ async def assignment_detail(
     if sa is None:
         raise HTTPException(status_code=404)
 
-    latest_sub = (
-        max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None
-    )
+    latest_sub = max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None
 
     # Quiz attempt metadata: count used attempts across all submissions for this sa
     attempts_used_result = await db.execute(
@@ -262,8 +282,7 @@ async def assignment_detail(
             plugin_cfg = await db.get(SubjectPluginConfig, latest_sub.plugin_config_id)
             if plugin_cfg:
                 quiz_cfg = (
-                    plugin_cfg.config
-                    .get("assignments", {})
+                    plugin_cfg.config.get("assignments", {})
                     .get(sa.subjects_assignment.code, {})
                     .get("quiz", {})
                 )
@@ -311,12 +330,16 @@ async def assignment_detail(
 
     student = await db.get(Student, student_id)
 
-    return render(request, "assignment_detail.html", {
+    return render(
+        request,
+        "assignment_detail.html",
+        {
             "current_user": current_user,
             "student": student,
             "subject_id": subject_id,
             "assignment": detail,
-        })
+        },
+    )
 
 
 @router.post("/subjects/{subject_id}/assignments/{sa_id}/submit")
@@ -359,7 +382,9 @@ async def submit_assignment(
         )
     )
     if (completed_result.scalar_one() or 0) > 0:
-        raise HTTPException(status_code=403, detail="Assignment already passed. No further submissions accepted.")
+        raise HTTPException(
+            status_code=403, detail="Assignment already passed. No further submissions accepted."
+        )
 
     # Re-submission limit
     max_submissions = subjects_assignment.config.get("max_submissions")
@@ -390,8 +415,7 @@ async def submit_assignment(
 
     # Compare against all other ZIP submissions for this assignment (plagiarism detection)
     other_subs_result = await db.execute(
-        select(Submission.source_metadata)
-        .where(
+        select(Submission.source_metadata).where(
             Submission.students_assignment_id.in_(
                 select(StudentAssignment.id).where(
                     StudentAssignment.subjects_assignment_id == sa.subjects_assignment_id,
@@ -425,11 +449,13 @@ async def submit_assignment(
     await db.flush()
 
     # Enqueue background check — submission stays PENDING until worker picks it up
-    db.add(OutboxMessage(
-        event_type=OutboxEventType.RUN_CHECKS,
-        state=OutboxMessageState.PENDING,
-        payload={"submission_id": submission.id},
-    ))
+    db.add(
+        OutboxMessage(
+            event_type=OutboxEventType.RUN_CHECKS,
+            state=OutboxMessageState.PENDING,
+            payload={"submission_id": submission.id},
+        )
+    )
 
     await audit(
         db,
@@ -531,11 +557,13 @@ async def student_summary(
             .subquery()
         )
         sub_result = await db.execute(
-            select(Submission)
-            .join(latest_sub_sq, and_(
-                Submission.students_assignment_id == latest_sub_sq.c.students_assignment_id,
-                Submission.created_at == latest_sub_sq.c.max_at,
-            ))
+            select(Submission).join(
+                latest_sub_sq,
+                and_(
+                    Submission.students_assignment_id == latest_sub_sq.c.students_assignment_id,
+                    Submission.created_at == latest_sub_sq.c.max_at,
+                ),
+            )
         )
         subs_by_sa = {s.students_assignment_id: s for s in sub_result.scalars().all()}
     else:
@@ -552,17 +580,22 @@ async def student_summary(
             deadline = deadline.replace(tzinfo=UTC)
         sub = subs_by_sa.get(r.student_assignment_id)
         is_overdue = deadline is not None and deadline < now and r.grade is None
-        summary_rows.append({
-            "subject": subject_map.get(sa.subject_id),
-            "assignment": sa,
-            "student_assignment_id": r.student_assignment_id,
-            "grade": r.grade,
-            "submission_status": sub.status if sub else None,
-            "deadline": deadline,
-            "is_overdue": is_overdue,
-        })
+        summary_rows.append(
+            {
+                "subject": subject_map.get(sa.subject_id),
+                "assignment": sa,
+                "student_assignment_id": r.student_assignment_id,
+                "grade": r.grade,
+                "submission_status": sub.status if sub else None,
+                "deadline": deadline,
+                "is_overdue": is_overdue,
+            }
+        )
 
-    return render(request, "student_summary.html", {
+    return render(
+        request,
+        "student_summary.html",
+        {
             "current_user": current_user,
             "student": student,
             "summary_rows": summary_rows,
@@ -571,7 +604,8 @@ async def student_summary(
             "total_assignments": len(all_rows),
             "upcoming_deadlines": upcoming_deadlines,
             "overdue": overdue,
-        })
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +642,9 @@ async def notification_preferences_page(
             methods.append({"method": method, "method_label": method_label, "enabled": enabled})
         preferences.append({"case": case, "case_label": case_label, "methods": methods})
 
-    return render(request, "student_settings.html", {"current_user": current_user, "preferences": preferences})
+    return render(
+        request, "student_settings.html", {"current_user": current_user, "preferences": preferences}
+    )
 
 
 @router.post("/notification-preferences/{case}/{method}/toggle")
@@ -628,7 +664,9 @@ async def toggle_notification_preference(
     )
     pref = result.scalar_one_or_none()
     if pref is None:
-        db.add(NotificationPreference(student_id=student_id, case=case, method=method, enabled=False))
+        db.add(
+            NotificationPreference(student_id=student_id, case=case, method=method, enabled=False)
+        )
     else:
         pref.enabled = not pref.enabled
     await db.commit()

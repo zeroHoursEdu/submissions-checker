@@ -89,7 +89,9 @@ async def _enroll(db, subject_id: int, student_id: int) -> None:
     await db.commit()
 
 
-async def _grade(db, subjects_assignment_id: int, student_id: int, grade: int | None) -> StudentAssignment:
+async def _grade(
+    db, subjects_assignment_id: int, student_id: int, grade: int | None
+) -> StudentAssignment:
     sa = StudentAssignment(
         student_id=student_id,
         subjects_assignment_id=subjects_assignment_id,
@@ -101,7 +103,9 @@ async def _grade(db, subjects_assignment_id: int, student_id: int, grade: int | 
     return sa
 
 
-async def _submit(db, students_assignment_id: int, *, created_at: datetime | None = None) -> Submission:
+async def _submit(
+    db, students_assignment_id: int, *, created_at: datetime | None = None
+) -> Submission:
     sub = Submission(
         students_assignment_id=students_assignment_id,
         source_type=SubmissionSourceType.ZIP_UPLOAD,
@@ -235,16 +239,26 @@ async def test_overview_aggregates_and_grade_buckets(
     bucketing fix targets, plus pass-rate boundaries.
     """
     group = await make_group("G1")
-    s1, _ = await _student_with_user(make_user, make_student, group=group, full_name="Alice", email="a@e.com")
-    s2, _ = await _student_with_user(make_user, make_student, group=group, full_name="Bob", email="b@e.com")
-    s3, _ = await _student_with_user(make_user, make_student, group=group, full_name="Carol", email="c@e.com")
+    s1, _ = await _student_with_user(
+        make_user, make_student, group=group, full_name="Alice", email="a@e.com"
+    )
+    s2, _ = await _student_with_user(
+        make_user, make_student, group=group, full_name="Bob", email="b@e.com"
+    )
+    s3, _ = await _student_with_user(
+        make_user, make_student, group=group, full_name="Carol", email="c@e.com"
+    )
 
     subj_a = await _make_subject(db, None, name="Algebra", code="alg")
     subj_b = await _make_subject(db, None, name="Biology", code="bio")
 
     # min_grade=50 so we can reason about pass rate; max_grade=100.
-    asg_a = await _make_assignment(db, subj_a.id, title="A1", code="a1", min_grade=50, max_grade=100)
-    asg_b = await _make_assignment(db, subj_b.id, title="B1", code="b1", min_grade=50, max_grade=100)
+    asg_a = await _make_assignment(
+        db, subj_a.id, title="A1", code="a1", min_grade=50, max_grade=100
+    )
+    asg_b = await _make_assignment(
+        db, subj_b.id, title="B1", code="b1", min_grade=50, max_grade=100
+    )
 
     # Enroll all three in both subjects (total distinct students = 3).
     for st in (s1, s2, s3):

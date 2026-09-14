@@ -56,17 +56,25 @@ class DockerSandbox:
             os.chmod(output_dir, 0o777)
             container_name = f"submission-check-{uuid.uuid4().hex}"
             cmd = [
-                "docker", "run", "--rm",
-                "--name", container_name,
-                "--network", "none",
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "--network",
+                "none",
                 f"--memory={memory}",
                 f"--cpus={cpus}",
                 "--pids-limit=100",
                 "--read-only",
-                "--tmpfs", "/tmp:rw,size=64m",
-                "-v", f"{student_files_dir}:/submission:ro",
-                "-v", f"{plugin_dir}:/plugin:ro",
-                "-v", f"{output_dir}:/output:rw",
+                "--tmpfs",
+                "/tmp:rw,size=64m",
+                "-v",
+                f"{student_files_dir}:/submission:ro",
+                "-v",
+                f"{plugin_dir}:/plugin:ro",
+                "-v",
+                f"{output_dir}:/output:rw",
             ]
             for k, v in (env or {}).items():
                 cmd += ["-e", f"{k}={v}"]
@@ -135,7 +143,9 @@ class DockerSandbox:
         timeout fired, which is a harmless race, not an error."""
         try:
             kill_proc = await asyncio.create_subprocess_exec(
-                "docker", "kill", name,
+                "docker",
+                "kill",
+                name,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )

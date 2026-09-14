@@ -27,30 +27,32 @@ async def admin_dashboard(
 ) -> HTMLResponse:
     # System stats
     user_counts_result = await db.execute(
-        select(User.role, func.count(User.id).label("cnt"))
-        .group_by(User.role)
+        select(User.role, func.count(User.id).label("cnt")).group_by(User.role)
     )
     user_counts = {r.role: r.cnt for r in user_counts_result}
 
     outbox_result = await db.execute(
-        select(OutboxMessage.state, func.count(OutboxMessage.id).label("cnt"))
-        .group_by(OutboxMessage.state)
+        select(OutboxMessage.state, func.count(OutboxMessage.id).label("cnt")).group_by(
+            OutboxMessage.state
+        )
     )
     outbox_counts = {r.state: r.cnt for r in outbox_result}
 
     recent_audit_result = await db.execute(
-        select(AuditLog)
-        .order_by(AuditLog.created_at.desc())
-        .limit(20)
+        select(AuditLog).order_by(AuditLog.created_at.desc()).limit(20)
     )
     recent_audit = recent_audit_result.scalars().all()
 
-    return render(request, "admin_dashboard.html", {
+    return render(
+        request,
+        "admin_dashboard.html",
+        {
             "current_user": current_user,
             "user_counts": user_counts,
             "outbox_counts": outbox_counts,
             "recent_audit": recent_audit,
-        })
+        },
+    )
 
 
 @router.get("/users", response_class=HTMLResponse)
@@ -59,9 +61,7 @@ async def admin_users(
     db: DBSession,
     current_user: AdminUser,
 ) -> HTMLResponse:
-    result = await db.execute(
-        select(User).order_by(User.role, User.username)
-    )
+    result = await db.execute(select(User).order_by(User.role, User.username))
     users = result.scalars().all()
     return render(request, "admin_users.html", {"current_user": current_user, "users": users})
 
@@ -71,7 +71,9 @@ async def create_teacher_page(
     request: Request,
     current_user: AdminUser,
 ) -> HTMLResponse:
-    return render(request, "admin_create_teacher.html", {"current_user": current_user, "error": None})
+    return render(
+        request, "admin_create_teacher.html", {"current_user": current_user, "error": None}
+    )
 
 
 @router.post("/teachers/create", response_model=None)
@@ -84,17 +86,30 @@ async def create_teacher(
 ) -> HTMLResponse | RedirectResponse:
     username = username.strip()
     if len(password) < 8:
-        return render(request, "admin_create_teacher.html", {"current_user": current_user, "error": "Password must be at least 8 characters."}, status_code=422)  # type: ignore[return-value]
+        return render(
+            request,
+            "admin_create_teacher.html",
+            {"current_user": current_user, "error": "Password must be at least 8 characters."},
+            status_code=422,
+        )  # type: ignore[return-value]
     existing = await db.execute(select(User.id).where(User.username == username))
     if existing.scalar_one_or_none() is not None:
-        return render(request, "admin_create_teacher.html", {"current_user": current_user, "error": "Username already taken."}, status_code=422)  # type: ignore[return-value]
+        return render(
+            request,
+            "admin_create_teacher.html",
+            {"current_user": current_user, "error": "Username already taken."},
+            status_code=422,
+        )  # type: ignore[return-value]
 
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
     user = User(username=username, password_hash=password_hash, role=UserRole.TEACHER)
     db.add(user)
     await audit(
-        db, action="create_teacher", actor_id=current_user.user_id,
-        actor_username=current_user.username, new_username=username,
+        db,
+        action="create_teacher",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        new_username=username,
     )
     await db.commit()
     return RedirectResponse(url="/admin/users", status_code=303)
@@ -113,8 +128,12 @@ async def toggle_user_active(
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
     user.is_active = not user.is_active
     await audit(
-        db, action="toggle_user_active", actor_id=current_user.user_id,
-        actor_username=current_user.username, target_user_id=user_id, is_active=user.is_active,
+        db,
+        action="toggle_user_active",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_user_id=user_id,
+        is_active=user.is_active,
     )
     await db.commit()
     return RedirectResponse(url="/admin/users", status_code=303)
@@ -126,8 +145,6 @@ async def admin_audit_log(
     db: DBSession,
     current_user: AdminUser,
 ) -> HTMLResponse:
-    result = await db.execute(
-        select(AuditLog).order_by(AuditLog.created_at.desc()).limit(200)
-    )
+    result = await db.execute(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(200))
     logs = result.scalars().all()
     return render(request, "admin_audit.html", {"current_user": current_user, "logs": logs})

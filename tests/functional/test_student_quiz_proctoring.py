@@ -88,9 +88,7 @@ async def _arrange_quiz(
     await db.commit()
     await db.refresh(cfg)
 
-    sub_a = SubjectsAssignment(
-        subject_id=subject.id, title="HW1", code=assignment_code, config={}
-    )
+    sub_a = SubjectsAssignment(subject_id=subject.id, title="HW1", code=assignment_code, config={})
     db.add(sub_a)
     await db.commit()
     await db.refresh(sub_a)
@@ -115,10 +113,22 @@ async def _arrange_quiz(
 
 
 _DEFAULT_SNAP = [
-    {"id": 0, "type": "SINGLE_CHOICE", "text": "2+2", "points": 1,
-     "is_required": False, "config": {"options": ["3", "4", "5"], "correct": 1}},
-    {"id": 1, "type": "SINGLE_CHOICE", "text": "sky", "points": 1,
-     "is_required": False, "config": {"options": ["green", "blue"], "correct": 1}},
+    {
+        "id": 0,
+        "type": "SINGLE_CHOICE",
+        "text": "2+2",
+        "points": 1,
+        "is_required": False,
+        "config": {"options": ["3", "4", "5"], "correct": 1},
+    },
+    {
+        "id": 1,
+        "type": "SINGLE_CHOICE",
+        "text": "sky",
+        "points": 1,
+        "is_required": False,
+        "config": {"options": ["green", "blue"], "correct": 1},
+    },
 ]
 
 
@@ -183,9 +193,7 @@ async def _storage_enabled(upload_url: str = "https://cdn/proctor/x.jpg"):
     fake_storage = AsyncMock()
     fake_storage.upload_bytes = AsyncMock(return_value=upload_url)
     try:
-        with patch.object(
-            student_quiz_module, "StorageService", return_value=fake_storage
-        ):
+        with patch.object(student_quiz_module, "StorageService", return_value=fake_storage):
             yield fake_storage
     finally:
         app.dependency_overrides.pop(get_settings, None)
@@ -208,7 +216,10 @@ async def test_event_warn_below_threshold_is_none_then_warns(
     r1 = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "tab_switch"})
     assert r1.status_code == 200
     assert r1.json() == {
-        "action": "none", "seconds_remaining": None, "message": "", "violation_count": 1,
+        "action": "none",
+        "seconds_remaining": None,
+        "message": "",
+        "violation_count": 1,
     }
 
     r2 = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "tab_switch"})
@@ -254,7 +265,9 @@ async def test_event_fail_and_reduce_time_unaffected_by_notify_student_false(
         ],
     }
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": anti_cheat, "time_limit_minutes": 10},
         started_at=datetime.now(UTC),
     )
@@ -280,10 +293,14 @@ async def test_event_message_template_interpolates_count_and_threshold(
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     anti_cheat = {
         "rules": [
-            _rule("tab_switch", 1, {
-                "type": "warn",
-                "message": "{count}/{threshold} (fail at {fail_threshold})",
-            }),
+            _rule(
+                "tab_switch",
+                1,
+                {
+                    "type": "warn",
+                    "message": "{count}/{threshold} (fail at {fail_threshold})",
+                },
+            ),
             _rule("tab_switch", 3, {"type": "fail", "message": "gone"}),
         ]
     }
@@ -299,10 +316,14 @@ async def test_event_reduce_time_accumulates_penalty(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     anti_cheat = {
-        "rules": [_rule("blur", 1, {"type": "reduce_time", "penalty_seconds": 30, "message": "-30s"})]
+        "rules": [
+            _rule("blur", 1, {"type": "reduce_time", "penalty_seconds": 30, "message": "-30s"})
+        ]
     }
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": anti_cheat, "time_limit_minutes": 10},
         started_at=datetime.now(UTC),
     )
@@ -345,7 +366,10 @@ async def test_event_unconfigured_type_counts_but_no_action(
 
     r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "mystery"})
     assert r.json() == {
-        "action": "none", "seconds_remaining": None, "message": "", "violation_count": 1,
+        "action": "none",
+        "seconds_remaining": None,
+        "message": "",
+        "violation_count": 1,
     }
     await db.refresh(attempt)
     assert attempt.violations["mystery"] == 1
@@ -365,9 +389,7 @@ async def test_event_empty_type_defaults_to_empty_string_key(
     assert attempt.violations[""] == 1
 
 
-async def test_event_on_unknown_attempt_404(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_event_on_unknown_attempt_404(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     r = await student_client.post("/portal/quiz/888888/event", json={"type": "x"})
     assert r.status_code == 404
@@ -380,7 +402,10 @@ async def test_event_on_timed_out_attempt_ignored(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg, status=QuizAttemptStatus.TIMED_OUT,
+        db,
+        sub.id,
+        cfg,
+        status=QuizAttemptStatus.TIMED_OUT,
         config_snapshot={"anti_cheat": {"rules": [_rule("x", 1, {"type": "fail"})]}},
     )
     r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "x"})
@@ -405,7 +430,9 @@ async def test_force_fail_finalizes_on_submit_as_violation_fail(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"pass_threshold_pct": 0.6},
         violations={"_force_fail": True},
     )
@@ -436,7 +463,9 @@ async def test_snapshot_stored_when_capture_enabled_and_storage_configured(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}},
     )
     async with _storage_enabled(upload_url="https://cdn/proctor/1.jpg") as storage:
@@ -451,10 +480,14 @@ async def test_snapshot_stored_when_capture_enabled_and_storage_configured(
     storage.upload_bytes.assert_awaited_once()
 
     rows = (
-        await db.execute(
-            select(QuizAttemptSnapshot).where(QuizAttemptSnapshot.attempt_id == attempt.id)
+        (
+            await db.execute(
+                select(QuizAttemptSnapshot).where(QuizAttemptSnapshot.attempt_id == attempt.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     snap = rows[0]
     # event_type sanitized: non-alnum (except _-) stripped.
@@ -470,14 +503,21 @@ async def test_snapshot_sequence_increments_for_second_capture(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}},
     )
     # Pre-existing snapshot so the next sequence number is 2.
-    db.add(QuizAttemptSnapshot(
-        attempt_id=attempt.id, event_type="prior", s3_key="k", s3_url="u",
-        captured_at=datetime.now(UTC),
-    ))
+    db.add(
+        QuizAttemptSnapshot(
+            attempt_id=attempt.id,
+            event_type="prior",
+            s3_key="k",
+            s3_url="u",
+            captured_at=datetime.now(UTC),
+        )
+    )
     await db.commit()
 
     async with _storage_enabled():
@@ -487,12 +527,16 @@ async def test_snapshot_sequence_increments_for_second_capture(
         )
     assert r.status_code == 200
     rows = (
-        await db.execute(
-            select(QuizAttemptSnapshot)
-            .where(QuizAttemptSnapshot.attempt_id == attempt.id)
-            .order_by(QuizAttemptSnapshot.id)
+        (
+            await db.execute(
+                select(QuizAttemptSnapshot)
+                .where(QuizAttemptSnapshot.attempt_id == attempt.id)
+                .order_by(QuizAttemptSnapshot.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 2
     assert rows[1].s3_key == f"proctoring/attempt-{attempt.id}/2-blur.png"
 
@@ -504,7 +548,9 @@ async def test_snapshot_no_storage_configured_returns_stored_false(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}},
     )
     # Default app settings have s3_endpoint_url=None → storage is None.
@@ -515,20 +561,25 @@ async def test_snapshot_no_storage_configured_returns_stored_false(
     assert r.status_code == 200
     assert r.json() == {"stored": False}
     rows = (
-        await db.execute(
-            select(QuizAttemptSnapshot).where(QuizAttemptSnapshot.attempt_id == attempt.id)
+        (
+            await db.execute(
+                select(QuizAttemptSnapshot).where(QuizAttemptSnapshot.attempt_id == attempt.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows == []
 
 
-async def test_snapshot_terminal_attempt_409(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_snapshot_terminal_attempt_409(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg, status=QuizAttemptStatus.COMPLETED,
+        db,
+        sub.id,
+        cfg,
+        status=QuizAttemptStatus.COMPLETED,
         config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}},
     )
     r = await student_client.post(
@@ -538,13 +589,13 @@ async def test_snapshot_terminal_attempt_409(
     assert r.status_code == 409
 
 
-async def test_snapshot_bad_content_type_415(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_snapshot_bad_content_type_415(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}},
     )
     async with _storage_enabled():
@@ -555,13 +606,13 @@ async def test_snapshot_bad_content_type_415(
     assert r.status_code == 415
 
 
-async def test_snapshot_oversize_413(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_snapshot_oversize_413(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}},
     )
     big = b"\xff\xd8\xff" + b"x" * (2 * 1024 * 1024 + 1)  # > 2 MB
@@ -573,13 +624,13 @@ async def test_snapshot_oversize_413(
     assert r.status_code == 413
 
 
-async def test_snapshot_empty_frame_413(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_snapshot_empty_frame_413(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}},
     )
     async with _storage_enabled():
@@ -590,9 +641,7 @@ async def test_snapshot_empty_frame_413(
     assert r.status_code == 413
 
 
-async def test_snapshot_unknown_attempt_404(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_snapshot_unknown_attempt_404(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     r = await student_client.post(
         "/portal/quiz/777777/snapshot?event_type=blur",
@@ -607,22 +656,50 @@ async def test_snapshot_unknown_attempt_404(
 
 
 _MULTI_TYPE_SNAP = [
-    {"id": 0, "type": "SINGLE_CHOICE", "text": "single", "points": 1,
-     "is_required": False, "config": {"options": ["a", "b", "c"], "correct": 2}},
-    {"id": 1, "type": "MULTIPLE_CHOICE", "text": "multi", "points": 2,
-     "is_required": False, "config": {"options": ["a", "b", "c"], "correct": [0, 2]}},
-    {"id": 2, "type": "ORDERING", "text": "order", "points": 2,
-     "is_required": False, "config": {"items": ["x", "y", "z"], "correct_order": [2, 0, 1]}},
-    {"id": 3, "type": "TRUE_FALSE", "text": "tf", "points": 1,
-     "is_required": False, "config": {"correct": True}},
-    {"id": 4, "type": "SHORT_ANSWER", "text": "sa", "points": 3,
-     "is_required": False, "config": {}},
+    {
+        "id": 0,
+        "type": "SINGLE_CHOICE",
+        "text": "single",
+        "points": 1,
+        "is_required": False,
+        "config": {"options": ["a", "b", "c"], "correct": 2},
+    },
+    {
+        "id": 1,
+        "type": "MULTIPLE_CHOICE",
+        "text": "multi",
+        "points": 2,
+        "is_required": False,
+        "config": {"options": ["a", "b", "c"], "correct": [0, 2]},
+    },
+    {
+        "id": 2,
+        "type": "ORDERING",
+        "text": "order",
+        "points": 2,
+        "is_required": False,
+        "config": {"items": ["x", "y", "z"], "correct_order": [2, 0, 1]},
+    },
+    {
+        "id": 3,
+        "type": "TRUE_FALSE",
+        "text": "tf",
+        "points": 1,
+        "is_required": False,
+        "config": {"correct": True},
+    },
+    {
+        "id": 4,
+        "type": "SHORT_ANSWER",
+        "text": "sa",
+        "points": 3,
+        "is_required": False,
+        "config": {},
+    },
 ]
 
 
-async def test_grading_all_question_types(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_grading_all_question_types(student_client: AsyncClient, db, student_user) -> None:
     """Exercises _grade_answer for every type in one submit.
 
     Max auto-scorable = single(1) + multi(2) + order(2) + tf(1) = 6.
@@ -632,18 +709,20 @@ async def test_grading_all_question_types(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         questions_snapshot=_MULTI_TYPE_SNAP,
         config_snapshot={"pass_threshold_pct": 0.6},
     )
     r = await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
         data={
-            "answer_0": "2",                 # single correct
-            "answer_1": ["0", "2"],          # multi correct {0,2}
-            "answer_ordering_2": "2,0,1",    # ordering correct
-            "answer_3": "true",              # true/false correct
-            "answer_4": "  free text  ",     # short answer (auto 0)
+            "answer_0": "2",  # single correct
+            "answer_1": ["0", "2"],  # multi correct {0,2}
+            "answer_ordering_2": "2,0,1",  # ordering correct
+            "answer_3": "true",  # true/false correct
+            "answer_4": "  free text  ",  # short answer (auto 0)
         },
         follow_redirects=False,
     )
@@ -657,9 +736,9 @@ async def test_grading_all_question_types(
 
     answers = {
         a.question_id: a
-        for a in (
-            await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id))
-        ).scalars().all()
+        for a in (await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)))
+        .scalars()
+        .all()
     }
     assert answers[0].is_correct is True and answers[0].points_earned == 1
     assert answers[1].answer == {"selected": [0, 2]} and answers[1].points_earned == 2
@@ -677,18 +756,20 @@ async def test_grading_wrong_answers_score_zero(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         questions_snapshot=_MULTI_TYPE_SNAP,
         config_snapshot={"pass_threshold_pct": 0.6},
     )
     r = await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
         data={
-            "answer_0": "0",                 # single wrong
-            "answer_1": "1",                 # multi wrong
-            "answer_ordering_2": "0,1,2",    # ordering wrong
-            "answer_3": "false",             # tf wrong
-            "answer_4": "",                  # short answer empty
+            "answer_0": "0",  # single wrong
+            "answer_1": "1",  # multi wrong
+            "answer_ordering_2": "0,1,2",  # ordering wrong
+            "answer_3": "false",  # tf wrong
+            "answer_4": "",  # short answer empty
         },
         follow_redirects=False,
     )
@@ -713,8 +794,10 @@ async def test_grading_non_numeric_single_choice_is_incorrect(
     await db.refresh(attempt)
     assert attempt.score == 0
     answers = (
-        await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id))
-    ).scalars().all()
+        (await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)))
+        .scalars()
+        .all()
+    )
     assert all(a.answer == {"selected": None} for a in answers)
     assert all(a.is_correct is False for a in answers)
 
@@ -770,7 +853,9 @@ async def test_result_renders_graded_multi_type_attempt(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         questions_snapshot=_MULTI_TYPE_SNAP,
         status=QuizAttemptStatus.COMPLETED,
         config_snapshot={"pass_threshold_pct": 0.6, "show_correct_answers_after": True},
@@ -780,10 +865,15 @@ async def test_result_renders_graded_multi_type_attempt(
     attempt.max_score = 9
     await db.commit()
     # One recorded answer so the answers branch (not the None branch) is taken.
-    db.add(QuizAnswer(
-        attempt_id=attempt.id, question_id=0, answer={"selected": 2},
-        is_correct=True, points_earned=1,
-    ))
+    db.add(
+        QuizAnswer(
+            attempt_id=attempt.id,
+            question_id=0,
+            answer={"selected": 2},
+            is_correct=True,
+            points_earned=1,
+        )
+    )
     await db.commit()
 
     r = await student_client.get(f"/portal/quiz/{attempt.id}/result")
@@ -796,7 +886,11 @@ async def test_result_of_violation_fail_visible_to_owner(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg, status=QuizAttemptStatus.VIOLATION_FAIL, is_passed=False,
+        db,
+        sub.id,
+        cfg,
+        status=QuizAttemptStatus.VIOLATION_FAIL,
+        is_passed=False,
     )
     attempt.score = 0
     attempt.max_score = 2
@@ -818,7 +912,9 @@ async def test_time_penalty_causes_timeout_on_show(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"pass_threshold_pct": 0.6, "time_limit_minutes": 5},
         started_at=datetime.now(UTC) - timedelta(minutes=4),
         violations={"_time_penalty_seconds": 120},
@@ -837,7 +933,9 @@ async def test_submit_when_timed_out_finalizes_timed_out(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={"pass_threshold_pct": 0.6, "time_limit_minutes": 1},
         started_at=datetime.now(UTC) - timedelta(minutes=5),
     )
@@ -866,7 +964,9 @@ async def test_show_in_progress_proctored_quiz_renders(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={
             "pass_threshold_pct": 0.6,
             "time_limit_minutes": 30,
@@ -894,7 +994,9 @@ async def test_notify_student_defaults_true_when_key_absent(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={
             "anti_cheat": {
                 "rules": [_rule("tab_switch", 3, {"type": "warn", "message": "m"})],
@@ -916,7 +1018,9 @@ async def test_notify_student_explicit_false_rendered_in_camera_block(
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(
-        db, sub.id, cfg,
+        db,
+        sub.id,
+        cfg,
         config_snapshot={
             "anti_cheat": {
                 "notify_student": False,
@@ -977,9 +1081,7 @@ async def test_start_quiz_builds_choices_format_and_extra_types(
         "shuffle_options": True,
         "pass_threshold_pct": 0.6,
     }
-    subject, sa, sub, _cfg = await _arrange_quiz(
-        db, student_user.student_id, quiz_cfg=quiz_cfg
-    )
+    subject, sa, sub, _cfg = await _arrange_quiz(db, student_user.student_id, quiz_cfg=quiz_cfg)
     r = await student_client.get(
         f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz",
         follow_redirects=False,
@@ -987,8 +1089,10 @@ async def test_start_quiz_builds_choices_format_and_extra_types(
     assert r.status_code == 303
 
     attempt = (
-        await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id))
-    ).scalars().one()
+        (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))
+        .scalars()
+        .one()
+    )
     snap = {q["type"]: q for q in attempt.questions_snapshot}
     assert len(attempt.questions_snapshot) == 4
     # SINGLE_CHOICE from choices: options derived, correct index valid.
@@ -1021,17 +1125,17 @@ async def test_start_quiz_questions_to_send_limits_with_required(
         "shuffle_options": False,
         "pass_threshold_pct": 0.6,
     }
-    subject, sa, sub, _cfg = await _arrange_quiz(
-        db, student_user.student_id, quiz_cfg=quiz_cfg
-    )
+    subject, sa, sub, _cfg = await _arrange_quiz(db, student_user.student_id, quiz_cfg=quiz_cfg)
     r = await student_client.get(
         f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz",
         follow_redirects=False,
     )
     assert r.status_code == 303
     attempt = (
-        await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id))
-    ).scalars().one()
+        (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))
+        .scalars()
+        .one()
+    )
     # total=2: 1 required + 1 optional.
     assert len(attempt.questions_snapshot) == 2
     assert any(q["is_required"] for q in attempt.questions_snapshot)

@@ -49,9 +49,7 @@ def _patch_processor_session(monkeypatch, db_session: AsyncSession) -> None:
     monkeypatch.setattr(outbox_processor, "get_session", fake_get_session)
 
 
-async def _process(
-    db_session: AsyncSession, monkeypatch, message: OutboxMessage
-) -> OutboxMessage:
+async def _process(db_session: AsyncSession, monkeypatch, message: OutboxMessage) -> OutboxMessage:
     db_session.add(message)
     await db_session.commit()
     await db_session.refresh(message)
@@ -61,20 +59,14 @@ async def _process(
     return message
 
 
-async def _seed_enrollment(
-    db: AsyncSession, suffix: str
-) -> tuple[Student, SubjectsAssignment]:
+async def _seed_enrollment(db: AsyncSession, suffix: str) -> tuple[Student, SubjectsAssignment]:
     """Create student + subject + assignment + enrollment; return (student, sa)."""
     group = Group(name=f"grp-{suffix}")
     db.add(group)
     await db.flush()
 
-    student = Student(
-        group_id=group.id, email=f"dl-{suffix}@e.com", full_name=f"Dl {suffix}"
-    )
-    teacher = User(
-        username=f"dlt-{suffix}", password_hash="x", role="TEACHER", is_active=True
-    )
+    student = Student(group_id=group.id, email=f"dl-{suffix}@e.com", full_name=f"Dl {suffix}")
+    teacher = User(username=f"dlt-{suffix}", password_hash="x", role="TEACHER", is_active=True)
     db.add_all([student, teacher])
     await db.flush()
 
@@ -82,9 +74,7 @@ async def _seed_enrollment(
     db.add(subject)
     await db.flush()
 
-    sa = SubjectsAssignment(
-        subject_id=subject.id, title=f"Assignment {suffix}", code="lab1"
-    )
+    sa = SubjectsAssignment(subject_id=subject.id, title=f"Assignment {suffix}", code="lab1")
     db.add(sa)
     await db.flush()
 
@@ -103,9 +93,7 @@ async def test_deadline_reminder_sends_email(
     student, sa = await _seed_enrollment(db_session, "send")
     monkeypatch.setattr(notification_tasks, "get_settings", lambda: test_settings)
     dispatcher = _FakeDispatcher()
-    monkeypatch.setattr(
-        notification_tasks, "build_dispatcher", lambda _s: dispatcher
-    )
+    monkeypatch.setattr(notification_tasks, "build_dispatcher", lambda _s: dispatcher)
 
     message = OutboxMessage(
         event_type=OutboxEventType.DEADLINE_REMINDER,
@@ -133,9 +121,7 @@ async def test_deadline_reminder_no_channel_skips(
     student, sa = await _seed_enrollment(db_session, "noch")
     monkeypatch.setattr(notification_tasks, "get_settings", lambda: test_settings)
     dispatcher = _FakeDispatcher(with_channel=False)
-    monkeypatch.setattr(
-        notification_tasks, "build_dispatcher", lambda _s: dispatcher
-    )
+    monkeypatch.setattr(notification_tasks, "build_dispatcher", lambda _s: dispatcher)
 
     message = OutboxMessage(
         event_type=OutboxEventType.DEADLINE_REMINDER,
@@ -158,9 +144,7 @@ async def test_deadline_reminder_missing_enrollment_noops(
     """A reminder for an unknown enrollment finishes without sending."""
     monkeypatch.setattr(notification_tasks, "get_settings", lambda: test_settings)
     dispatcher = _FakeDispatcher()
-    monkeypatch.setattr(
-        notification_tasks, "build_dispatcher", lambda _s: dispatcher
-    )
+    monkeypatch.setattr(notification_tasks, "build_dispatcher", lambda _s: dispatcher)
 
     message = OutboxMessage(
         event_type=OutboxEventType.DEADLINE_REMINDER,

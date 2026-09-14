@@ -26,6 +26,7 @@ def svc(tmp_path: Path) -> ConfigApplyService:
 
 # ── _parse_deadline ───────────────────────────────────────────────────────────
 
+
 def test_parse_deadline_valid_iso(svc: ConfigApplyService) -> None:
     dt = svc._parse_deadline("2026-07-01T12:00:00")
     assert dt == datetime(2026, 7, 1, 12, 0, 0, tzinfo=UTC)
@@ -48,6 +49,7 @@ def test_parse_deadline_date_only(svc: ConfigApplyService) -> None:
 
 # ── _diff_assignment ──────────────────────────────────────────────────────────
 
+
 def test_diff_assignment_identical_has_no_changes(svc: ConfigApplyService) -> None:
     a = {"title": "T", "min_grade": 0, "sandbox": {"image": "x"}}
     assert svc._diff_assignment(a, dict(a)) == []
@@ -59,9 +61,7 @@ def test_diff_assignment_simple_field_change(svc: ConfigApplyService) -> None:
 
 
 def test_diff_assignment_config_grouped_under_config(svc: ConfigApplyService) -> None:
-    changed = svc._diff_assignment(
-        {"sandbox": {"image": "v2"}}, {"sandbox": {"image": "v1"}}
-    )
+    changed = svc._diff_assignment({"sandbox": {"image": "v2"}}, {"sandbox": {"image": "v1"}})
     assert changed == ["config"]
 
 
@@ -82,6 +82,7 @@ def test_diff_assignment_multiple_changes(svc: ConfigApplyService) -> None:
 
 
 # ── _build_assignment_config ──────────────────────────────────────────────────
+
 
 def test_build_assignment_config_filters_to_known_keys(svc: ConfigApplyService) -> None:
     cfg = svc._build_assignment_config(
@@ -126,19 +127,16 @@ def test_diff_assignment_ai_review_unchanged_no_change(svc: ConfigApplyService) 
 
 # ── _build_content_files ──────────────────────────────────────────────────────
 
+
 def test_build_content_files_maps_urls(svc: ConfigApplyService) -> None:
     a_cfg = {"contentFiles": [{"filename": "spec.pdf", "displayName": "Spec"}]}
     url_map = {"subjects/demo/assignments/lab1/spec.pdf": "https://cdn/spec.pdf"}
     out = svc._build_content_files(a_cfg, url_map, "demo", "lab1")
-    assert out == [
-        {"url": "https://cdn/spec.pdf", "display_name": "Spec", "filename": "spec.pdf"}
-    ]
+    assert out == [{"url": "https://cdn/spec.pdf", "display_name": "Spec", "filename": "spec.pdf"}]
 
 
 def test_build_content_files_display_name_defaults_to_filename(svc: ConfigApplyService) -> None:
-    out = svc._build_content_files(
-        {"contentFiles": [{"filename": "a.txt"}]}, {}, "s", "c"
-    )
+    out = svc._build_content_files({"contentFiles": [{"filename": "a.txt"}]}, {}, "s", "c")
     assert out[0]["display_name"] == "a.txt"
     assert out[0]["url"] == ""  # no url in map
 
@@ -146,12 +144,15 @@ def test_build_content_files_display_name_defaults_to_filename(svc: ConfigApplyS
 def test_build_content_files_skips_entries_without_filename(svc: ConfigApplyService) -> None:
     out = svc._build_content_files(
         {"contentFiles": [{"displayName": "no file"}, {"filename": "ok.txt"}]},
-        {}, "s", "c",
+        {},
+        "s",
+        "c",
     )
     assert [e["filename"] for e in out] == ["ok.txt"]
 
 
 # ── _compute_plan ─────────────────────────────────────────────────────────────
+
 
 class _FakeSubject:
     """Stand-in for a Subject ORM row for diffing (attribute access only)."""

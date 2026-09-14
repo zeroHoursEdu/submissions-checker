@@ -66,8 +66,12 @@ async def _arrange_submission(
 
     db.add(SubjectsStudents(student_id=student_id, subject_id=subject_id))
     sub_a = SubjectsAssignment(
-        subject_id=subject_id, title="Lab AI", code="lab_ai", config=config,
-        min_grade=0, max_grade=100,
+        subject_id=subject_id,
+        title="Lab AI",
+        code="lab_ai",
+        config=config,
+        min_grade=0,
+        max_grade=100,
     )
     db.add(sub_a)
     await db.commit()
@@ -97,8 +101,10 @@ async def test_clean_verdict_advances_to_quiz(
 ) -> None:
     _patch_provider(monkeypatch, CLEAN_VERDICT)
     sub, _, _ = await _arrange_submission(
-        db, student_user.student_id,
-        config={"ai_review": {}}, status=SubmissionStatus.AWAITING_AI_REVIEW,
+        db,
+        student_user.student_id,
+        config={"ai_review": {}},
+        status=SubmissionStatus.AWAITING_AI_REVIEW,
     )
     await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id, "next_step": "quiz"})
     await db.commit()
@@ -112,7 +118,8 @@ async def test_flagged_verdict_escalates_to_teacher(
 ) -> None:
     _patch_provider(monkeypatch, FLAGGED_VERDICT)
     sub, _, _ = await _arrange_submission(
-        db, student_user.student_id,
+        db,
+        student_user.student_id,
         config={"ai_review": {"cheating_threshold": 0.6}},
         status=SubmissionStatus.AWAITING_AI_REVIEW,
     )
@@ -128,8 +135,10 @@ async def test_malformed_verdict_fails_review(
 ) -> None:
     _patch_provider(monkeypatch, {"comment": "missing everything else"})
     sub, _, _ = await _arrange_submission(
-        db, student_user.student_id,
-        config={"ai_review": {}}, status=SubmissionStatus.AWAITING_AI_REVIEW,
+        db,
+        student_user.student_id,
+        config={"ai_review": {}},
+        status=SubmissionStatus.AWAITING_AI_REVIEW,
     )
     with pytest.raises(AIProviderError):
         await review_tasks.execute_ai_review_task(
@@ -143,10 +152,14 @@ async def test_completed_path_finalizes_grade(
 ) -> None:
     _patch_provider(monkeypatch, CLEAN_VERDICT)
     # code_weight uses works (test %) and quality (AI mark).
-    grading = {"code_weight": 1.0, "quiz_weight": 0.0,
-               "code": {"works_weight": 0.5, "quality_weight": 0.5}}
+    grading = {
+        "code_weight": 1.0,
+        "quiz_weight": 0.0,
+        "code": {"works_weight": 0.5, "quality_weight": 0.5},
+    }
     sub, _, sa_id = await _arrange_submission(
-        db, student_user.student_id,
+        db,
+        student_user.student_id,
         config={"ai_review": {}, "grading": grading},
         status=SubmissionStatus.AWAITING_AI_REVIEW,
         test_results={"score": 10, "max_score": 10},  # works = 100
@@ -173,13 +186,22 @@ async def _completed_submission_with_review(
         "grading": {"show_breakdown_to_student": show_breakdown},
     }
     sub, subject_id, sa_id = await _arrange_submission(
-        db, student_id, config=config, status=SubmissionStatus.COMPLETED,
+        db,
+        student_id,
+        config=config,
+        status=SubmissionStatus.COMPLETED,
         test_results={"score": 8, "max_score": 10},
     )
     sub.ai_review = dict(CLEAN_VERDICT, provider="openai", model="gpt-test")
     sub.grade_breakdown = {
-        "grade": 80, "works_score": 80.0, "quality_score": 82.0, "quiz_score": None,
-        "code_weight": 1.0, "quiz_weight": 0.0, "works_weight": 1.0, "quality_weight": 0.0,
+        "grade": 80,
+        "works_score": 80.0,
+        "quality_score": 82.0,
+        "quiz_score": None,
+        "code_weight": 1.0,
+        "quiz_weight": 0.0,
+        "works_weight": 1.0,
+        "quality_weight": 0.0,
     }
     await db.commit()
     return sa_id, subject_id

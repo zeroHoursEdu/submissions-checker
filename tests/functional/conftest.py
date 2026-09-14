@@ -133,9 +133,7 @@ async def db(
 
 @pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 
 

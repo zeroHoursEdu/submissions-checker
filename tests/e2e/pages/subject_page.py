@@ -31,7 +31,9 @@ class SubjectPage:
             csv_bytes = f.read()
         response = self.page.request.post(
             f"{self.app_url}/teacher/subjects/{subject_id}/students/import",
-            multipart={"file": {"name": "students.csv", "mimeType": "text/csv", "buffer": csv_bytes}},
+            multipart={
+                "file": {"name": "students.csv", "mimeType": "text/csv", "buffer": csv_bytes}
+            },
         )
         return {"status": response.status, "url": response.url}
 
@@ -47,10 +49,12 @@ class SubjectPage:
         return results
 
     def open_assignment(self, assignment_id: int) -> None:
-        self.page.goto(f"{self.app_url}/teacher/subjects/{self.current_subject_id}/assignments/{assignment_id}")
+        self.page.goto(
+            f"{self.app_url}/teacher/subjects/{self.current_subject_id}/assignments/{assignment_id}"
+        )
 
     def get_student_count_from_page(self) -> int:
-        el = self.page.locator('.lg\\:col-span-2 span.text-xs').first
+        el = self.page.locator(".lg\\:col-span-2 span.text-xs").first
         try:
             return int(el.text_content() or "0")
         except ValueError:

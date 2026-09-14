@@ -76,7 +76,12 @@ async def login(
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(password, user.password_hash):
-        return render(request, "login.html", {"current_user": None, "error": "Invalid username or password"}, status_code=status.HTTP_401_UNAUTHORIZED)
+        return render(
+            request,
+            "login.html",
+            {"current_user": None, "error": "Invalid username or password"},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
 
     db.add(UserLogin(user_id=user.id))
     await db.commit()
@@ -97,7 +102,9 @@ async def logout() -> RedirectResponse:
 
 @router.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_page(request: Request) -> HTMLResponse:
-    return render(request, "forgot_password.html", {"current_user": None, "sent": False, "error": None})
+    return render(
+        request, "forgot_password.html", {"current_user": None, "sent": False, "error": None}
+    )
 
 
 @router.post("/forgot-password", response_class=HTMLResponse)
@@ -134,7 +141,9 @@ async def forgot_password(
             if dispatcher._channels:
                 await dispatcher.notify(email, subj, body)
 
-    return render(request, "forgot_password.html", {"current_user": None, "sent": True, "error": None})
+    return render(
+        request, "forgot_password.html", {"current_user": None, "sent": True, "error": None}
+    )
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
@@ -143,12 +152,14 @@ async def reset_password_page(
     token: str,
     db: DBSession,
 ) -> HTMLResponse:
-    result = await db.execute(
-        select(PasswordResetToken).where(PasswordResetToken.token == token)
-    )
+    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
     prt = result.scalar_one_or_none()
     valid = prt is not None and prt.is_valid()
-    return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": valid, "error": None, "success": False})
+    return render(
+        request,
+        "reset_password.html",
+        {"current_user": None, "token": token, "valid": valid, "error": None, "success": False},
+    )
 
 
 @router.post("/reset-password", response_class=HTMLResponse)
@@ -160,17 +171,42 @@ async def reset_password(
     confirm_password: str = Form(...),
 ) -> HTMLResponse:
     if new_password != confirm_password:
-        return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": True, "error": "Passwords do not match.", "success": False}, status_code=422)
+        return render(
+            request,
+            "reset_password.html",
+            {
+                "current_user": None,
+                "token": token,
+                "valid": True,
+                "error": "Passwords do not match.",
+                "success": False,
+            },
+            status_code=422,
+        )
 
     if len(new_password) < 8:
-        return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": True, "error": "Password must be at least 8 characters.", "success": False}, status_code=422)
+        return render(
+            request,
+            "reset_password.html",
+            {
+                "current_user": None,
+                "token": token,
+                "valid": True,
+                "error": "Password must be at least 8 characters.",
+                "success": False,
+            },
+            status_code=422,
+        )
 
-    result = await db.execute(
-        select(PasswordResetToken).where(PasswordResetToken.token == token)
-    )
+    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
     prt = result.scalar_one_or_none()
     if prt is None or not prt.is_valid():
-        return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": False, "error": None, "success": False}, status_code=400)
+        return render(
+            request,
+            "reset_password.html",
+            {"current_user": None, "token": token, "valid": False, "error": None, "success": False},
+            status_code=400,
+        )
 
     user = await db.get(User, prt.user_id)
     if user is None:
@@ -180,4 +216,8 @@ async def reset_password(
     prt.used = True
     await db.commit()
 
-    return render(request, "reset_password.html", {"current_user": None, "token": token, "valid": True, "error": None, "success": True})
+    return render(
+        request,
+        "reset_password.html",
+        {"current_user": None, "token": token, "valid": True, "error": None, "success": True},
+    )

@@ -26,6 +26,4 @@ class FeedbackToken(Base):
     feedback_request: Mapped[object] = relationship("FeedbackRequest", back_populates="tokens")
     student: Mapped[object] = relationship("Student")
 
-    __table_args__ = (
-        Index("ix_feedback_tokens_feedback_request_id", "feedback_request_id"),
-    )
+    __table_args__ = (Index("ix_feedback_tokens_feedback_request_id", "feedback_request_id"),)

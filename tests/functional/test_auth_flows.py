@@ -29,9 +29,7 @@ PASSWORD = "Sup3rSecret!"
 # ── Login: success ────────────────────────────────────────────────────────────
 
 
-async def test_login_success_sets_valid_jwt_cookie(
-    client: AsyncClient, make_user
-) -> None:
+async def test_login_success_sets_valid_jwt_cookie(client: AsyncClient, make_user) -> None:
     user = await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD)
 
     resp = await client.post(
@@ -53,9 +51,7 @@ async def test_login_success_sets_valid_jwt_cookie(
     assert payload["role"] == UserRole.TEACHER.value
 
 
-async def test_login_redirects_student_to_portal(
-    client: AsyncClient, make_user
-) -> None:
+async def test_login_redirects_student_to_portal(client: AsyncClient, make_user) -> None:
     await make_user(role=UserRole.STUDENT, username="pupil", password=PASSWORD)
     resp = await client.post(
         "/auth/login",
@@ -66,9 +62,7 @@ async def test_login_redirects_student_to_portal(
     assert resp.headers["location"] == "/portal"
 
 
-async def test_login_redirects_admin_to_admin_dashboard(
-    client: AsyncClient, make_user
-) -> None:
+async def test_login_redirects_admin_to_admin_dashboard(client: AsyncClient, make_user) -> None:
     await make_user(role=UserRole.ADMIN, username="root", password=PASSWORD)
     resp = await client.post(
         "/auth/login",
@@ -79,9 +73,7 @@ async def test_login_redirects_admin_to_admin_dashboard(
     assert resp.headers["location"] == "/admin"
 
 
-async def test_login_records_user_login_row(
-    client: AsyncClient, make_user, db
-) -> None:
+async def test_login_records_user_login_row(client: AsyncClient, make_user, db) -> None:
     user = await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD)
 
     await client.post(
@@ -90,15 +82,11 @@ async def test_login_records_user_login_row(
         follow_redirects=False,
     )
 
-    rows = (
-        await db.execute(select(UserLogin).where(UserLogin.user_id == user.id))
-    ).scalars().all()
+    rows = (await db.execute(select(UserLogin).where(UserLogin.user_id == user.id))).scalars().all()
     assert len(rows) == 1
 
 
-async def test_password_is_stored_as_bcrypt_hash_not_plaintext(
-    make_user, db
-) -> None:
+async def test_password_is_stored_as_bcrypt_hash_not_plaintext(make_user, db) -> None:
     """The factory uses the app's hash_password; confirm it is a verifiable bcrypt
     hash and never the plaintext, which is what login relies on."""
     user = await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD)
@@ -112,9 +100,7 @@ async def test_password_is_stored_as_bcrypt_hash_not_plaintext(
 # ── Login: rejection ──────────────────────────────────────────────────────────
 
 
-async def test_login_wrong_password_rejected_no_cookie(
-    client: AsyncClient, make_user
-) -> None:
+async def test_login_wrong_password_rejected_no_cookie(client: AsyncClient, make_user) -> None:
     await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD)
 
     resp = await client.post(
@@ -138,12 +124,8 @@ async def test_login_unknown_user_rejected(client: AsyncClient) -> None:
     assert COOKIE_NAME not in resp.cookies
 
 
-async def test_login_inactive_user_rejected(
-    client: AsyncClient, make_user
-) -> None:
-    await make_user(
-        role=UserRole.TEACHER, username="alice", password=PASSWORD, is_active=False
-    )
+async def test_login_inactive_user_rejected(client: AsyncClient, make_user) -> None:
+    await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD, is_active=False)
     resp = await client.post(
         "/auth/login",
         data={"username": "alice", "password": PASSWORD},
@@ -154,9 +136,7 @@ async def test_login_inactive_user_rejected(
     assert COOKIE_NAME not in resp.cookies
 
 
-async def test_failed_login_records_no_user_login_row(
-    client: AsyncClient, make_user, db
-) -> None:
+async def test_failed_login_records_no_user_login_row(client: AsyncClient, make_user, db) -> None:
     user = await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD)
     await client.post(
         "/auth/login",
@@ -164,9 +144,7 @@ async def test_failed_login_records_no_user_login_row(
         follow_redirects=False,
     )
     count = (
-        await db.execute(
-            select(func.count(UserLogin.id)).where(UserLogin.user_id == user.id)
-        )
+        await db.execute(select(func.count(UserLogin.id)).where(UserLogin.user_id == user.id))
     ).scalar_one()
     assert count == 0
 
@@ -185,7 +163,7 @@ async def test_logout_clears_cookie(client: AsyncClient, make_user, login) -> No
     # delete_cookie emits a Set-Cookie that expires the cookie.
     set_cookie = resp.headers.get("set-cookie", "")
     assert COOKIE_NAME in set_cookie
-    assert ('Max-Age=0' in set_cookie) or ("expires=" in set_cookie.lower())
+    assert ("Max-Age=0" in set_cookie) or ("expires=" in set_cookie.lower())
 
 
 # ── Forgot password ───────────────────────────────────────────────────────────
@@ -196,16 +174,14 @@ async def test_forgot_password_existing_user_creates_token(
 ) -> None:
     user = await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD)
 
-    resp = await client.post(
-        "/auth/forgot-password", data={"username": "alice"}
-    )
+    resp = await client.post("/auth/forgot-password", data={"username": "alice"})
     assert resp.status_code == 200
 
     tokens = (
-        await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert len(tokens) == 1
     assert tokens[0].used is False
     assert tokens[0].is_valid()
@@ -224,23 +200,17 @@ async def test_forgot_password_unknown_user_does_not_leak(
     assert known.status_code == unknown.status_code == 200
     assert known.text == unknown.text  # indistinguishable response bodies
 
-    total_tokens = (
-        await db.execute(select(func.count(PasswordResetToken.id)))
-    ).scalar_one()
+    total_tokens = (await db.execute(select(func.count(PasswordResetToken.id)))).scalar_one()
     assert total_tokens == 1  # only the real user got one
 
 
 async def test_forgot_password_inactive_user_creates_no_token(
     client: AsyncClient, make_user, db
 ) -> None:
-    await make_user(
-        role=UserRole.TEACHER, username="alice", password=PASSWORD, is_active=False
-    )
+    await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD, is_active=False)
     resp = await client.post("/auth/forgot-password", data={"username": "alice"})
     assert resp.status_code == 200
-    count = (
-        await db.execute(select(func.count(PasswordResetToken.id)))
-    ).scalar_one()
+    count = (await db.execute(select(func.count(PasswordResetToken.id)))).scalar_one()
     assert count == 0
 
 
@@ -281,9 +251,7 @@ async def test_reset_password_valid_token_updates_hash_and_consumes_token(
     assert bcrypt.checkpw(new_pw.encode(), fresh.password_hash.encode())
 
     prt = (
-        await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.token == token_str)
-        )
+        await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token_str))
     ).scalar_one()
     await db.refresh(prt)
     assert prt.used is True
@@ -333,9 +301,7 @@ async def test_reset_password_unknown_token_rejected(client: AsyncClient) -> Non
     assert resp.status_code == 400
 
 
-async def test_reset_password_expired_token_rejected(
-    client: AsyncClient, make_user, db
-) -> None:
+async def test_reset_password_expired_token_rejected(client: AsyncClient, make_user, db) -> None:
     from datetime import UTC, datetime, timedelta
 
     user = await make_user(role=UserRole.TEACHER, username="alice", password=PASSWORD)
@@ -380,9 +346,7 @@ async def test_reset_password_mismatch_rejected_with_422(
     assert resp.status_code == 422
     # Token must remain unused since the change never applied.
     prt = (
-        await db.execute(
-            select(PasswordResetToken).where(PasswordResetToken.token == token_str)
-        )
+        await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token_str))
     ).scalar_one()
     await db.refresh(prt)
     assert prt.used is False

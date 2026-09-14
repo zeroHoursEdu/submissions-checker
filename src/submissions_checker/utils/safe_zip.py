@@ -30,7 +30,9 @@ def safe_extract(
         raise UnsafeArchiveError(f"archive has too many entries ({len(infos)} > {max_entries})")
     total = sum(i.file_size for i in infos)
     if total > max_total_bytes:
-        raise UnsafeArchiveError(f"archive too large uncompressed ({total} > {max_total_bytes} bytes)")
+        raise UnsafeArchiveError(
+            f"archive too large uncompressed ({total} > {max_total_bytes} bytes)"
+        )
     for info in infos:
         name = info.filename
         # reject absolute paths and drive letters

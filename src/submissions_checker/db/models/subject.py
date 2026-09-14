@@ -54,7 +54,12 @@ class Subject(Base, TimestampMixin):
         BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[SubjectStatus] = mapped_column(
-        SQLEnum(SubjectStatus, name="subject_status", native_enum=True, values_callable=lambda x: [e.value for e in x]),
+        SQLEnum(
+            SubjectStatus,
+            name="subject_status",
+            native_enum=True,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
         default=SubjectStatus.ACTIVE,
         server_default="ACTIVE",

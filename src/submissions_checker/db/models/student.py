@@ -29,7 +29,12 @@ class Student(Base, TimestampMixin):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[EntityType] = mapped_column(
-        SQLEnum(EntityType, name="entity_type", native_enum=True, values_callable=lambda x: [e.value for e in x]),
+        SQLEnum(
+            EntityType,
+            name="entity_type",
+            native_enum=True,
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
         default=EntityType.REAL,
         server_default="REAL",

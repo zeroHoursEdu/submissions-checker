@@ -23,7 +23,11 @@ from submissions_checker.db.models import (
     Submission,
     SubmissionStatus,
 )
-from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState, QuizAttemptStatus
+from submissions_checker.db.models.enums import (
+    OutboxEventType,
+    OutboxMessageState,
+    QuizAttemptStatus,
+)
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.services.grading import finalize_grade
@@ -50,6 +54,7 @@ _ALLOWED_SNAPSHOT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -87,7 +92,9 @@ def _seconds_remaining(attempt: QuizAttempt) -> int | None:
     return max(0, int(effective_limit - _elapsed_seconds(attempt)))
 
 
-def _seconds_remaining_from_violations(attempt: QuizAttempt, violations: dict[str, Any]) -> int | None:
+def _seconds_remaining_from_violations(
+    attempt: QuizAttempt, violations: dict[str, Any]
+) -> int | None:
     """Pure helper used inside report_violation before the DB commit."""
     limit = attempt.config_snapshot.get("time_limit_minutes")
     if not limit:
@@ -156,9 +163,7 @@ def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
         if attempt.question_started_at is None:
             attempt.question_started_at = _utcnow()
             break
-        elapsed = (
-            _utcnow() - attempt.question_started_at.replace(tzinfo=UTC)
-        ).total_seconds()
+        elapsed = (_utcnow() - attempt.question_started_at.replace(tzinfo=UTC)).total_seconds()
         if elapsed <= limit:
             break
         _record_timed_out(attempt, db)
@@ -166,9 +171,9 @@ def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
         # The next window starts when this one ENDED, not now — otherwise a student who
         # closes the laptop for an hour loses exactly one question and gets a fresh clock
         # on the next. Answering normally restarts the clock at "now"; expiring does not.
-        attempt.question_started_at = attempt.question_started_at.replace(
-            tzinfo=UTC
-        ) + timedelta(seconds=limit)
+        attempt.question_started_at = attempt.question_started_at.replace(tzinfo=UTC) + timedelta(
+            seconds=limit
+        )
         burned += 1
     return burned
 
@@ -182,9 +187,7 @@ def _build_question_config(q_type: str, q: dict[str, Any]) -> dict[str, Any]:
             raw_choices = q["choices"]
             options = [c.get("text", str(c)) for c in raw_choices]
             if q_type == "SINGLE_CHOICE":
-                correct_idx = next(
-                    (i for i, c in enumerate(raw_choices) if c.get("is_correct")), 0
-                )
+                correct_idx = next((i for i, c in enumerate(raw_choices) if c.get("is_correct")), 0)
                 return {"options": options, "correct": correct_idx}
             else:
                 correct_idxs = [i for i, c in enumerate(raw_choices) if c.get("is_correct")]
@@ -193,7 +196,10 @@ def _build_question_config(q_type: str, q: dict[str, Any]) -> dict[str, Any]:
             return {"options": q.get("options", []), "correct": int(q.get("correct", 0))}
         return {"options": q.get("options", []), "correct": [int(x) for x in q.get("correct", [])]}
     if q_type == "ORDERING":
-        return {"items": q.get("items", []), "correct_order": [int(x) for x in q.get("correct_order", [])]}
+        return {
+            "items": q.get("items", []),
+            "correct_order": [int(x) for x in q.get("correct_order", [])],
+        }
     if q_type == "TRUE_FALSE":
         return {"correct": bool(q.get("correct", False))}
     return {}
@@ -317,11 +323,13 @@ async def _count_used_attempts(db: DBSession, submission_id: int, exclude_id: in
     result = await db.execute(
         select(func.count(QuizAttempt.id)).where(
             QuizAttempt.submission_id == submission_id,
-            QuizAttempt.status.in_([
-                QuizAttemptStatus.COMPLETED,
-                QuizAttemptStatus.TIMED_OUT,
-                QuizAttemptStatus.VIOLATION_FAIL,
-            ]),
+            QuizAttempt.status.in_(
+                [
+                    QuizAttemptStatus.COMPLETED,
+                    QuizAttemptStatus.TIMED_OUT,
+                    QuizAttemptStatus.VIOLATION_FAIL,
+                ]
+            ),
             QuizAttempt.id != exclude_id,
         )
     )
@@ -379,18 +387,20 @@ async def _grade_and_finalize(
                     attempts_left = max_attempts - (prior + 1)
             # else: leave at QUIZ_SENT so student can retry
 
-    db.add(OutboxMessage(
-        event_type=OutboxEventType.QUIZ_RESULT,
-        state=OutboxMessageState.PENDING,
-        payload={
-            "submission_id": attempt.submission_id,
-            "attempt_id": attempt.id,
-            "score": score,
-            "max_score": max_score,
-            "is_passed": is_passed,
-            "attempts_left": attempts_left,
-        },
-    ))
+    db.add(
+        OutboxMessage(
+            event_type=OutboxEventType.QUIZ_RESULT,
+            state=OutboxMessageState.PENDING,
+            payload={
+                "submission_id": attempt.submission_id,
+                "attempt_id": attempt.id,
+                "score": score,
+                "max_score": max_score,
+                "is_passed": is_passed,
+                "attempts_left": attempts_left,
+            },
+        )
+    )
 
     await db.commit()
 
@@ -398,6 +408,7 @@ async def _grade_and_finalize(
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("/subjects/{subject_id}/assignments/{sa_id}/quiz")
 async def start_or_resume_quiz(
@@ -453,8 +464,8 @@ async def start_or_resume_quiz(
     if not assignment_code:
         raise HTTPException(status_code=404, detail="Assignment has no config code")
 
-    plugin_assignment: dict[str, Any] = (
-        config_record.config.get("assignments", {}).get(assignment_code, {})
+    plugin_assignment: dict[str, Any] = config_record.config.get("assignments", {}).get(
+        assignment_code, {}
     )
     quiz_cfg: dict[str, Any] = plugin_assignment.get("quiz", {})
     if not quiz_cfg or not quiz_cfg.get("questions"):
@@ -466,7 +477,9 @@ async def start_or_resume_quiz(
     if max_attempts is not None and used_count >= max_attempts:
         latest_finished = existing[-1] if existing else None
         if latest_finished:
-            return RedirectResponse(url=f"/portal/quiz/{latest_finished.id}/result", status_code=303)
+            return RedirectResponse(
+                url=f"/portal/quiz/{latest_finished.id}/result", status_code=303
+            )
         raise HTTPException(status_code=403, detail="No quiz attempts remaining")
 
     questions_snapshot = _build_questions_from_config(quiz_cfg)
@@ -560,21 +573,28 @@ async def show_quiz(
         if attempt.question_started_at is None:
             attempt.question_started_at = _utcnow()
             await db.commit()
-        return render(request, "student_quiz_step.html", {
-            "current_user": current_user,
-            "attempt": attempt,
-            "question": question,
-            "question_number": attempt.current_index + 1,
-            "total_questions": len(attempt.questions_snapshot or []),
-            "seconds_remaining": _question_seconds_remaining(attempt),
-            "anti_cheat_config": anti_cheat_config,
-            "proctoring_config": proctoring_config,
-        })
+        return render(
+            request,
+            "student_quiz_step.html",
+            {
+                "current_user": current_user,
+                "attempt": attempt,
+                "question": question,
+                "question_number": attempt.current_index + 1,
+                "total_questions": len(attempt.questions_snapshot or []),
+                "seconds_remaining": _question_seconds_remaining(attempt),
+                "anti_cheat_config": anti_cheat_config,
+                "proctoring_config": proctoring_config,
+            },
+        )
 
     existing_answers = {a.question_id: a.answer for a in attempt.answers}
     seconds_remaining = _seconds_remaining(attempt)
 
-    return render(request, "student_quiz.html", {
+    return render(
+        request,
+        "student_quiz.html",
+        {
             "current_user": current_user,
             "attempt": attempt,
             "questions": attempt.questions_snapshot,
@@ -582,7 +602,8 @@ async def show_quiz(
             "seconds_remaining": seconds_remaining,
             "anti_cheat_config": anti_cheat_config,
             "proctoring_config": proctoring_config,
-        })
+        },
+    )
 
 
 @router.post("/quiz/{attempt_id}/event")
@@ -662,7 +683,9 @@ async def report_violation(
                         )
                     seconds_remaining = _question_seconds_remaining(attempt)
                 else:
-                    violations["_time_penalty_seconds"] = int(violations.get("_time_penalty_seconds", 0)) + penalty
+                    violations["_time_penalty_seconds"] = (
+                        int(violations.get("_time_penalty_seconds", 0)) + penalty
+                    )
                     seconds_remaining = _seconds_remaining_from_violations(attempt, violations)
 
             elif action_type == "warn":
@@ -680,12 +703,14 @@ async def report_violation(
     attempt.violations = violations
     await db.commit()
 
-    return JSONResponse({
-        "action": response_action,
-        "seconds_remaining": seconds_remaining,
-        "message": message,
-        "violation_count": count,
-    })
+    return JSONResponse(
+        {
+            "action": response_action,
+            "seconds_remaining": seconds_remaining,
+            "message": message,
+            "violation_count": count,
+        }
+    )
 
 
 @router.post("/quiz/{attempt_id}/snapshot")
@@ -733,9 +758,9 @@ async def upload_snapshot(
 
     ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[frame.content_type]
     seq = await db.scalar(
-        select(func.count()).select_from(QuizAttemptSnapshot).where(
-            QuizAttemptSnapshot.attempt_id == attempt_id
-        )
+        select(func.count())
+        .select_from(QuizAttemptSnapshot)
+        .where(QuizAttemptSnapshot.attempt_id == attempt_id)
     )
     safe_event = "".join(c for c in event_type if c.isalnum() or c in "_-")[:48] or "event"
     key = f"proctoring/attempt-{attempt_id}/{(seq or 0) + 1}-{safe_event}.{ext}"
@@ -953,13 +978,15 @@ async def quiz_result(
     question_results = []
     for q_snap in attempt.questions_snapshot:
         ans = answers_by_qid.get(q_snap["id"])
-        question_results.append({
-            "question": q_snap,
-            "answer": ans.answer if ans else None,
-            "is_correct": ans.is_correct if ans else None,
-            "points_earned": ans.points_earned if ans else 0,
-            "timed_out": bool(ans.timed_out) if ans else False,
-        })
+        question_results.append(
+            {
+                "question": q_snap,
+                "answer": ans.answer if ans else None,
+                "is_correct": ans.is_correct if ans else None,
+                "points_earned": ans.points_earned if ans else 0,
+                "timed_out": bool(ans.timed_out) if ans else False,
+            }
+        )
 
     sa = submission.students_assignment
     sa_full_result = await db.execute(
@@ -970,7 +997,10 @@ async def quiz_result(
     sa_full = sa_full_result.scalar_one()
     subject_id = sa_full.subjects_assignment.subject_id
 
-    return render(request, "student_quiz_result.html", {
+    return render(
+        request,
+        "student_quiz_result.html",
+        {
             "current_user": current_user,
             "attempt": attempt,
             "question_results": question_results,
@@ -978,4 +1008,5 @@ async def quiz_result(
             "show_correct": show_correct,
             "subject_id": subject_id,
             "student_assignment_id": sa.id,
-        })
+        },
+    )

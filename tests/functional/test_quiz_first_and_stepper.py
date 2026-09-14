@@ -33,8 +33,13 @@ pytestmark = pytest.mark.asyncio
 
 
 def _question(text: str, correct: int, *, seconds: int | None = None) -> dict:
-    q = {"type": "single_choice", "text": text, "points": 1,
-         "options": ["wrong", "right"], "correct": correct}
+    q = {
+        "type": "single_choice",
+        "text": text,
+        "points": 1,
+        "options": ["wrong", "right"],
+        "correct": correct,
+    }
     if seconds is not None:
         q["time_limit_seconds"] = seconds
     return q
@@ -95,9 +100,12 @@ async def _arrange(
     await db.refresh(cfg)
 
     sub_a = SubjectsAssignment(
-        subject_id=subject.id, title="Lab 1", code="lab1",
+        subject_id=subject.id,
+        title="Lab 1",
+        code="lab1",
         config={"review_mode": review_mode, "grading": {"code_weight": 0, "quiz_weight": 1}},
-        min_grade=0, max_grade=max_grade,
+        min_grade=0,
+        max_grade=max_grade,
     )
     db.add(sub_a)
     await db.commit()
@@ -135,9 +143,7 @@ async def _start(client: AsyncClient, subject: Subject, sa: StudentAssignment) -
 
 
 async def _attempt_of(db, submission_id: int) -> QuizAttempt:
-    result = await db.execute(
-        select(QuizAttempt).where(QuizAttempt.submission_id == submission_id)
-    )
+    result = await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == submission_id))
     return result.scalars().one()
 
 
@@ -203,21 +209,25 @@ async def test_a_stale_index_changes_nothing(
     # Answer question 0 normally.
     await student_client.post(
         f"/portal/quiz/{attempt.id}/answer",
-        data={"index": "0", "answer_0": "1"}, follow_redirects=False,
+        data={"index": "0", "answer_0": "1"},
+        follow_redirects=False,
     )
     # A stale tab replays the same index — must not record a second answer or advance.
     resp = await student_client.post(
         f"/portal/quiz/{attempt.id}/answer",
-        data={"index": "0", "answer_0": "0"}, follow_redirects=False,
+        data={"index": "0", "answer_0": "0"},
+        follow_redirects=False,
     )
     assert resp.status_code == 303
     assert resp.headers["location"] == f"/portal/quiz/{attempt.id}"
 
     await db.refresh(attempt)
     assert attempt.current_index == 1
-    answers = (await db.execute(
-        select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)
-    )).scalars().all()
+    answers = (
+        (await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)))
+        .scalars()
+        .all()
+    )
     assert len(answers) == 1
     assert answers[0].is_correct is True
 
@@ -241,9 +251,11 @@ async def test_expired_question_is_recorded_and_surfaced_on_the_result_page(
 
     await db.refresh(attempt)
     assert attempt.current_index == 1
-    burned = (await db.execute(
-        select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)
-    )).scalars().one()
+    burned = (
+        (await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)))
+        .scalars()
+        .one()
+    )
     assert burned.timed_out is True
     assert burned.points_earned == 0
 
@@ -251,7 +263,8 @@ async def test_expired_question_is_recorded_and_surfaced_on_the_result_page(
     for i in (1, 2):
         await student_client.post(
             f"/portal/quiz/{attempt.id}/answer",
-            data={"index": str(i), f"answer_{i}": "1"}, follow_redirects=False,
+            data={"index": str(i), f"answer_{i}": "1"},
+            follow_redirects=False,
         )
 
     result = await student_client.get(f"/portal/quiz/{attempt.id}/result")
@@ -278,12 +291,15 @@ async def test_an_answer_arriving_after_its_window_scores_zero(
     # The correct answer, posted too late.
     await student_client.post(
         f"/portal/quiz/{attempt.id}/answer",
-        data={"index": "0", "answer_0": "1"}, follow_redirects=False,
+        data={"index": "0", "answer_0": "1"},
+        follow_redirects=False,
     )
 
-    answers = (await db.execute(
-        select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)
-    )).scalars().all()
+    answers = (
+        (await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)))
+        .scalars()
+        .all()
+    )
     assert len(answers) == 1
     assert answers[0].timed_out is True
     assert answers[0].points_earned == 0
@@ -331,7 +347,8 @@ async def test_quiz_without_per_question_limits_still_renders_one_page(
 
     resp = await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
-        data={"answer_0": "1", "answer_1": "1"}, follow_redirects=False,
+        data={"answer_0": "1", "answer_1": "1"},
+        follow_redirects=False,
     )
     assert resp.status_code == 303
     await db.refresh(attempt)
@@ -346,8 +363,12 @@ async def test_quiz_then_teacher_routes_a_pass_to_teacher_review(
     student_client: AsyncClient, db, student_user, teacher, login
 ) -> None:
     subject, sa, submission = await _arrange(
-        db, student_user.student_id, teacher.id,
-        quiz_cfg=FLAT_QUIZ, review_mode="quiz_then_teacher", max_grade=8,
+        db,
+        student_user.student_id,
+        teacher.id,
+        quiz_cfg=FLAT_QUIZ,
+        review_mode="quiz_then_teacher",
+        max_grade=8,
     )
     await _start(student_client, subject, sa)
     attempt = await _attempt_of(db, submission.id)
@@ -355,7 +376,8 @@ async def test_quiz_then_teacher_routes_a_pass_to_teacher_review(
 
     await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
-        data={"answer_0": "1", "answer_1": "1"}, follow_redirects=False,
+        data={"answer_0": "1", "answer_1": "1"},
+        follow_redirects=False,
     )
 
     await db.refresh(submission)
@@ -384,15 +406,20 @@ async def test_quiz_only_completes_without_a_teacher(
     student_client: AsyncClient, db, student_user, teacher
 ) -> None:
     subject, sa, submission = await _arrange(
-        db, student_user.student_id, teacher.id,
-        quiz_cfg=FLAT_QUIZ, review_mode="quiz_only", max_grade=8,
+        db,
+        student_user.student_id,
+        teacher.id,
+        quiz_cfg=FLAT_QUIZ,
+        review_mode="quiz_only",
+        max_grade=8,
     )
     await _start(student_client, subject, sa)
     attempt = await _attempt_of(db, submission.id)
 
     await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
-        data={"answer_0": "1", "answer_1": "1"}, follow_redirects=False,
+        data={"answer_0": "1", "answer_1": "1"},
+        follow_redirects=False,
     )
 
     await db.refresh(submission)

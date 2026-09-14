@@ -53,8 +53,9 @@ pytestmark = pytest.mark.asyncio
 # ── Arrange helpers ──────────────────────────────────────────────────────────
 
 
-async def _make_subject(db, owner_id: int | None, *, name: str = "Owned Subject",
-                        code: str | None = None) -> Subject:
+async def _make_subject(
+    db, owner_id: int | None, *, name: str = "Owned Subject", code: str | None = None
+) -> Subject:
     subject = Subject(name=name, code=code, owner_id=owner_id)
     db.add(subject)
     await db.commit()
@@ -62,12 +63,24 @@ async def _make_subject(db, owner_id: int | None, *, name: str = "Owned Subject"
     return subject
 
 
-async def _make_assignment(db, subject_id: int, *, title: str = "A1", code: str = "a1",
-                          config: dict | None = None, deadline: datetime | None = None,
-                          content_files: list | None = None) -> SubjectsAssignment:
+async def _make_assignment(
+    db,
+    subject_id: int,
+    *,
+    title: str = "A1",
+    code: str = "a1",
+    config: dict | None = None,
+    deadline: datetime | None = None,
+    content_files: list | None = None,
+) -> SubjectsAssignment:
     sa = SubjectsAssignment(
-        subject_id=subject_id, code=code, title=title, max_grade=100,
-        config=config or {}, deadline=deadline, content_files=content_files,
+        subject_id=subject_id,
+        code=code,
+        title=title,
+        max_grade=100,
+        config=config or {},
+        deadline=deadline,
+        content_files=content_files,
     )
     db.add(sa)
     await db.commit()
@@ -80,8 +93,9 @@ async def _enroll(db, subject_id: int, student_id: int) -> None:
     await db.commit()
 
 
-async def _make_student_assignment(db, student_id: int, sa_id: int, *,
-                                   grade: int | None = None) -> StudentAssignment:
+async def _make_student_assignment(
+    db, student_id: int, sa_id: int, *, grade: int | None = None
+) -> StudentAssignment:
     student_assignment = StudentAssignment(
         student_id=student_id, subjects_assignment_id=sa_id, grade=grade
     )
@@ -91,12 +105,16 @@ async def _make_student_assignment(db, student_id: int, sa_id: int, *,
     return student_assignment
 
 
-async def _make_submission(db, student_assignment_id: int, *,
-                          status: SubmissionStatus = SubmissionStatus.PENDING,
-                          created_at: datetime | None = None,
-                          plugin_config_id: int | None = None,
-                          test_results: dict | None = None,
-                          source_metadata: dict | None = None) -> Submission:
+async def _make_submission(
+    db,
+    student_assignment_id: int,
+    *,
+    status: SubmissionStatus = SubmissionStatus.PENDING,
+    created_at: datetime | None = None,
+    plugin_config_id: int | None = None,
+    test_results: dict | None = None,
+    source_metadata: dict | None = None,
+) -> Submission:
     sub = Submission(
         students_assignment_id=student_assignment_id,
         source_type=SubmissionSourceType.ZIP_UPLOAD,
@@ -113,10 +131,14 @@ async def _make_submission(db, student_assignment_id: int, *,
     return sub
 
 
-async def _make_plugin_config(db, subject_id: int, config: dict, *, version: int = 1) -> SubjectPluginConfig:
+async def _make_plugin_config(
+    db, subject_id: int, config: dict, *, version: int = 1
+) -> SubjectPluginConfig:
     cfg = SubjectPluginConfig(
-        subject_id=subject_id, version=version,
-        content_hash=f"hash-{subject_id}-{version}", config=config,
+        subject_id=subject_id,
+        version=version,
+        content_hash=f"hash-{subject_id}-{version}",
+        config=config,
     )
     db.add(cfg)
     await db.commit()
@@ -150,11 +172,15 @@ async def test_teacher_assignment_owner_renders_enrolled_students_and_status(
     grace_sa = await _make_student_assignment(db, grace.id, sa.id, grade=88)
     # Older + newer submission: only the latest (COMPLETED) must surface.
     await _make_submission(
-        db, grace_sa.id, status=SubmissionStatus.FAILED,
+        db,
+        grace_sa.id,
+        status=SubmissionStatus.FAILED,
         created_at=datetime.now(UTC) - timedelta(hours=2),
     )
     await _make_submission(
-        db, grace_sa.id, status=SubmissionStatus.COMPLETED,
+        db,
+        grace_sa.id,
+        status=SubmissionStatus.COMPLETED,
         created_at=datetime.now(UTC),
     )
     # ada is enrolled but has no StudentAssignment/submission at all.
@@ -266,16 +292,18 @@ async def test_teacher_assignment_surfaces_quiz_violation_flag(
     sub = await _make_submission(
         db, student_sa.id, status=SubmissionStatus.QUIZ_SENT, plugin_config_id=cfg.id
     )
-    db.add(QuizAttempt(
-        submission_id=sub.id,
-        plugin_config_id=cfg.id,
-        plugin_config_version=cfg.version,
-        questions_snapshot=[],
-        config_snapshot={},
-        started_at=datetime.now(UTC),
-        status=QuizAttemptStatus.VIOLATION_FAIL,
-        violations={"tab_switch": 3},
-    ))
+    db.add(
+        QuizAttempt(
+            submission_id=sub.id,
+            plugin_config_id=cfg.id,
+            plugin_config_version=cfg.version,
+            questions_snapshot=[],
+            config_snapshot={},
+            started_at=datetime.now(UTC),
+            status=QuizAttemptStatus.VIOLATION_FAIL,
+            violations={"tab_switch": 3},
+        )
+    )
     await db.commit()
 
     authenticate(client, teacher)
@@ -299,10 +327,12 @@ async def test_teacher_students_overview_lists_students(
     student = await make_student(full_name="Linus Pauling", email="linus@example.com")
     await _enroll(db, subject.id, student.id)
     await make_user(role=UserRole.STUDENT, username="linus", student=student)
-    db.add(OutboxMessage(
-        event_type=OutboxEventType.SEND_CREDENTIALS,
-        payload={"student_email": "linus@example.com"},
-    ))
+    db.add(
+        OutboxMessage(
+            event_type=OutboxEventType.SEND_CREDENTIALS,
+            payload={"student_email": "linus@example.com"},
+        )
+    )
     await db.commit()
 
     authenticate(client, teacher)
@@ -370,9 +400,7 @@ async def test_teacher_review_get_renders_for_owner(
     sa = await _make_assignment(db, subject.id, title="Reviewable", code="rev1")
     student = await make_student(full_name="Rev Iewer", email="rev@example.com")
     student_sa = await _make_student_assignment(db, student.id, sa.id)
-    sub = await _make_submission(
-        db, student_sa.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
-    )
+    sub = await _make_submission(db, student_sa.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW)
     authenticate(client, teacher)
     resp = await client.get(f"/teacher/submissions/{sub.id}/review")
     assert resp.status_code == 200
@@ -392,17 +420,21 @@ async def test_review_approve_with_quiz_sends_quiz_from_awaiting(
     student = await make_student(email="q1@example.com")
     student_sa = await _make_student_assignment(db, student.id, sa.id)
     cfg = await _make_plugin_config(
-        db, subject.id,
+        db,
+        subject.id,
         {"assignments": {"quizlab": {"quiz": {"questions": [{"id": 0, "type": "single_choice"}]}}}},
     )
     sub = await _make_submission(
-        db, student_sa.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        db,
+        student_sa.id,
+        status=SubmissionStatus.AWAITING_TEACHER_REVIEW,
         plugin_config_id=cfg.id,
     )
     authenticate(client, teacher)
     resp = await client.post(
         f"/teacher/submissions/{sub.id}/review",
-        data={"action": "approve"}, follow_redirects=False,
+        data={"action": "approve"},
+        follow_redirects=False,
     )
     assert resp.status_code == 303
     await db.refresh(sub)
@@ -419,17 +451,21 @@ async def test_review_approve_with_quiz_from_legacy_waiting_sends_quiz(
     student = await make_student(email="q2@example.com")
     student_sa = await _make_student_assignment(db, student.id, sa.id)
     cfg = await _make_plugin_config(
-        db, subject.id,
+        db,
+        subject.id,
         {"assignments": {"quizlab": {"quiz": {"questions": [{"id": 0, "type": "single_choice"}]}}}},
     )
     sub = await _make_submission(
-        db, student_sa.id, status=SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
+        db,
+        student_sa.id,
+        status=SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
         plugin_config_id=cfg.id,
     )
     authenticate(client, teacher)
     resp = await client.post(
         f"/teacher/submissions/{sub.id}/review",
-        data={"action": "approve"}, follow_redirects=False,
+        data={"action": "approve"},
+        follow_redirects=False,
     )
     assert resp.status_code == 303
     await db.refresh(sub)
@@ -451,7 +487,8 @@ async def test_review_reject_from_legacy_waiting_fails(
     authenticate(client, teacher)
     resp = await client.post(
         f"/teacher/submissions/{sub.id}/review",
-        data={"action": "reject", "reason": "no good"}, follow_redirects=False,
+        data={"action": "reject", "reason": "no good"},
+        follow_redirects=False,
     )
     assert resp.status_code == 303
     await db.refresh(sub)
@@ -479,8 +516,11 @@ async def test_student_assignment_detail_latest_attempt_metadata(
     )
     student_sa = await _make_student_assignment(db, sid, sa.id)
     sub = await _make_submission(
-        db, student_sa.id, status=SubmissionStatus.QUIZ_SENT,
-        plugin_config_id=cfg.id, created_at=datetime.now(UTC),
+        db,
+        student_sa.id,
+        status=SubmissionStatus.QUIZ_SENT,
+        plugin_config_id=cfg.id,
+        created_at=datetime.now(UTC),
     )
     # A COMPLETED attempt → quiz_attempts_used == 1 and quiz_max_attempts read
     # from the attempt's config_snapshot (5), so the template renders "1/5".
@@ -497,9 +537,7 @@ async def test_student_assignment_detail_latest_attempt_metadata(
     await db.commit()
     await db.refresh(attempt)
 
-    resp = await student_client.get(
-        f"/portal/subjects/{subject.id}/assignments/{student_sa.id}"
-    )
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{student_sa.id}")
     assert resp.status_code == 200
     assert "1/5" in resp.text
 
@@ -518,13 +556,14 @@ async def test_student_assignment_detail_no_attempt_reads_config_max_attempts(
     )
     student_sa = await _make_student_assignment(db, sid, sa.id)
     await _make_submission(
-        db, student_sa.id, status=SubmissionStatus.QUIZ_SENT,
-        plugin_config_id=cfg.id, created_at=datetime.now(UTC),
+        db,
+        student_sa.id,
+        status=SubmissionStatus.QUIZ_SENT,
+        plugin_config_id=cfg.id,
+        created_at=datetime.now(UTC),
     )
 
-    resp = await student_client.get(
-        f"/portal/subjects/{subject.id}/assignments/{student_sa.id}"
-    )
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{student_sa.id}")
     assert resp.status_code == 200
 
 
@@ -544,17 +583,26 @@ async def test_student_summary_classifies_overdue_and_upcoming(
     now = datetime.now(UTC)
     # Overdue (past deadline, ungraded) → overdue bucket (line 499-500).
     overdue_a = await _make_assignment(
-        db, subject.id, title="Overdue", code="od",
+        db,
+        subject.id,
+        title="Overdue",
+        code="od",
         deadline=now - timedelta(days=2),
     )
     # Upcoming within 7 days, ungraded → upcoming bucket (line 501-502).
     soon_a = await _make_assignment(
-        db, subject.id, title="Soon", code="soon",
+        db,
+        subject.id,
+        title="Soon",
+        code="soon",
         deadline=now + timedelta(days=3),
     )
     # Graded one (grade not None) → contributes to avg, neither bucket.
     graded_a = await _make_assignment(
-        db, subject.id, title="Graded", code="gr",
+        db,
+        subject.id,
+        title="Graded",
+        code="gr",
         deadline=now + timedelta(days=1),
     )
     osa = await _make_student_assignment(db, sid, overdue_a.id)
@@ -562,9 +610,7 @@ async def test_student_summary_classifies_overdue_and_upcoming(
     await _make_student_assignment(db, sid, graded_a.id, grade=90)
 
     # A latest submission for the overdue SA so the latest-submission join runs.
-    await _make_submission(
-        db, osa.id, status=SubmissionStatus.FAILED, created_at=now
-    )
+    await _make_submission(db, osa.id, status=SubmissionStatus.FAILED, created_at=now)
 
     resp = await student_client.get("/portal/summary")
     assert resp.status_code == 200
@@ -585,13 +631,13 @@ async def test_student_assignment_detail_check_reason_surfaced(
     sa = await _make_assignment(db, subject.id, code="rc1")
     student_sa = await _make_student_assignment(db, sid, sa.id)
     await _make_submission(
-        db, student_sa.id, status=SubmissionStatus.CHECK_FAILED,
+        db,
+        student_sa.id,
+        status=SubmissionStatus.CHECK_FAILED,
         test_results={"check_reason": "compilation error"},
         created_at=datetime.now(UTC),
     )
-    resp = await student_client.get(
-        f"/portal/subjects/{subject.id}/assignments/{student_sa.id}"
-    )
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{student_sa.id}")
     assert resp.status_code == 200
     assert "compilation error" in resp.text
 

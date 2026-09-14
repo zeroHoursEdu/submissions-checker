@@ -36,7 +36,9 @@ def quiz_result_template(
     subject = f"Quiz result for '{assignment_title}'"
     retry_line = ""
     if not is_passed and attempts_left and attempts_left > 0:
-        retry_line = f"\n\nYou have {attempts_left} attempt(s) remaining. Re-upload your work to retry."
+        retry_line = (
+            f"\n\nYou have {attempts_left} attempt(s) remaining. Re-upload your work to retry."
+        )
     elif not is_passed:
         retry_line = "\n\nAll attempts have been used."
     body = (
@@ -129,7 +131,9 @@ def password_reset_template(full_name: str, reset_url: str) -> tuple[str, str]:
     return subject, body
 
 
-def passed_template(github_username: str, score: int, max_score: int, lab_id: int) -> tuple[str, str]:
+def passed_template(
+    github_username: str, score: int, max_score: int, lab_id: int
+) -> tuple[str, str]:
     """Return (subject, body) for a passing quiz result."""
     subject = f"Congratulations! You passed Lab {lab_id} Quiz"
     body = (
@@ -142,7 +146,9 @@ def passed_template(github_username: str, score: int, max_score: int, lab_id: in
     return subject, body
 
 
-def failed_template(github_username: str, score: int, max_score: int, lab_id: int) -> tuple[str, str]:
+def failed_template(
+    github_username: str, score: int, max_score: int, lab_id: int
+) -> tuple[str, str]:
     """Return (subject, body) for a failing quiz result."""
     subject = f"Lab {lab_id} Quiz Result — Please Resubmit"
     body = (
@@ -157,7 +163,9 @@ def failed_template(github_username: str, score: int, max_score: int, lab_id: in
     return subject, body
 
 
-def feedback_request_template(full_name: str, subject_name: str, semester_name: str, feedback_url: str) -> tuple[str, str]:
+def feedback_request_template(
+    full_name: str, subject_name: str, semester_name: str, feedback_url: str
+) -> tuple[str, str]:
     """Return (subject, body) for a feedback request notification."""
     subject = f"Share your feedback for '{subject_name}' — {semester_name}"
     body = (
@@ -172,7 +180,9 @@ def feedback_request_template(full_name: str, subject_name: str, semester_name: 
     return subject, body
 
 
-def credentials_template(full_name: str, username: str, password: str, login_url: str) -> tuple[str, str]:
+def credentials_template(
+    full_name: str, username: str, password: str, login_url: str
+) -> tuple[str, str]:
     """Return (subject, body) for a new student account welcome email."""
     subject = "Your account credentials for EduTrack"
     body = (

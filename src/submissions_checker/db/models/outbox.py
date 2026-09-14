@@ -62,11 +62,7 @@ class OutboxMessage(Base, TimestampMixin):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<OutboxMessage(id={self.id}, "
-            f"event={self.event_type}, "
-            f"state={self.state})>"
-        )
+        return f"<OutboxMessage(id={self.id}, event={self.event_type}, state={self.state})>"
 
     def mark_finished(self) -> None:
         """Mark the message as successfully finished."""

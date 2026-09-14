@@ -115,6 +115,7 @@ def ensure_feedback_request(page, app_url: str, e2e_context: dict, teacher_accou
         e2e_context["_feedback_cleaned"] = True
     if not _feedback_request_exists(subject_id):
         from tests.e2e.pages.login_page import LoginPage
+
         # A prior scenario may already hold an auth cookie; GET /auth/login would then
         # redirect away (no #username field). Clear the session so login works.
         page.context.clear_cookies()

@@ -19,9 +19,7 @@ router = APIRouter(tags=["feedback"])
 
 @router.get("/feedback/{token}", response_class=HTMLResponse)
 async def feedback_form(token: str, request: Request, db: DBSession) -> HTMLResponse:
-    token_result = await db.execute(
-        select(FeedbackToken).where(FeedbackToken.token == token)
-    )
+    token_result = await db.execute(select(FeedbackToken).where(FeedbackToken.token == token))
     feedback_token = token_result.scalar_one_or_none()
 
     if feedback_token is None:
@@ -31,11 +29,14 @@ async def feedback_form(token: str, request: Request, db: DBSession) -> HTMLResp
         return render(request, "feedback_already_submitted.html", {})
 
     from submissions_checker.db.models.feedback_request import FeedbackRequest
+
     fr_result = await db.execute(
         select(FeedbackRequest).where(FeedbackRequest.id == feedback_token.feedback_request_id)
     )
     feedback_request = fr_result.scalar_one()
-    subject_result = await db.execute(select(Subject).where(Subject.id == feedback_request.subject_id))
+    subject_result = await db.execute(
+        select(Subject).where(Subject.id == feedback_request.subject_id)
+    )
     subject = subject_result.scalar_one()
 
     return render(request, "feedback_form.html", {"token": token, "subject": subject})
@@ -51,9 +52,7 @@ async def submit_feedback(
     went_bad: str = Form(...),
     to_change: str = Form(...),
 ) -> HTMLResponse | RedirectResponse:
-    token_result = await db.execute(
-        select(FeedbackToken).where(FeedbackToken.token == token)
-    )
+    token_result = await db.execute(select(FeedbackToken).where(FeedbackToken.token == token))
     feedback_token = token_result.scalar_one_or_none()
 
     if feedback_token is None:
@@ -64,29 +63,40 @@ async def submit_feedback(
 
     if rating < 1 or rating > 5:
         from submissions_checker.db.models.feedback_request import FeedbackRequest
+
         fr_result = await db.execute(
             select(FeedbackRequest).where(FeedbackRequest.id == feedback_token.feedback_request_id)
         )
         feedback_request = fr_result.scalar_one()
-        subject_result = await db.execute(select(Subject).where(Subject.id == feedback_request.subject_id))
+        subject_result = await db.execute(
+            select(Subject).where(Subject.id == feedback_request.subject_id)
+        )
         subject = subject_result.scalar_one()
-        return render(request, "feedback_form.html", {"token": token, "subject": subject, "error": "Rating must be between 1 and 5."}, status_code=422)
+        return render(
+            request,
+            "feedback_form.html",
+            {"token": token, "subject": subject, "error": "Rating must be between 1 and 5."},
+            status_code=422,
+        )
 
     from submissions_checker.db.models.feedback_request import FeedbackRequest
+
     fr_result = await db.execute(
         select(FeedbackRequest).where(FeedbackRequest.id == feedback_token.feedback_request_id)
     )
     feedback_request = fr_result.scalar_one()
 
-    db.add(FeedbackResponse(
-        feedback_token_id=feedback_token.id,
-        subject_id=feedback_request.subject_id,
-        rating=rating,
-        went_well=went_well.strip(),
-        went_bad=went_bad.strip(),
-        to_change=to_change.strip(),
-        submitted_at=datetime.now(UTC),
-    ))
+    db.add(
+        FeedbackResponse(
+            feedback_token_id=feedback_token.id,
+            subject_id=feedback_request.subject_id,
+            rating=rating,
+            went_well=went_well.strip(),
+            went_bad=went_bad.strip(),
+            to_change=to_change.strip(),
+            submitted_at=datetime.now(UTC),
+        )
+    )
     feedback_token.used_at = datetime.now(UTC)
     await db.commit()
 

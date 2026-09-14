@@ -21,6 +21,7 @@ from submissions_checker.services.similarity import (
 
 # ── jaccard_similarity ────────────────────────────────────────────────────────
 
+
 def test_identical_token_lists_score_one() -> None:
     toks = ["a", "b", "c"]
     assert jaccard_similarity(toks, list(toks)) == 1.0
@@ -56,6 +57,7 @@ def test_score_bounded_unit_interval() -> None:
 
 # ── _normalize ────────────────────────────────────────────────────────────────
 
+
 def test_normalize_lowercases_identifiers() -> None:
     assert _normalize("Foo BAR baz") == ["foo", "bar", "baz"]
 
@@ -71,7 +73,7 @@ def test_normalize_strips_string_literals() -> None:
 
 
 def test_normalize_strips_block_comments() -> None:
-    src = 'a /* block\ncomment b */ c'
+    src = "a /* block\ncomment b */ c"
     toks = _normalize(src)
     assert toks == ["a", "c"]
 
@@ -84,6 +86,7 @@ def test_normalize_strips_triple_quoted_docstrings() -> None:
 
 
 # ── compare_zip_files ─────────────────────────────────────────────────────────
+
 
 def _make_zip(tmp_path: Path, name: str, files: dict[str, str]) -> Path:
     p = tmp_path / name
@@ -117,7 +120,9 @@ def test_non_code_files_are_ignored(tmp_path: Path) -> None:
 
 def test_comments_do_not_affect_similarity(tmp_path: Path) -> None:
     a = _make_zip(tmp_path, "a.zip", {"m.py": "result = transform(data)  # mine\n"})
-    b = _make_zip(tmp_path, "b.zip", {"m.py": "result = transform(data)  # entirely different note\n"})
+    b = _make_zip(
+        tmp_path, "b.zip", {"m.py": "result = transform(data)  # entirely different note\n"}
+    )
     assert compare_zip_files(a, b) == 1.0
 
 

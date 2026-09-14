@@ -21,7 +21,9 @@ FIXTURES_DIR = __import__("pathlib").Path(__file__).parent.parent / "fixtures"
 SUBMISSION_WAIT_TIMEOUT = 240
 
 
-def _get_student_assignment_id(subject_id: int, assignment_code: str, student_username: str) -> int | None:
+def _get_student_assignment_id(
+    subject_id: int, assignment_code: str, student_username: str
+) -> int | None:
     conn = _db_conn()
     try:
         with conn.cursor() as cur:
@@ -66,7 +68,10 @@ def navigate_to_lab1(page, app_url: str, e2e_context: dict) -> None:
         conn = _db_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM outbox_messages WHERE payload->>'submission_id' IN (SELECT id::text FROM submissions WHERE students_assignment_id = %s)", (sa_id,))
+                cur.execute(
+                    "DELETE FROM outbox_messages WHERE payload->>'submission_id' IN (SELECT id::text FROM submissions WHERE students_assignment_id = %s)",
+                    (sa_id,),
+                )
                 cur.execute("DELETE FROM submissions WHERE students_assignment_id = %s", (sa_id,))
                 conn.commit()
         finally:
@@ -223,4 +228,6 @@ def assert_upload_blocked(e2e_context: dict) -> None:
     before = e2e_context.get("sub_before_blocked")
     after = e2e_context.get("sub_after_blocked")
     # Either the same submission ID (blocked), or None after (error page)
-    assert before == after or after is None, "Expected upload to be blocked but a new submission was created"
+    assert before == after or after is None, (
+        "Expected upload to be blocked but a new submission was created"
+    )

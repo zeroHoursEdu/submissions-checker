@@ -75,22 +75,34 @@ async def execute_feedback_request_task(db: AsyncSession, payload: dict) -> None
         logger.info("feedback_request_email_suppressed", token_id=token_id, student_id=student.id)
         return
 
-    fr_result = await db.execute(select(FeedbackRequest).where(FeedbackRequest.id == token.feedback_request_id))
+    fr_result = await db.execute(
+        select(FeedbackRequest).where(FeedbackRequest.id == token.feedback_request_id)
+    )
     feedback_request = fr_result.scalar_one_or_none()
     if feedback_request is None:
-        logger.warning("feedback_request_task_request_not_found", feedback_request_id=token.feedback_request_id)
+        logger.warning(
+            "feedback_request_task_request_not_found", feedback_request_id=token.feedback_request_id
+        )
         return
 
-    subject_result = await db.execute(select(Subject).where(Subject.id == feedback_request.subject_id))
+    subject_result = await db.execute(
+        select(Subject).where(Subject.id == feedback_request.subject_id)
+    )
     subject = subject_result.scalar_one_or_none()
     if subject is None:
-        logger.warning("feedback_request_task_subject_not_found", subject_id=feedback_request.subject_id)
+        logger.warning(
+            "feedback_request_task_subject_not_found", subject_id=feedback_request.subject_id
+        )
         return
 
-    semester_result = await db.execute(select(Semester).where(Semester.id == feedback_request.semester_id))
+    semester_result = await db.execute(
+        select(Semester).where(Semester.id == feedback_request.semester_id)
+    )
     semester = semester_result.scalar_one_or_none()
     if semester is None:
-        logger.warning("feedback_request_task_semester_not_found", semester_id=feedback_request.semester_id)
+        logger.warning(
+            "feedback_request_task_semester_not_found", semester_id=feedback_request.semester_id
+        )
         return
 
     feedback_url = f"{settings.app_base_url.rstrip('/')}/feedback/{token.token}"
@@ -124,10 +136,10 @@ async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> N
         select(Submission)
         .where(Submission.id == submission_id)
         .options(
-            selectinload(Submission.students_assignment)
-            .selectinload(StudentAssignment.student),
-            selectinload(Submission.students_assignment)
-            .selectinload(StudentAssignment.subjects_assignment),
+            selectinload(Submission.students_assignment).selectinload(StudentAssignment.student),
+            selectinload(Submission.students_assignment).selectinload(
+                StudentAssignment.subjects_assignment
+            ),
         )
     )
     submission = result.scalar_one_or_none()
@@ -155,13 +167,16 @@ async def execute_submission_reviewed_task(db: AsyncSession, payload: dict) -> N
     # In-app notification is a separate channel from email — pushed regardless of the
     # student's SUBMISSION_CHECKED/EMAIL preference, which only governs email.
     verb = "approved" if action == "approve" else "rejected"
-    in_app_body = f"Your submission for \"{assignment.title}\" was {verb}."
+    in_app_body = f'Your submission for "{assignment.title}" was {verb}.'
     if reason and action == "reject":
         in_app_body += f" Feedback: {reason}"
     notify_user_id = await db.scalar(select(User.id).where(User.student_id == student.id))
     if notify_user_id is not None:
         await push_notification(
-            db, notify_user_id, email_subject, in_app_body,
+            db,
+            notify_user_id,
+            email_subject,
+            in_app_body,
             f"/portal/subjects/{assignment.subject_id}/assignments/{sa.id}",
         )
 
@@ -204,10 +219,10 @@ async def execute_quiz_result_task(db: AsyncSession, payload: dict) -> None:
         select(Submission)
         .where(Submission.id == submission_id)
         .options(
-            selectinload(Submission.students_assignment)
-            .selectinload(StudentAssignment.student),
-            selectinload(Submission.students_assignment)
-            .selectinload(StudentAssignment.subjects_assignment),
+            selectinload(Submission.students_assignment).selectinload(StudentAssignment.student),
+            selectinload(Submission.students_assignment).selectinload(
+                StudentAssignment.subjects_assignment
+            ),
         )
     )
     submission = result.scalar_one_or_none()
@@ -219,10 +234,7 @@ async def execute_quiz_result_task(db: AsyncSession, payload: dict) -> None:
     student = sa.student
     assignment = sa.subjects_assignment
 
-    portal_url = (
-        f"{settings.app_base_url.rstrip('/')}"
-        f"/portal/quiz/{attempt_id}/result"
-    )
+    portal_url = f"{settings.app_base_url.rstrip('/')}/portal/quiz/{attempt_id}/result"
 
     email_subject, body = quiz_result_template(
         full_name=student.full_name,
@@ -261,8 +273,9 @@ async def execute_deadline_reminder_task(db: AsyncSession, payload: dict) -> Non
         )
         .options(
             selectinload(StudentAssignment.student),
-            selectinload(StudentAssignment.subjects_assignment)
-            .selectinload(SubjectsAssignment.subject),
+            selectinload(StudentAssignment.subjects_assignment).selectinload(
+                SubjectsAssignment.subject
+            ),
         )
     )
     student_assignment = result.scalar_one_or_none()
@@ -314,16 +327,12 @@ async def _resolve_review_recipients(db: AsyncSession, submission_id: int) -> li
     owner_id = owner_result.scalar_one_or_none()
 
     if owner_id is not None:
-        owner = await db.execute(
-            select(User).where(User.id == owner_id, User.is_active.is_(True))
-        )
+        owner = await db.execute(select(User).where(User.id == owner_id, User.is_active.is_(True)))
         user = owner.scalar_one_or_none()
         if user is not None:
             return [user]
 
-    admins = await db.execute(
-        select(User).where(User.role == "ADMIN", User.is_active.is_(True))
-    )
+    admins = await db.execute(select(User).where(User.role == "ADMIN", User.is_active.is_(True)))
     return list(admins.scalars().all())
 
 

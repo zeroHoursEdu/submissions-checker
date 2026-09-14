@@ -28,7 +28,11 @@ async def notifications_list(
         .limit(50)
     )
     notifications = result.scalars().all()
-    return render(request, "notifications.html", {"current_user": current_user, "notifications": notifications})
+    return render(
+        request,
+        "notifications.html",
+        {"current_user": current_user, "notifications": notifications},
+    )
 
 
 @router.post("/{notification_id}/read")
@@ -71,6 +75,7 @@ async def unread_count(
     current_user: CurrentUser,
 ) -> JSONResponse:
     from sqlalchemy import func
+
     result = await db.execute(
         select(func.count(Notification.id)).where(
             Notification.user_id == current_user.user_id,

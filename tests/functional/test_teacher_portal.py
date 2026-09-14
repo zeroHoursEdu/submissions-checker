@@ -62,7 +62,9 @@ async def _make_subject(
     return subject
 
 
-async def _make_assignment(db, subject_id: int, *, title: str = "A1", code: str = "a1") -> SubjectsAssignment:
+async def _make_assignment(
+    db, subject_id: int, *, title: str = "A1", code: str = "a1"
+) -> SubjectsAssignment:
     sa = SubjectsAssignment(subject_id=subject_id, code=code, title=title, max_grade=100)
     db.add(sa)
     await db.commit()
@@ -155,17 +157,13 @@ async def test_view_missing_subject_is_404(teacher_client: AsyncClient) -> None:
     assert (await teacher_client.get("/teacher/subjects/999")).status_code == 404
 
 
-async def test_owner_can_view_own_subject(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_owner_can_view_own_subject(client: AsyncClient, db, teacher) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
     assert (await client.get(f"/teacher/subjects/{subject.id}")).status_code == 200
 
 
-async def test_admin_can_view_any_subject(
-    client: AsyncClient, db, admin, make_user
-) -> None:
+async def test_admin_can_view_any_subject(client: AsyncClient, db, admin, make_user) -> None:
     other = await make_user(role=UserRole.TEACHER, username="other")
     subject = await _make_subject(db, owner_id=other.id)
     authenticate(client, admin)
@@ -204,9 +202,9 @@ async def test_enroll_into_other_teachers_subject_is_403(
     assert resp.status_code == 403
     # No enrollment row leaked.
     count = await db.scalar(
-        select(func.count()).select_from(SubjectsStudents).where(
-            SubjectsStudents.subject_id == subject.id
-        )
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(SubjectsStudents.subject_id == subject.id)
     )
     assert count == 0
 
@@ -285,9 +283,7 @@ async def test_review_get_404_for_non_review_status(
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(db, subject.id)
     student = await make_student()
-    submission = await _make_submission(
-        db, sa.id, student.id, status=SubmissionStatus.COMPLETED
-    )
+    submission = await _make_submission(db, sa.id, student.id, status=SubmissionStatus.COMPLETED)
     authenticate(client, teacher)
     # Submission exists but is not awaiting review → 404 (handler hides it).
     assert (await client.get(f"/teacher/submissions/{submission.id}/review")).status_code == 404
@@ -317,21 +313,25 @@ async def test_owner_approve_completes_submission(
 
     # Side effect: SUBMISSION_REVIEWED outbox message queued.
     ob = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.event_type == OutboxEventType.SUBMISSION_REVIEWED
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.SUBMISSION_REVIEWED
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(ob) == 1
     assert ob[0].payload["action"] == "approve"
     assert ob[0].payload["submission_id"] == submission.id
 
     # Side effect: audit row.
     audit_count = await db.scalar(
-        select(func.count()).select_from(AuditLog).where(
-            AuditLog.action == "teacher_approve_submission"
-        )
+        select(func.count())
+        .select_from(AuditLog)
+        .where(AuditLog.action == "teacher_approve_submission")
     )
     assert audit_count == 1
 
@@ -380,9 +380,7 @@ async def test_admin_can_review_any_subject(
     assert submission.status == SubmissionStatus.COMPLETED
 
 
-async def test_review_invalid_action_is_400(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
+async def test_review_invalid_action_is_400(client: AsyncClient, db, teacher, make_student) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(db, subject.id)
     student = await make_student()
@@ -439,7 +437,9 @@ async def test_enroll_creates_enrollment_and_student_assignments(
     assert resp.status_code == 303
 
     enrolled = await db.scalar(
-        select(func.count()).select_from(SubjectsStudents).where(
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(
             SubjectsStudents.subject_id == subject.id,
             SubjectsStudents.student_id == student.id,
         )
@@ -447,7 +447,9 @@ async def test_enroll_creates_enrollment_and_student_assignments(
     assert enrolled == 1
     # A StudentAssignment is created for each existing assignment in the subject.
     sa_count = await db.scalar(
-        select(func.count()).select_from(StudentAssignment).where(
+        select(func.count())
+        .select_from(StudentAssignment)
+        .where(
             StudentAssignment.student_id == student.id,
             StudentAssignment.subjects_assignment_id == sa.id,
         )
@@ -455,9 +457,7 @@ async def test_enroll_creates_enrollment_and_student_assignments(
     assert sa_count == 1
 
 
-async def test_enroll_is_idempotent(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
+async def test_enroll_is_idempotent(client: AsyncClient, db, teacher, make_student) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     student = await make_student()
     await _enroll(db, subject.id, student.id)
@@ -468,16 +468,14 @@ async def test_enroll_is_idempotent(
     )
     assert resp.status_code == 303  # already enrolled → no-op, still redirects
     count = await db.scalar(
-        select(func.count()).select_from(SubjectsStudents).where(
-            SubjectsStudents.subject_id == subject.id
-        )
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(SubjectsStudents.subject_id == subject.id)
     )
     assert count == 1
 
 
-async def test_unenroll_removes_enrollment(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
+async def test_unenroll_removes_enrollment(client: AsyncClient, db, teacher, make_student) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     student = await make_student()
     await _enroll(db, subject.id, student.id)
@@ -488,9 +486,9 @@ async def test_unenroll_removes_enrollment(
     )
     assert resp.status_code == 303
     count = await db.scalar(
-        select(func.count()).select_from(SubjectsStudents).where(
-            SubjectsStudents.subject_id == subject.id
-        )
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(SubjectsStudents.subject_id == subject.id)
     )
     assert count == 0
 
@@ -524,9 +522,9 @@ async def test_unenroll_into_other_teachers_subject_is_403(
     assert resp.status_code == 403
     # Enrollment must survive the denied request.
     count = await db.scalar(
-        select(func.count()).select_from(SubjectsStudents).where(
-            SubjectsStudents.subject_id == subject.id
-        )
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(SubjectsStudents.subject_id == subject.id)
     )
     assert count == 1
 
@@ -534,9 +532,7 @@ async def test_unenroll_into_other_teachers_subject_is_403(
 # ── 5. Subject soft-delete ───────────────────────────────────────────────────
 
 
-async def test_owner_delete_soft_deletes_subject(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_owner_delete_soft_deletes_subject(client: AsyncClient, db, teacher) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
     resp = await client.post(f"/teacher/subjects/{subject.id}/delete", follow_redirects=False)
@@ -563,9 +559,7 @@ async def test_owner_delete_soft_deletes_subject(
 # the outer Submission join, making SQLAlchemy raise InvalidRequestError ("no FROM
 # clauses due to auto-correlation") at compile time on EVERY call. The fix adds
 # .correlate(StudentAssignment) so the subquery keeps its own Submission FROM.
-async def test_export_csv_owner_happy_path(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
+async def test_export_csv_owner_happy_path(client: AsyncClient, db, teacher, make_student) -> None:
     subject = await _make_subject(db, owner_id=teacher.id, name="My Course")
     await _make_assignment(db, subject.id, title="HW1")
     student = await make_student(full_name="Ada Lovelace", email="ada@example.com")
@@ -595,9 +589,7 @@ async def test_export_csv_empty_subject_returns_header_only(
     assert "Student,Email,Group,Assignment,Grade,Max Grade,Status,Submitted At" in resp.text
 
 
-async def test_template_csv_for_owned_subject(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_template_csv_for_owned_subject(client: AsyncClient, db, teacher) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     await _make_assignment(db, subject.id)
     authenticate(client, teacher)
@@ -627,8 +619,7 @@ async def test_global_student_import_creates_accounts_and_outbox(
 ) -> None:
     authenticate(client, teacher)
     csv_body = (
-        "student_group,student_name,student_surname,email\n"
-        "IT-99,Grace,Hopper,grace@example.com\n"
+        "student_group,student_name,student_surname,email\nIT-99,Grace,Hopper,grace@example.com\n"
     )
     resp = await client.post(
         "/teacher/students/import",
@@ -645,19 +636,21 @@ async def test_global_student_import_creates_accounts_and_outbox(
     assert student.type == EntityType.REAL
 
     cred = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(cred) == 1
     assert cred[0].payload["student_email"] == "grace@example.com"
 
 
-async def test_global_student_import_missing_columns_is_422(
-    client: AsyncClient, teacher
-) -> None:
+async def test_global_student_import_missing_columns_is_422(client: AsyncClient, teacher) -> None:
     authenticate(client, teacher)
     resp = await client.post(
         "/teacher/students/import",

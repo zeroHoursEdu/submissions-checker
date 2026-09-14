@@ -18,6 +18,7 @@ JWT_EXPIRY_HOURS = 8
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 
+
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=12)).decode()
 
@@ -27,6 +28,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
+
 
 def create_access_token(user_id: int, username: str, role: str) -> str:
     """Create HS256 JWT. Claims: sub (user_id), username, role, exp."""

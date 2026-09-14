@@ -39,6 +39,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture(scope="session")
 def app_url() -> str:
     from tests.e2e.helpers import E2E_APP_URL
+
     return E2E_APP_URL
 
 
@@ -80,9 +81,7 @@ def admin_account() -> Generator[dict, None, None]:
             cur.execute("SELECT id FROM users WHERE username = %s", (ADMIN_USERNAME,))
             existing = cur.fetchone()
             if existing is None:
-                password_hash = bcrypt.hashpw(
-                    ADMIN_PASSWORD.encode(), bcrypt.gensalt(12)
-                ).decode()
+                password_hash = bcrypt.hashpw(ADMIN_PASSWORD.encode(), bcrypt.gensalt(12)).decode()
                 cur.execute(
                     """
                     INSERT INTO users (username, password_hash, role, created_at, updated_at)

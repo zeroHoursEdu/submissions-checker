@@ -150,9 +150,7 @@ async def test_global_import_creates_student_user_group_and_outbox(
     assert resp.headers["location"] == "/teacher/students?imported=2&skipped=0"
 
     # Two REAL students created.
-    students = (
-        await db.execute(select(Student).order_by(Student.email))
-    ).scalars().all()
+    students = (await db.execute(select(Student).order_by(Student.email))).scalars().all()
     assert {s.email for s in students} == {"ivan@example.com", "olena@example.com"}
     assert all(s.type == EntityType.REAL for s in students)
     assert all(s.full_name for s in students)
@@ -164,20 +162,22 @@ async def test_global_import_creates_student_user_group_and_outbox(
     assert group_count == 1
 
     # Two STUDENT users, one per student, with derived usernames.
-    users = (
-        await db.execute(select(User).where(User.role == UserRole.STUDENT))
-    ).scalars().all()
+    users = (await db.execute(select(User).where(User.role == UserRole.STUDENT))).scalars().all()
     assert len(users) == 2
     assert {u.username for u in users} == {"ivan.petrenko", "olena.kovalenko"}
 
     # Two SEND_CREDENTIALS outbox rows carrying the plaintext password.
     creds = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(creds) == 2
     for c in creds:
         assert c.payload["student_email"] in {"ivan@example.com", "olena@example.com"}
@@ -213,9 +213,7 @@ async def test_global_import_lowercases_email_and_skips_duplicate(
     assert dupe_count == 1
 
 
-async def test_global_import_skips_blank_rows(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_global_import_skips_blank_rows(client: AsyncClient, db, teacher) -> None:
     # Rows with any empty required cell are silently skipped (not errors).
     body = (
         "student_group,student_name,student_surname,email\n"
@@ -251,9 +249,7 @@ async def test_global_import_missing_required_columns_is_422(
     assert (await db.scalar(select(func.count()).select_from(Student))) == 0
 
 
-async def test_global_import_empty_file_is_422(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_global_import_empty_file_is_422(client: AsyncClient, db, teacher) -> None:
     # Empty file → DictReader.fieldnames is None → required columns missing → 422.
     authenticate(client, teacher)
     resp = await client.post(
@@ -263,9 +259,7 @@ async def test_global_import_empty_file_is_422(
     assert "Missing CSV columns" in resp.json()["detail"]
 
 
-async def test_global_import_non_utf8_is_422(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_global_import_non_utf8_is_422(client: AsyncClient, db, teacher) -> None:
     authenticate(client, teacher)
     # 0xff is invalid as a UTF-8 start byte → UnicodeDecodeError → 422.
     bad = b"student_group,student_name,student_surname,email\n\xff\xfe,a,b,c@x.com\n"
@@ -278,9 +272,7 @@ async def test_global_import_non_utf8_is_422(
     assert resp.json()["detail"] == "File must be UTF-8 encoded"
 
 
-async def test_global_import_strips_utf8_bom(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_global_import_strips_utf8_bom(client: AsyncClient, db, teacher) -> None:
     # Excel often prepends a BOM; handler decodes with utf-8-sig to strip it.
     authenticate(client, teacher)
     body = "student_group,student_name,student_surname,email\nIT-21,Bom,Test,bom@example.com\n"
@@ -315,9 +307,9 @@ async def test_global_import_duplicate_username_disambiguates(
     assert resp.status_code == 303
     usernames = {
         u.username
-        for u in (
-            await db.execute(select(User).where(User.role == UserRole.STUDENT))
-        ).scalars().all()
+        for u in (await db.execute(select(User).where(User.role == UserRole.STUDENT)))
+        .scalars()
+        .all()
     }
     assert usernames == {"ivan.petrenko", "ivan.petrenko_2"}
 
@@ -334,10 +326,7 @@ async def test_subject_import_creates_enrollment_and_student_assignments(
     sa = await _make_assignment(db, subject.id, code="a1")
     authenticate(client, teacher)
 
-    body = (
-        "student_group,student_name,student_surname,email\n"
-        "IT-21,Ada,Lovelace,ada@example.com\n"
-    )
+    body = "student_group,student_name,student_surname,email\nIT-21,Ada,Lovelace,ada@example.com\n"
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
         files=_csv_file(body),
@@ -352,7 +341,9 @@ async def test_subject_import_creates_enrollment_and_student_assignments(
     ).scalar_one()
     # Enrolled in the subject.
     enrolled = await db.scalar(
-        select(func.count()).select_from(SubjectsStudents).where(
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(
             SubjectsStudents.subject_id == subject.id,
             SubjectsStudents.student_id == student.id,
         )
@@ -360,7 +351,9 @@ async def test_subject_import_creates_enrollment_and_student_assignments(
     assert enrolled == 1
     # StudentAssignment fan-out created for the subject's assignment.
     sa_count = await db.scalar(
-        select(func.count()).select_from(StudentAssignment).where(
+        select(func.count())
+        .select_from(StudentAssignment)
+        .where(
             StudentAssignment.student_id == student.id,
             StudentAssignment.subjects_assignment_id == sa.id,
         )
@@ -368,9 +361,9 @@ async def test_subject_import_creates_enrollment_and_student_assignments(
     assert sa_count == 1
     # Credentials outbox queued (new account).
     creds = await db.scalar(
-        select(func.count()).select_from(OutboxMessage).where(
-            OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS
-        )
+        select(func.count())
+        .select_from(OutboxMessage)
+        .where(OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS)
     )
     assert creds == 1
 
@@ -386,8 +379,7 @@ async def test_subject_import_existing_student_skipped_but_enrolled(
     authenticate(client, teacher)
 
     body = (
-        "student_group,student_name,student_surname,email\n"
-        "IT-21,Known,Person,known@example.com\n"
+        "student_group,student_name,student_surname,email\nIT-21,Known,Person,known@example.com\n"
     )
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
@@ -398,7 +390,9 @@ async def test_subject_import_existing_student_skipped_but_enrolled(
     assert resp.headers["location"].endswith("imported=0&skipped=1&variants_updated=0")
 
     enrolled = await db.scalar(
-        select(func.count()).select_from(SubjectsStudents).where(
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(
             SubjectsStudents.subject_id == subject.id,
             SubjectsStudents.student_id == existing.id,
         )
@@ -406,9 +400,9 @@ async def test_subject_import_existing_student_skipped_but_enrolled(
     assert enrolled == 1
     # No SEND_CREDENTIALS for the skipped (pre-existing) student.
     creds = await db.scalar(
-        select(func.count()).select_from(OutboxMessage).where(
-            OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS
-        )
+        select(func.count())
+        .select_from(OutboxMessage)
+        .where(OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS)
     )
     assert creds == 0
 
@@ -417,9 +411,7 @@ async def test_subject_import_sets_variants_from_variant_columns(
     client: AsyncClient, db, teacher
 ) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
-    sa = await _make_assignment(
-        db, subject.id, code="lab1", config={"variants_required": True}
-    )
+    sa = await _make_assignment(db, subject.id, code="lab1", config={"variants_required": True})
     authenticate(client, teacher)
 
     body = (
@@ -452,9 +444,7 @@ async def test_subject_import_blank_variant_leaves_variant_unset(
     client: AsyncClient, db, teacher
 ) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
-    sa = await _make_assignment(
-        db, subject.id, code="lab1", config={"variants_required": True}
-    )
+    sa = await _make_assignment(db, subject.id, code="lab1", config={"variants_required": True})
     authenticate(client, teacher)
     body = (
         "student_group,student_name,student_surname,email,variant_lab1\n"
@@ -501,9 +491,7 @@ async def test_subject_import_unknown_variant_column_ignored(
     assert resp.headers["location"].endswith("imported=1&skipped=0&variants_updated=0")
 
 
-async def test_subject_import_missing_columns_is_422(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_subject_import_missing_columns_is_422(client: AsyncClient, db, teacher) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
     resp = await client.post(
@@ -516,9 +504,7 @@ async def test_subject_import_missing_columns_is_422(
     assert (await db.scalar(select(func.count()).select_from(Student))) == 0
 
 
-async def test_subject_import_non_utf8_is_422(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_subject_import_non_utf8_is_422(client: AsyncClient, db, teacher) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
     bad = b"student_group,student_name,student_surname,email\n\xff,a,b,c@x.com\n"
@@ -537,10 +523,7 @@ async def test_subject_import_cross_teacher_is_403(
     other = await make_user(role=UserRole.TEACHER, username="other")
     subject = await _make_subject(db, owner_id=other.id)
     authenticate(client, teacher)
-    body = (
-        "student_group,student_name,student_surname,email\n"
-        "IT-21,Ada,Lovelace,ada@example.com\n"
-    )
+    body = "student_group,student_name,student_surname,email\nIT-21,Ada,Lovelace,ada@example.com\n"
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
         files=_csv_file(body),
@@ -568,17 +551,13 @@ async def test_subject_import_missing_subject_is_404(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_provision_test_student_creates_entities(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_provision_test_student_creates_entities(client: AsyncClient, db, teacher) -> None:
     await _make_test_group(db)
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(db, subject.id, code="a1")
     authenticate(client, teacher)
 
-    resp = await client.post(
-        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
-    )
+    resp = await client.post(f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == f"/teacher/subjects/{subject.id}?test_student=created"
 
@@ -595,16 +574,16 @@ async def test_provision_test_student_creates_entities(
     assert student.type == EntityType.TEST
 
     # A STUDENT user named test_<subject_id> exists.
-    user = (
-        await db.execute(select(User).where(User.student_id == student.id))
-    ).scalar_one()
+    user = (await db.execute(select(User).where(User.student_id == student.id))).scalar_one()
     assert user.username == f"test_{subject.id}"
     assert user.role == UserRole.STUDENT
 
     # Enrolled + StudentAssignment created for the subject assignment.
     assert (
         await db.scalar(
-            select(func.count()).select_from(SubjectsStudents).where(
+            select(func.count())
+            .select_from(SubjectsStudents)
+            .where(
                 SubjectsStudents.subject_id == subject.id,
                 SubjectsStudents.student_id == student.id,
             )
@@ -613,7 +592,9 @@ async def test_provision_test_student_creates_entities(
     )
     assert (
         await db.scalar(
-            select(func.count()).select_from(StudentAssignment).where(
+            select(func.count())
+            .select_from(StudentAssignment)
+            .where(
                 StudentAssignment.student_id == student.id,
                 StudentAssignment.subjects_assignment_id == sa.id,
             )
@@ -630,21 +611,19 @@ async def test_provision_test_student_defaults_variant_when_required_and_unpicke
     await _make_test_group(db)
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(
-        db, subject.id, code="a1",
+        db,
+        subject.id,
+        code="a1",
         config={"variants_required": True, "variants": {"2": {}, "1": {}}},
     )
     authenticate(client, teacher)
 
-    resp = await client.post(
-        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
-    )
+    resp = await client.post(f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False)
     assert resp.status_code == 303
 
     student_assignment = (
         await db.execute(
-            select(StudentAssignment).where(
-                StudentAssignment.subjects_assignment_id == sa.id
-            )
+            select(StudentAssignment).where(StudentAssignment.subjects_assignment_id == sa.id)
         )
     ).scalar_one()
     assert student_assignment.variant == "1"  # first sorted key, not left NULL
@@ -656,7 +635,9 @@ async def test_provision_test_student_persists_explicit_variant_choice(
     await _make_test_group(db)
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(
-        db, subject.id, code="a1",
+        db,
+        subject.id,
+        code="a1",
         config={"variants_required": True, "variants": {"1": {}, "2": {}}},
     )
     authenticate(client, teacher)
@@ -670,9 +651,7 @@ async def test_provision_test_student_persists_explicit_variant_choice(
 
     student_assignment = (
         await db.execute(
-            select(StudentAssignment).where(
-                StudentAssignment.subjects_assignment_id == sa.id
-            )
+            select(StudentAssignment).where(StudentAssignment.subjects_assignment_id == sa.id)
         )
     ).scalar_one()
     assert student_assignment.variant == "2"
@@ -684,7 +663,9 @@ async def test_provision_test_student_invalid_variant_falls_back_to_default(
     await _make_test_group(db)
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(
-        db, subject.id, code="a1",
+        db,
+        subject.id,
+        code="a1",
         config={"variants_required": True, "variants": {"1": {}, "3": {}}},
     )
     authenticate(client, teacher)
@@ -698,9 +679,7 @@ async def test_provision_test_student_invalid_variant_falls_back_to_default(
 
     student_assignment = (
         await db.execute(
-            select(StudentAssignment).where(
-                StudentAssignment.subjects_assignment_id == sa.id
-            )
+            select(StudentAssignment).where(StudentAssignment.subjects_assignment_id == sa.id)
         )
     ).scalar_one()
     assert student_assignment.variant == "1"  # fell back to first sorted key
@@ -714,24 +693,18 @@ async def test_provision_test_student_no_variants_configured_leaves_null(
     sa = await _make_assignment(db, subject.id, code="a1", config={})
     authenticate(client, teacher)
 
-    resp = await client.post(
-        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
-    )
+    resp = await client.post(f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False)
     assert resp.status_code == 303
 
     student_assignment = (
         await db.execute(
-            select(StudentAssignment).where(
-                StudentAssignment.subjects_assignment_id == sa.id
-            )
+            select(StudentAssignment).where(StudentAssignment.subjects_assignment_id == sa.id)
         )
     ).scalar_one()
     assert student_assignment.variant is None
 
 
-async def test_provision_test_student_idempotent(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_provision_test_student_idempotent(client: AsyncClient, db, teacher) -> None:
     await _make_test_group(db)
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
@@ -748,9 +721,9 @@ async def test_provision_test_student_idempotent(
     assert second.headers["location"] == f"/teacher/subjects/{subject.id}?test_student=existing"
     # Still exactly one SubjectTestStudent.
     count = await db.scalar(
-        select(func.count()).select_from(SubjectTestStudent).where(
-            SubjectTestStudent.subject_id == subject.id
-        )
+        select(func.count())
+        .select_from(SubjectTestStudent)
+        .where(SubjectTestStudent.subject_id == subject.id)
     )
     assert count == 1
 
@@ -762,9 +735,7 @@ async def test_provision_test_student_cross_teacher_is_403(
     other = await make_user(role=UserRole.TEACHER, username="other")
     subject = await _make_subject(db, owner_id=other.id)
     authenticate(client, teacher)
-    resp = await client.post(
-        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
-    )
+    resp = await client.post(f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False)
     assert resp.status_code == 403
     assert (await db.scalar(select(func.count()).select_from(SubjectTestStudent))) == 0
 
@@ -778,9 +749,7 @@ async def test_provision_test_student_admin_succeeds_cross_teacher(
     other = await make_user(role=UserRole.TEACHER, username="other")
     subject = await _make_subject(db, owner_id=other.id)
     authenticate(client, admin)
-    resp = await client.post(
-        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
-    )
+    resp = await client.post(f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == f"/teacher/subjects/{subject.id}?test_student=created"
 
@@ -794,9 +763,7 @@ async def test_provision_test_student_missing_subject_is_404(
     assert resp.status_code == 404
 
 
-async def test_enter_as_test_student_sets_auth_cookie(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_enter_as_test_student_sets_auth_cookie(client: AsyncClient, db, teacher) -> None:
     await _make_test_group(db)
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
@@ -840,9 +807,7 @@ async def test_enter_as_test_student_cross_teacher_is_403(
     subject = await _make_subject(db, owner_id=other.id)
     # Provision as owner first.
     owner_client = _client_for(other)
-    await owner_client.post(
-        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
-    )
+    await owner_client.post(f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False)
     await owner_client.aclose()
 
     authenticate(client, teacher)
@@ -859,9 +824,7 @@ async def test_enter_as_test_student_admin_succeeds_cross_teacher(
     other = await make_user(role=UserRole.TEACHER, username="other")
     subject = await _make_subject(db, owner_id=other.id)
     owner_client = _client_for(other)
-    await owner_client.post(
-        f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False
-    )
+    await owner_client.post(f"/teacher/subjects/{subject.id}/test-student", follow_redirects=False)
     await owner_client.aclose()
 
     authenticate(client, admin)
@@ -895,30 +858,32 @@ async def test_feedback_request_creates_request_tokens_and_outbox(
     assert resp.headers["location"] == f"/teacher/subjects/{subject.id}?feedback_sent=1"
 
     fr = (
-        await db.execute(
-            select(FeedbackRequest).where(FeedbackRequest.subject_id == subject.id)
-        )
+        await db.execute(select(FeedbackRequest).where(FeedbackRequest.subject_id == subject.id))
     ).scalar_one()
     assert fr.semester_id == semester.id
     assert fr.created_by_teacher_id == teacher.id
 
     tokens = (
-        await db.execute(
-            select(FeedbackToken).where(FeedbackToken.feedback_request_id == fr.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(FeedbackToken).where(FeedbackToken.feedback_request_id == fr.id)))
+        .scalars()
+        .all()
+    )
     assert len(tokens) == 2
     assert {t.student_id for t in tokens} == {s1.id, s2.id}
     assert all(t.token for t in tokens)
 
     # One FEEDBACK_REQUEST_SENT outbox per token.
     ob = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.event_type == OutboxEventType.FEEDBACK_REQUEST_SENT
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.FEEDBACK_REQUEST_SENT
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(ob) == 2
     token_ids = {t.id for t in tokens}
     assert {m.payload["feedback_token_id"] for m in ob} == token_ids
@@ -981,9 +946,7 @@ async def test_feedback_request_cross_teacher_is_403(
     assert (await db.scalar(select(func.count()).select_from(FeedbackRequest))) == 0
 
 
-async def test_feedback_view_owner_renders_200(
-    client: AsyncClient, db, teacher
-) -> None:
+async def test_feedback_view_owner_renders_200(client: AsyncClient, db, teacher) -> None:
     await _make_active_semester(db)
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
@@ -991,9 +954,7 @@ async def test_feedback_view_owner_renders_200(
     assert resp.status_code == 200
 
 
-async def test_feedback_view_admin_can_view_any(
-    client: AsyncClient, db, admin, make_user
-) -> None:
+async def test_feedback_view_admin_can_view_any(client: AsyncClient, db, admin, make_user) -> None:
     # Feedback handlers use require_subject_access → ADMIN allowed.
     await _make_active_semester(db)
     other = await make_user(role=UserRole.TEACHER, username="other")
@@ -1062,8 +1023,7 @@ async def test_feedback_export_csv_empty_returns_header_only(
     resp = await client.get(f"/teacher/subjects/{subject.id}/feedback/export.csv")
     assert resp.status_code == 200
     assert (
-        "student_name,student_email,rating,went_well,went_bad,to_change,submitted_at"
-        in resp.text
+        "student_name,student_email,rating,went_well,went_bad,to_change,submitted_at" in resp.text
     )
 
 
@@ -1114,9 +1074,7 @@ async def test_add_student_creates_student_user_and_outbox(
     group = (await db.execute(select(Group).where(Group.name == "IT-42"))).scalar_one()
     assert student.group_id == group.id
     # User + outbox.
-    user = (
-        await db.execute(select(User).where(User.student_id == student.id))
-    ).scalar_one()
+    user = (await db.execute(select(User).where(User.student_id == student.id))).scalar_one()
     assert user.username == "alan.turing"
     creds = (
         await db.execute(
@@ -1147,9 +1105,7 @@ async def test_add_student_duplicate_email_is_422(
     # No second student / user / outbox created.
     assert (
         await db.scalar(
-            select(func.count()).select_from(Student).where(
-                Student.email == "taken@example.com"
-            )
+            select(func.count()).select_from(Student).where(Student.email == "taken@example.com")
         )
         == 1
     )

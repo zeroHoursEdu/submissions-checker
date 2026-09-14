@@ -49,7 +49,9 @@ class QuizAttempt(Base, TimestampMixin):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Per-question timing cursor. Only meaningful when config_snapshot["per_question_timing"]
     # is set; otherwise the whole attempt is answered on one page and these stay at 0/NULL.
-    current_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    current_index: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     question_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -94,7 +96,9 @@ class QuizAnswer(Base, TimestampMixin):
     attempt_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("quiz_attempts.id", ondelete="CASCADE"), nullable=False
     )
-    question_id: Mapped[int] = mapped_column(BigInteger, nullable=False)  # no FK intentional — references snapshot index
+    question_id: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )  # no FK intentional — references snapshot index
     answer: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     points_earned: Mapped[int | None] = mapped_column(Integer, nullable=True)

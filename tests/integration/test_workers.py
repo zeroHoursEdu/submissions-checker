@@ -66,12 +66,14 @@ async def test_outbox_processor_marks_message_finished(
 
     # No PENDING messages remain.
     pending = (
-        await db_session.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.state == OutboxMessageState.PENDING
+        (
+            await db_session.execute(
+                select(OutboxMessage).where(OutboxMessage.state == OutboxMessageState.PENDING)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert pending == []
 
 
@@ -136,15 +138,17 @@ async def test_outbox_processor_drops_retired_event_type_without_retry(
 
     # Excluded from the next poll's retry_count < outbox_max_retries filter.
     pending = (
-        await db_session.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.state.in_(
-                    [OutboxMessageState.PENDING, OutboxMessageState.ERROR]
-                ),
-                OutboxMessage.retry_count < get_settings().outbox_max_retries,
+        (
+            await db_session.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.state.in_([OutboxMessageState.PENDING, OutboxMessageState.ERROR]),
+                    OutboxMessage.retry_count < get_settings().outbox_max_retries,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert message not in pending
 
 

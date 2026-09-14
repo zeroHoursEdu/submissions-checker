@@ -38,15 +38,11 @@ def _ensure_other_teacher() -> int:
     conn = _db_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM users WHERE username = %s", (OTHER_TEACHER_USERNAME,)
-            )
+            cur.execute("SELECT id FROM users WHERE username = %s", (OTHER_TEACHER_USERNAME,))
             row = cur.fetchone()
             if row:
                 return row[0]
-            pw_hash = bcrypt.hashpw(
-                OTHER_TEACHER_PASSWORD.encode(), bcrypt.gensalt(12)
-            ).decode()
+            pw_hash = bcrypt.hashpw(OTHER_TEACHER_PASSWORD.encode(), bcrypt.gensalt(12)).decode()
             cur.execute(
                 """
                 INSERT INTO users (username, password_hash, role, created_at, updated_at)
@@ -145,7 +141,7 @@ def navigate_protected(page, app_url: str, path: str) -> int:
     return SecurityPage(page, app_url).status_for(path)
 
 
-@when(parsers.parse('I navigate to the other teacher\'s subject page'), target_fixture="last_status")
+@when(parsers.parse("I navigate to the other teacher's subject page"), target_fixture="last_status")
 def navigate_other_subject(page, app_url: str, e2e_context: dict) -> int:
     subject_id = e2e_context["other_teacher_subject_id"]
     return SecurityPage(page, app_url).status_for(f"/teacher/subjects/{subject_id}")
@@ -185,7 +181,7 @@ def assert_forbidden(page, last_status: int) -> None:
     assert last_status == 403, f"Expected 403 Forbidden, got {last_status}"
 
 
-@then(parsers.parse('the page should not show the teacher dashboard'))
+@then(parsers.parse("the page should not show the teacher dashboard"))
 def assert_not_teacher_dashboard(page, app_url: str) -> None:
     # A genuine teacher dashboard renders an upload form for the subject config ZIP.
     assert page.locator('input[name="config_zip"]').count() == 0, (

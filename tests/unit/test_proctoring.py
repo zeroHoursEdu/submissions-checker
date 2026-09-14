@@ -66,7 +66,9 @@ async def test_upload_bytes_puts_object_with_content_type() -> None:
     fake = _FakeS3()
     storage._session = _FakeSession(fake)  # type: ignore[assignment]
 
-    url = await storage.upload_bytes(b"\xff\xd8jpegbytes", "proctoring/attempt-9/1-x.jpg", "image/jpeg")
+    url = await storage.upload_bytes(
+        b"\xff\xd8jpegbytes", "proctoring/attempt-9/1-x.jpg", "image/jpeg"
+    )
 
     assert len(fake.calls) == 1
     call = fake.calls[0]

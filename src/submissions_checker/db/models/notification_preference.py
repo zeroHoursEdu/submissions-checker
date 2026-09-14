@@ -20,6 +20,8 @@ class NotificationPreference(Base, TimestampMixin):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     __table_args__ = (
-        UniqueConstraint("student_id", "case", "method", name="uq_notification_pref_student_case_method"),
+        UniqueConstraint(
+            "student_id", "case", "method", name="uq_notification_pref_student_case_method"
+        ),
         Index("ix_notification_preferences_student_id", "student_id"),
     )

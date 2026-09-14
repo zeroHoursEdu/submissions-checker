@@ -64,18 +64,18 @@ def test_legal_transition_succeeds(start: S, event: str, expected: S) -> None:
 # Illegal: events that are valid *somewhere* but not from this status, plus
 # unknown events and terminal states.
 ILLEGAL = [
-    (S.PENDING, "validation_passed"),       # wrong event for PENDING
+    (S.PENDING, "validation_passed"),  # wrong event for PENDING
     (S.PENDING, "teacher_approve"),
-    (S.VALIDATING, "start_validation"),     # cannot re-start
+    (S.VALIDATING, "start_validation"),  # cannot re-start
     (S.VALIDATING, "test_passed_ai"),
     (S.TESTING, "validation_passed"),
-    (S.COMPLETED, "teacher_approve"),       # terminal
+    (S.COMPLETED, "teacher_approve"),  # terminal
     (S.COMPLETED, "start_validation"),
-    (S.FAILED, "teacher_reject"),           # terminal
+    (S.FAILED, "teacher_reject"),  # terminal
     (S.VALIDATION_FAILED, "validation_passed"),
     (S.TEST_FAILED, "test_passed_ai"),
     (S.AWAITING_TEACHER_REVIEW, "teacher_approve_done"),  # legacy event on new state
-    (S.CHECKING, "teacher_approve"),        # new event on legacy state
+    (S.CHECKING, "teacher_approve"),  # new event on legacy state
     (S.PENDING, "totally_unknown_event"),
 ]
 

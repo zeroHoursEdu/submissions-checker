@@ -22,33 +22,45 @@ from submissions_checker.workers.tasks import check_tasks
 
 
 def _q(text: str, **extra) -> dict:
-    return {"type": "single_choice", "text": text, "points": 1,
-            "options": ["a", "b"], "correct": 0, **extra}
+    return {
+        "type": "single_choice",
+        "text": text,
+        "points": 1,
+        "options": ["a", "b"],
+        "correct": 0,
+        **extra,
+    }
 
 
 def test_question_limit_overrides_quiz_default() -> None:
-    snap = student_quiz._build_questions_from_config({
-        "questions": [_q("easy"), _q("hard", time_limit_seconds=60)],
-        "shuffle_questions": False,
-        "question_time_default_seconds": 30,
-    })
+    snap = student_quiz._build_questions_from_config(
+        {
+            "questions": [_q("easy"), _q("hard", time_limit_seconds=60)],
+            "shuffle_questions": False,
+            "question_time_default_seconds": 30,
+        }
+    )
     by_text = {q["text"]: q["time_limit_seconds"] for q in snap}
     assert by_text == {"easy": 30, "hard": 60}
 
 
 def test_no_timing_keys_means_no_limits() -> None:
-    snap = student_quiz._build_questions_from_config({
-        "questions": [_q("one"), _q("two")],
-        "shuffle_questions": False,
-    })
+    snap = student_quiz._build_questions_from_config(
+        {
+            "questions": [_q("one"), _q("two")],
+            "shuffle_questions": False,
+        }
+    )
     assert [q["time_limit_seconds"] for q in snap] == [None, None]
 
 
 def test_question_limit_without_quiz_default() -> None:
-    snap = student_quiz._build_questions_from_config({
-        "questions": [_q("timed", time_limit_seconds=45), _q("untimed")],
-        "shuffle_questions": False,
-    })
+    snap = student_quiz._build_questions_from_config(
+        {
+            "questions": [_q("timed", time_limit_seconds=45), _q("untimed")],
+            "shuffle_questions": False,
+        }
+    )
     assert [q["time_limit_seconds"] for q in snap] == [45, None]
 
 
@@ -69,8 +81,14 @@ def _attempt(seconds: list[int | None], *, started_ago: float, index: int = 0):
         current_index=index,
         question_started_at=datetime.now(UTC) - timedelta(seconds=started_ago),
         questions_snapshot=[
-            {"id": i, "type": "SINGLE_CHOICE", "text": f"q{i}", "points": 1,
-             "time_limit_seconds": s, "config": {"options": ["a"], "correct": 0}}
+            {
+                "id": i,
+                "type": "SINGLE_CHOICE",
+                "text": f"q{i}",
+                "points": 1,
+                "time_limit_seconds": s,
+                "config": {"options": ["a"], "correct": 0},
+            }
             for i, s in enumerate(seconds)
         ],
         answers=[],
@@ -130,8 +148,11 @@ def test_seconds_remaining_never_goes_negative() -> None:
 def test_grade_is_the_quiz_alone_when_nothing_ran() -> None:
     breakdown = compute_grade(
         {"code_weight": 0, "quiz_weight": 1},
-        0, 8,
-        works_pct=None, ai_mark=None, quiz_pct=75.0,
+        0,
+        8,
+        works_pct=None,
+        ai_mark=None,
+        quiz_pct=75.0,
     )
     assert breakdown.works_score is None
     assert breakdown.quiz_score == 75.0
@@ -140,8 +161,12 @@ def test_grade_is_the_quiz_alone_when_nothing_ran() -> None:
 
 def test_full_quiz_score_reaches_the_top_of_the_band() -> None:
     breakdown = compute_grade(
-        {"code_weight": 0, "quiz_weight": 1}, 0, 8,
-        works_pct=None, ai_mark=None, quiz_pct=100.0,
+        {"code_weight": 0, "quiz_weight": 1},
+        0,
+        8,
+        works_pct=None,
+        ai_mark=None,
+        quiz_pct=100.0,
     )
     assert breakdown.grade == 8
 
@@ -187,16 +212,28 @@ def _quiz_first_config(review_mode: str) -> dict:
 def _quiz_first_submission():
     subject = SimpleNamespace(id=5)
     subjects_assignment = SimpleNamespace(
-        id=7, code="lab1", title="Lab 1", subject=subject, subject_id=5,
-        config={}, min_grade=0, max_grade=8,
+        id=7,
+        code="lab1",
+        title="Lab 1",
+        subject=subject,
+        subject_id=5,
+        config={},
+        min_grade=0,
+        max_grade=8,
     )
     student_assignment = SimpleNamespace(
         variant=None, subjects_assignment=subjects_assignment, student_id=42, grade=None
     )
     return SimpleNamespace(
-        id=1, plugin_config_id=99, source_metadata={"saved_as": "s.zip"},
-        status=SubmissionStatus.PENDING, test_results=None, ai_review=None,
-        grade_breakdown=None, quiz_attempts=[], students_assignment=student_assignment,
+        id=1,
+        plugin_config_id=99,
+        source_metadata={"saved_as": "s.zip"},
+        status=SubmissionStatus.PENDING,
+        test_results=None,
+        ai_review=None,
+        grade_breakdown=None,
+        quiz_attempts=[],
+        students_assignment=student_assignment,
     )
 
 
@@ -210,8 +247,9 @@ async def test_quiz_first_mode_skips_the_sandbox(tmp_path, monkeypatch, review_m
         zf.writestr("report.md", "# lab 1\n")
 
     submission = _quiz_first_submission()
-    db = _FakeDB(submission, SimpleNamespace(id=99, version=2,
-                                             config=_quiz_first_config(review_mode)))
+    db = _FakeDB(
+        submission, SimpleNamespace(id=99, version=2, config=_quiz_first_config(review_mode))
+    )
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks.check_core, "run_check", _explode)
     monkeypatch.setattr(check_tasks.check_core, "resolve_check_plan", _explode)
@@ -228,8 +266,10 @@ async def test_quiz_first_mode_still_rejects_a_corrupt_archive(tmp_path, monkeyp
     (tmp_path / "s.zip").write_bytes(b"this is not a zip file")
 
     submission = _quiz_first_submission()
-    db = _FakeDB(submission, SimpleNamespace(id=99, version=2,
-                                             config=_quiz_first_config("quiz_then_teacher")))
+    db = _FakeDB(
+        submission,
+        SimpleNamespace(id=99, version=2, config=_quiz_first_config("quiz_then_teacher")),
+    )
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks.check_core, "run_check", _explode)
 
@@ -244,8 +284,9 @@ async def test_quiz_first_mode_rejects_a_traversal_archive(tmp_path, monkeypatch
         zf.writestr("../escape.txt", "nope")
 
     submission = _quiz_first_submission()
-    db = _FakeDB(submission, SimpleNamespace(id=99, version=2,
-                                             config=_quiz_first_config("quiz_only")))
+    db = _FakeDB(
+        submission, SimpleNamespace(id=99, version=2, config=_quiz_first_config("quiz_only"))
+    )
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks.check_core, "run_check", _explode)
 

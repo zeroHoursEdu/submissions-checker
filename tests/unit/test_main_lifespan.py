@@ -25,7 +25,8 @@ def _patch_lifespan(monkeypatch, *, scheduler_enabled: bool):
 
     # load_vocabularies is sync; record its call via the shared recorder.
     monkeypatch.setattr(
-        main_module, "load_vocabularies",
+        main_module,
+        "load_vocabularies",
         MagicMock(side_effect=lambda *a, **k: recorder("load_vocabularies")),
     )
 
@@ -38,9 +39,7 @@ def _patch_lifespan(monkeypatch, *, scheduler_enabled: bool):
 
     init_scheduler = MagicMock(side_effect=lambda *a, **k: recorder("init_scheduler"))
     start_scheduler = AsyncMock(side_effect=lambda *a, **k: recorder("start_scheduler"))
-    shutdown_scheduler = AsyncMock(
-        side_effect=lambda *a, **k: recorder("shutdown_scheduler")
-    )
+    shutdown_scheduler = AsyncMock(side_effect=lambda *a, **k: recorder("shutdown_scheduler"))
     monkeypatch.setattr(main_module, "init_scheduler", init_scheduler)
     monkeypatch.setattr(main_module, "start_scheduler", start_scheduler)
     monkeypatch.setattr(main_module, "shutdown_scheduler", shutdown_scheduler)

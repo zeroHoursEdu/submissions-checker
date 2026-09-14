@@ -104,8 +104,11 @@ async def test_run_uses_default_limits(tmp_path: Path) -> None:
     patcher, rec = _patch_exec(_fake_proc())
     with patcher:
         await DockerSandbox().run(
-            image="i", tool="python", script_path="c.py",
-            student_files_dir=student, plugin_dir=plugin,
+            image="i",
+            tool="python",
+            script_path="c.py",
+            student_files_dir=student,
+            plugin_dir=plugin,
         )
     assert "--memory=256m" in rec["cmd"]
     assert "--cpus=0.5" in rec["cmd"]
@@ -137,12 +140,16 @@ async def test_run_parses_output_files(tmp_path: Path) -> None:
 
     proc = _fake_proc(returncode=0)
     patcher, _ = _patch_exec(proc)
-    with patcher, patch(
-        "submissions_checker.services.docker_sandbox.tempfile.TemporaryDirectory", _TD
+    with (
+        patcher,
+        patch("submissions_checker.services.docker_sandbox.tempfile.TemporaryDirectory", _TD),
     ):
         result = await DockerSandbox().run(
-            image="i", tool="python", script_path="c.py",
-            student_files_dir=student, plugin_dir=plugin,
+            image="i",
+            tool="python",
+            script_path="c.py",
+            student_files_dir=student,
+            plugin_dir=plugin,
         )
     assert result.output_files["result.json"] == '{"ok": true}'
 
@@ -155,8 +162,11 @@ async def test_run_nonzero_exit_code(tmp_path: Path) -> None:
     patcher, _ = _patch_exec(_fake_proc(returncode=2, stderr=b"boom"))
     with patcher:
         result = await DockerSandbox().run(
-            image="i", tool="python", script_path="c.py",
-            student_files_dir=student, plugin_dir=plugin,
+            image="i",
+            tool="python",
+            script_path="c.py",
+            student_files_dir=student,
+            plugin_dir=plugin,
         )
     assert result.exit_code == 2
     assert result.stderr == "boom"
@@ -181,13 +191,20 @@ async def test_run_timeout_kills_and_returns_sentinel(tmp_path: Path) -> None:
     proc.kill = _kill
 
     patcher, rec = _patch_exec(proc)
-    with patcher, patch(
-        "submissions_checker.services.docker_sandbox.asyncio.wait_for",
-        side_effect=asyncio.TimeoutError,
+    with (
+        patcher,
+        patch(
+            "submissions_checker.services.docker_sandbox.asyncio.wait_for",
+            side_effect=asyncio.TimeoutError,
+        ),
     ):
         result = await DockerSandbox().run(
-            image="i", tool="python", script_path="c.py",
-            student_files_dir=student, plugin_dir=plugin, timeout=1,
+            image="i",
+            tool="python",
+            script_path="c.py",
+            student_files_dir=student,
+            plugin_dir=plugin,
+            timeout=1,
         )
     assert killed["called"] is True
     assert result.exit_code == -1
@@ -227,16 +244,23 @@ async def test_run_timeout_kill_failure_is_swallowed(tmp_path: Path) -> None:
             return proc  # the original `docker run`
         raise OSError("container already gone")  # the `docker kill` call
 
-    with patch(
-        "submissions_checker.services.docker_sandbox.asyncio.create_subprocess_exec",
-        side_effect=fake_exec,
-    ), patch(
-        "submissions_checker.services.docker_sandbox.asyncio.wait_for",
-        side_effect=asyncio.TimeoutError,
+    with (
+        patch(
+            "submissions_checker.services.docker_sandbox.asyncio.create_subprocess_exec",
+            side_effect=fake_exec,
+        ),
+        patch(
+            "submissions_checker.services.docker_sandbox.asyncio.wait_for",
+            side_effect=asyncio.TimeoutError,
+        ),
     ):
         result = await DockerSandbox().run(
-            image="i", tool="python", script_path="c.py",
-            student_files_dir=student, plugin_dir=plugin, timeout=1,
+            image="i",
+            tool="python",
+            script_path="c.py",
+            student_files_dir=student,
+            plugin_dir=plugin,
+            timeout=1,
         )
 
     assert result.exit_code == -1
@@ -254,8 +278,11 @@ async def test_run_missing_docker_binary_raises_runtime_error(tmp_path: Path) ->
     ):
         with pytest.raises(RuntimeError, match="docker command not found"):
             await DockerSandbox().run(
-                image="i", tool="python", script_path="c.py",
-                student_files_dir=student, plugin_dir=plugin,
+                image="i",
+                tool="python",
+                script_path="c.py",
+                student_files_dir=student,
+                plugin_dir=plugin,
             )
 
 

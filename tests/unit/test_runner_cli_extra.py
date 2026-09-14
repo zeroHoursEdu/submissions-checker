@@ -52,8 +52,14 @@ def test_evaluate_config_error(monkeypatch, tmp_path) -> None:
         check_core.CheckOutcome("config_error", 0, 0, [], "bad config"),
     )
     res = runner._evaluate(
-        label="c", config={}, assignment="lab1", variant=None,
-        submission_dir=tmp_path, plugin_dir=tmp_path, expect="pass", expect_score=None,
+        label="c",
+        config={},
+        assignment="lab1",
+        variant=None,
+        submission_dir=tmp_path,
+        plugin_dir=tmp_path,
+        expect="pass",
+        expect_score=None,
     )
     assert res.ok is False
     assert "config error" in res.detail
@@ -62,8 +68,14 @@ def test_evaluate_config_error(monkeypatch, tmp_path) -> None:
 def test_evaluate_invalid_expect(monkeypatch, tmp_path) -> None:
     _patch_outcome(monkeypatch, check_core.CheckOutcome("passed", 100, 100, []))
     res = runner._evaluate(
-        label="c", config={}, assignment="lab1", variant=None,
-        submission_dir=tmp_path, plugin_dir=tmp_path, expect="maybe", expect_score=None,
+        label="c",
+        config={},
+        assignment="lab1",
+        variant=None,
+        submission_dir=tmp_path,
+        plugin_dir=tmp_path,
+        expect="maybe",
+        expect_score=None,
     )
     assert res.ok is False
     assert "invalid expect" in res.detail
@@ -72,8 +84,14 @@ def test_evaluate_invalid_expect(monkeypatch, tmp_path) -> None:
 def test_evaluate_expect_score_mismatch(monkeypatch, tmp_path) -> None:
     _patch_outcome(monkeypatch, check_core.CheckOutcome("passed", 80, 100, []))
     res = runner._evaluate(
-        label="c", config={}, assignment="lab1", variant=None,
-        submission_dir=tmp_path, plugin_dir=tmp_path, expect="pass", expect_score=100,
+        label="c",
+        config={},
+        assignment="lab1",
+        variant=None,
+        submission_dir=tmp_path,
+        plugin_dir=tmp_path,
+        expect="pass",
+        expect_score=100,
     )
     assert res.ok is False
     assert "expected score 100" in res.detail
@@ -82,8 +100,14 @@ def test_evaluate_expect_score_mismatch(monkeypatch, tmp_path) -> None:
 def test_evaluate_pass_matches_with_score(monkeypatch, tmp_path) -> None:
     _patch_outcome(monkeypatch, check_core.CheckOutcome("passed", 100, 100, []))
     res = runner._evaluate(
-        label="c", config={}, assignment="lab1", variant="3",
-        submission_dir=tmp_path, plugin_dir=tmp_path, expect="pass", expect_score=100,
+        label="c",
+        config={},
+        assignment="lab1",
+        variant="3",
+        submission_dir=tmp_path,
+        plugin_dir=tmp_path,
+        expect="pass",
+        expect_score=100,
     )
     assert res.ok is True
 
@@ -93,7 +117,8 @@ def test_evaluate_pass_matches_with_score(monkeypatch, tmp_path) -> None:
 # --------------------------------------------------------------------------- #
 def _write_config(root: Path) -> Path:
     cfg = root / "config.yml"
-    cfg.write_text(textwrap.dedent("""
+    cfg.write_text(
+        textwrap.dedent("""
         subjectCode: demo
         name: Demo
         assignments:
@@ -102,7 +127,10 @@ def _write_config(root: Path) -> Path:
               image: demo:local
               check_command: assignments/lab1/check.py
               min_pass_score: 50
-    """).strip() + "\n", encoding="utf-8")
+    """).strip()
+        + "\n",
+        encoding="utf-8",
+    )
     return cfg
 
 
@@ -112,10 +140,19 @@ def test_cmd_run_human_output_ok(tmp_path, monkeypatch, capsys) -> None:
     sub.mkdir()
     _patch_outcome(monkeypatch, check_core.CheckOutcome("passed", 100, 100, []))
 
-    code = runner.main([
-        "run", "--config", str(tmp_path / "config.yml"),
-        "--assignment", "lab1", "--submission", str(sub), "--expect", "pass",
-    ])
+    code = runner.main(
+        [
+            "run",
+            "--config",
+            str(tmp_path / "config.yml"),
+            "--assignment",
+            "lab1",
+            "--submission",
+            str(sub),
+            "--expect",
+            "pass",
+        ]
+    )
 
     out = capsys.readouterr().out
     assert code == runner.EXIT_OK
@@ -129,11 +166,22 @@ def test_cmd_run_json_output_mismatch(tmp_path, monkeypatch, capsys) -> None:
     sub.mkdir()
     _patch_outcome(monkeypatch, check_core.CheckOutcome("failed", 0, 100, []))
 
-    code = runner.main([
-        "--json", "run", "--config", str(tmp_path / "config.yml"),
-        "--assignment", "lab1", "--variant", "3", "--submission", str(sub),
-        "--expect", "pass",
-    ])
+    code = runner.main(
+        [
+            "--json",
+            "run",
+            "--config",
+            str(tmp_path / "config.yml"),
+            "--assignment",
+            "lab1",
+            "--variant",
+            "3",
+            "--submission",
+            str(sub),
+            "--expect",
+            "pass",
+        ]
+    )
 
     out = capsys.readouterr().out
     assert code == runner.EXIT_MISMATCH
@@ -178,7 +226,8 @@ def test_run_suite_case_missing_keys(tmp_path, capsys) -> None:
         textwrap.dedent("""
             cases:
               - assignment: lab1
-        """).strip() + "\n",
+        """).strip()
+        + "\n",
         encoding="utf-8",
     )
     code = runner.main(["run-suite", str(tests / "suite.yml")])
@@ -197,7 +246,8 @@ def test_run_suite_fixture_missing_reports_config_error(tmp_path, monkeypatch, c
               - assignment: lab1
                 submission: tests/fixtures/ghost
                 expect: pass
-        """).strip() + "\n",
+        """).strip()
+        + "\n",
         encoding="utf-8",
     )
     code = runner.main(["run-suite", str(tests / "suite.yml")])
@@ -228,7 +278,8 @@ class _StubParser:
 
 def test_main_handles_check_execution_error(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
-        runner, "build_parser",
+        runner,
+        "build_parser",
         lambda: _StubParser(check_core.CheckExecutionError("docker down")),
     )
     code = runner.main([])
@@ -239,7 +290,8 @@ def test_main_handles_check_execution_error(monkeypatch, capsys) -> None:
 
 def test_main_handles_file_not_found(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
-        runner, "build_parser",
+        runner,
+        "build_parser",
         lambda: _StubParser(FileNotFoundError("config.yml")),
     )
     code = runner.main([])

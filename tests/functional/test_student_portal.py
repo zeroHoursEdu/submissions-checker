@@ -227,9 +227,7 @@ async def test_assignments_list_not_enrolled_returns_404(
     assert resp.status_code == 404
 
 
-async def test_assignments_list_enrolled_ok(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_assignments_list_enrolled_ok(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     subject = await _make_subject(db)
     await _enroll(db, student_user.student_id, subject.id)
@@ -247,23 +245,17 @@ async def test_assignment_detail_of_other_student_returns_404(
     await _enroll(db, student_user.student_id, subject.id)
     sub_a = await _make_assignment(db, subject.id)
     other_sa = await _make_student_assignment(db, other.id, sub_a.id)
-    resp = await student_client.get(
-        f"/portal/subjects/{subject.id}/assignments/{other_sa.id}"
-    )
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{other_sa.id}")
     assert resp.status_code == 404
 
 
-async def test_assignment_detail_own_ok(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_assignment_detail_own_ok(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     subject = await _make_subject(db)
     await _enroll(db, student_user.student_id, subject.id)
     sub_a = await _make_assignment(db, subject.id)
     sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
-    resp = await student_client.get(
-        f"/portal/subjects/{subject.id}/assignments/{sa.id}"
-    )
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
     assert resp.status_code == 200
 
 
@@ -285,15 +277,13 @@ async def test_submit_creates_pending_submission_and_outbox(
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"] == (
-        f"/portal/subjects/{subject.id}/assignments/{sa.id}"
-    )
+    assert resp.headers["location"] == (f"/portal/subjects/{subject.id}/assignments/{sa.id}")
 
     rows = (
-        await db.execute(
-            select(Submission).where(Submission.students_assignment_id == sa.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(Submission).where(Submission.students_assignment_id == sa.id)))
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     sub = rows[0]
     assert sub.status == SubmissionStatus.PENDING
@@ -302,18 +292,20 @@ async def test_submit_creates_pending_submission_and_outbox(
     assert "saved_as" in sub.source_metadata
 
     outbox = (
-        await db.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.payload["submission_id"].astext == str(sub.id)
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.payload["submission_id"].astext == str(sub.id)
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(outbox) == 1
 
 
-async def test_submit_non_zip_rejected_400(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_submit_non_zip_rejected_400(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     subject = await _make_subject(db)
     await _enroll(db, student_user.student_id, subject.id)
@@ -328,9 +320,7 @@ async def test_submit_non_zip_rejected_400(
     assert "ZIP" in resp.json()["detail"]
 
 
-async def test_submit_oversized_rejected_413(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_submit_oversized_rejected_413(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     subject = await _make_subject(db)
     await _enroll(db, student_user.student_id, subject.id)
@@ -362,10 +352,14 @@ async def test_submit_to_other_students_assignment_404(
     assert resp.status_code == 404
     # No submission row created for the victim's assignment.
     rows = (
-        await db.execute(
-            select(Submission).where(Submission.students_assignment_id == other_sa.id)
+        (
+            await db.execute(
+                select(Submission).where(Submission.students_assignment_id == other_sa.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows == []
 
 
@@ -395,9 +389,7 @@ async def test_submit_allowed_after_deadline_when_policy_allow(
     subject = await _make_subject(db)
     await _enroll(db, student_user.student_id, subject.id)
     past = (datetime.now(UTC) - timedelta(days=1)).replace(tzinfo=None)
-    sub_a = await _make_assignment(
-        db, subject.id, deadline=past, config={"late_policy": "allow"}
-    )
+    sub_a = await _make_assignment(db, subject.id, deadline=past, config={"late_policy": "allow"})
     sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
 
     resp = await student_client.post(
@@ -523,10 +515,12 @@ async def test_notification_pref_is_per_student(
         follow_redirects=False,
     )
     other_rows = (
-        await db.execute(
-            select(NotificationPreference).where(
-                NotificationPreference.student_id == other.id
+        (
+            await db.execute(
+                select(NotificationPreference).where(NotificationPreference.student_id == other.id)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert other_rows == []

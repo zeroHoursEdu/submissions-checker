@@ -23,6 +23,7 @@ def _settings(**overrides):
 
 # ── secret-key validator ──────────────────────────────────────────────────────
 
+
 def test_accepts_strong_key() -> None:
     s = _settings()
     assert s.secret_key == STRONG_KEY
@@ -59,6 +60,7 @@ def test_rejects_too_short_key() -> None:
 
 
 # ── environment-derived properties ────────────────────────────────────────────
+
 
 def test_production_flags() -> None:
     s = _settings(environment="production")

@@ -97,9 +97,7 @@ async def _arrange_quiz(
     await db.commit()
     await db.refresh(cfg)
 
-    sub_a = SubjectsAssignment(
-        subject_id=subject.id, title="HW1", code=assignment_code, config={}
-    )
+    sub_a = SubjectsAssignment(subject_id=subject.id, title="HW1", code=assignment_code, config={})
     db.add(sub_a)
     await db.commit()
     await db.refresh(sub_a)
@@ -135,12 +133,28 @@ async def _make_attempt(
     violations: dict | None = None,
     is_passed: bool | None = None,
 ) -> QuizAttempt:
-    snap = questions_snapshot if questions_snapshot is not None else [
-        {"id": 0, "type": "SINGLE_CHOICE", "text": "2+2", "points": 1,
-         "is_required": False, "config": {"options": ["3", "4", "5"], "correct": 1}},
-        {"id": 1, "type": "SINGLE_CHOICE", "text": "sky", "points": 1,
-         "is_required": False, "config": {"options": ["green", "blue"], "correct": 1}},
-    ]
+    snap = (
+        questions_snapshot
+        if questions_snapshot is not None
+        else [
+            {
+                "id": 0,
+                "type": "SINGLE_CHOICE",
+                "text": "2+2",
+                "points": 1,
+                "is_required": False,
+                "config": {"options": ["3", "4", "5"], "correct": 1},
+            },
+            {
+                "id": 1,
+                "type": "SINGLE_CHOICE",
+                "text": "sky",
+                "points": 1,
+                "is_required": False,
+                "config": {"options": ["green", "blue"], "correct": 1},
+            },
+        ]
+    )
     attempt = QuizAttempt(
         submission_id=submission_id,
         plugin_config_id=cfg.id,
@@ -179,9 +193,7 @@ async def test_show_quiz_redirects_to_consent_when_unconsented(
 ) -> None:
     _subject, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(db, sub.id, cfg)
-    resp = await student_client.get(
-        f"/portal/quiz/{attempt.id}", follow_redirects=False
-    )
+    resp = await student_client.get(f"/portal/quiz/{attempt.id}", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/portal/consent"
 
@@ -202,10 +214,10 @@ async def test_start_quiz_creates_in_progress_attempt(
     assert resp.headers["location"].startswith("/portal/quiz/")
 
     attempts = (
-        await db.execute(
-            select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))
+        .scalars()
+        .all()
+    )
     assert len(attempts) == 1
     assert attempts[0].status == QuizAttemptStatus.IN_PROGRESS
     assert len(attempts[0].questions_snapshot) == 2
@@ -225,10 +237,10 @@ async def test_start_quiz_resumes_existing_in_progress(
     assert resp.headers["location"] == f"/portal/quiz/{existing.id}"
     # No second attempt was created.
     attempts = (
-        await db.execute(
-            select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))
+        .scalars()
+        .all()
+    )
     assert len(attempts) == 1
 
 
@@ -255,9 +267,7 @@ async def test_start_quiz_requires_quiz_sent_status(
     subject, sa, _sub, _cfg = await _arrange_quiz(
         db, student_user.student_id, submission_status=SubmissionStatus.PENDING
     )
-    resp = await student_client.get(
-        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz"
-    )
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz")
     assert resp.status_code == 403
 
 
@@ -269,14 +279,10 @@ async def test_start_quiz_max_attempts_redirects_to_last_result(
 ) -> None:
     await _consent(db, student_user.student_id)
     cfg_with_max = {**QUIZ_CONFIG, "max_quiz_attempts": 2}
-    subject, sa, sub, cfg = await _arrange_quiz(
-        db, student_user.student_id, quiz_cfg=cfg_with_max
-    )
+    subject, sa, sub, cfg = await _arrange_quiz(db, student_user.student_id, quiz_cfg=cfg_with_max)
     # Two finished (failed) attempts already used.
     await _make_attempt(db, sub.id, cfg, status=QuizAttemptStatus.COMPLETED, is_passed=False)
-    last = await _make_attempt(
-        db, sub.id, cfg, status=QuizAttemptStatus.TIMED_OUT, is_passed=False
-    )
+    last = await _make_attempt(db, sub.id, cfg, status=QuizAttemptStatus.TIMED_OUT, is_passed=False)
     resp = await student_client.get(
         f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz",
         follow_redirects=False,
@@ -285,10 +291,10 @@ async def test_start_quiz_max_attempts_redirects_to_last_result(
     assert resp.headers["location"] == f"/portal/quiz/{last.id}/result"
     # No new attempt created.
     attempts = (
-        await db.execute(
-            select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)
-        )
-    ).scalars().all()
+        (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))
+        .scalars()
+        .all()
+    )
     assert len(attempts) == 2
 
 
@@ -303,9 +309,7 @@ async def test_view_other_students_attempt_403(
     await _consent(db, other.id)
     _subject, _sa, sub, cfg = await _arrange_quiz(db, other.id)
     attempt = await _make_attempt(db, sub.id, cfg)
-    resp = await student_client.get(
-        f"/portal/quiz/{attempt.id}", follow_redirects=False
-    )
+    resp = await student_client.get(f"/portal/quiz/{attempt.id}", follow_redirects=False)
     assert resp.status_code == 403
 
 
@@ -360,9 +364,7 @@ async def test_submit_all_correct_passes_and_completes_submission(
 ) -> None:
     await _consent(db, student_user.student_id)
     _subject, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
-    attempt = await _make_attempt(
-        db, sub.id, cfg, config_snapshot={"pass_threshold_pct": 0.6}
-    )
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"pass_threshold_pct": 0.6})
     resp = await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
         data={"answer_0": "1", "answer_1": "1"},  # both correct indices
@@ -380,14 +382,10 @@ async def test_submit_all_correct_passes_and_completes_submission(
     assert sub.status == SubmissionStatus.COMPLETED
 
 
-async def test_submit_below_threshold_fails(
-    student_client: AsyncClient, db, student_user
-) -> None:
+async def test_submit_below_threshold_fails(student_client: AsyncClient, db, student_user) -> None:
     await _consent(db, student_user.student_id)
     _subject, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
-    attempt = await _make_attempt(
-        db, sub.id, cfg, config_snapshot={"pass_threshold_pct": 0.6}
-    )
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"pass_threshold_pct": 0.6})
     resp = await student_client.post(
         f"/portal/quiz/{attempt.id}/submit",
         data={"answer_0": "0", "answer_1": "0"},  # both wrong
@@ -432,8 +430,10 @@ async def test_submit_on_terminal_attempt_redirects_to_result(
     assert resp.headers["location"] == f"/portal/quiz/{attempt.id}/result"
     # No answers were written.
     answers = (
-        await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id))
-    ).scalars().all()
+        (await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)))
+        .scalars()
+        .all()
+    )
     assert answers == []
 
 
@@ -453,9 +453,7 @@ async def test_show_quiz_times_out_when_over_limit(
         config_snapshot={"pass_threshold_pct": 0.6, "time_limit_minutes": 1},
         started_at=datetime.now(UTC) - timedelta(minutes=2),
     )
-    resp = await student_client.get(
-        f"/portal/quiz/{attempt.id}", follow_redirects=False
-    )
+    resp = await student_client.get(f"/portal/quiz/{attempt.id}", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == f"/portal/quiz/{attempt.id}/result"
     await db.refresh(attempt)
@@ -475,9 +473,7 @@ async def test_violation_warn_increments_count(
             {"event": "tab_switch", "threshold": 1, "action": {"type": "warn", "message": "stop"}}
         ]
     }
-    attempt = await _make_attempt(
-        db, sub.id, cfg, config_snapshot={"anti_cheat": anti_cheat}
-    )
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"anti_cheat": anti_cheat})
     resp = await student_client.post(
         f"/portal/quiz/{attempt.id}/event", json={"type": "tab_switch"}
     )
@@ -497,9 +493,7 @@ async def test_violation_fail_forces_force_fail_flag(
             {"event": "tab_switch", "threshold": 1, "action": {"type": "fail", "message": "out"}}
         ]
     }
-    attempt = await _make_attempt(
-        db, sub.id, cfg, config_snapshot={"anti_cheat": anti_cheat}
-    )
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"anti_cheat": anti_cheat})
     resp = await student_client.post(
         f"/portal/quiz/{attempt.id}/event", json={"type": "tab_switch"}
     )
@@ -522,9 +516,7 @@ async def test_force_fail_attempt_finalizes_as_violation_fail(
         config_snapshot={"pass_threshold_pct": 0.6},
         violations={"_force_fail": True},
     )
-    resp = await student_client.get(
-        f"/portal/quiz/{attempt.id}", follow_redirects=False
-    )
+    resp = await student_client.get(f"/portal/quiz/{attempt.id}", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == f"/portal/quiz/{attempt.id}/result"
     await db.refresh(attempt)

@@ -27,9 +27,7 @@ class TeacherNotificationQueue(Base, TimestampMixin):
     submission_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False
     )
-    sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("teacher_id", "submission_id", name="uq_teacher_notification_queue"),

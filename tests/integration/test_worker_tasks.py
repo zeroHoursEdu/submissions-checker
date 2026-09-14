@@ -112,9 +112,7 @@ async def _seed_submission(
     db.add(group)
     await db.flush()
 
-    student = Student(
-        group_id=group.id, email=f"stud-{suffix}@e.com", full_name=f"Stud {suffix}"
-    )
+    student = Student(group_id=group.id, email=f"stud-{suffix}@e.com", full_name=f"Stud {suffix}")
     teacher = User(
         username=f"teach-{suffix}",
         password_hash="x",
@@ -129,9 +127,7 @@ async def _seed_submission(
     db.add(subject)
     await db.flush()
 
-    sa_tmpl = SubjectsAssignment(
-        subject_id=subject.id, title=f"Assignment {suffix}", code="lab1"
-    )
+    sa_tmpl = SubjectsAssignment(subject_id=subject.id, title=f"Assignment {suffix}", code="lab1")
     db.add(sa_tmpl)
     await db.flush()
 
@@ -267,20 +263,22 @@ async def test_ai_review_teacher_path_enqueues_review(
     assert sub.ai_review == {"review": "ok"}
     # A teacher-review queue row was enqueued for the subject owner.
     rows = (
-        await db_session.execute(
-            select(TeacherNotificationQueue).where(
-                TeacherNotificationQueue.submission_id == sub.id,
-                TeacherNotificationQueue.teacher_id == teacher.id,
+        (
+            await db_session.execute(
+                select(TeacherNotificationQueue).where(
+                    TeacherNotificationQueue.submission_id == sub.id,
+                    TeacherNotificationQueue.teacher_id == teacher.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
 
 
 @pytest.mark.asyncio
-async def test_ai_review_empty_content_marks_failed(
-    db_session: AsyncSession, monkeypatch
-) -> None:
+async def test_ai_review_empty_content_marks_failed(db_session: AsyncSession, monkeypatch) -> None:
     """Empty AI content -> submission AI_REVIEW_FAILED, message ERROR (raises)."""
     _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-empty")
 
@@ -301,9 +299,7 @@ async def test_ai_review_empty_content_marks_failed(
 
 
 @pytest.mark.asyncio
-async def test_ai_review_client_error_is_handled(
-    db_session: AsyncSession, monkeypatch
-) -> None:
+async def test_ai_review_client_error_is_handled(db_session: AsyncSession, monkeypatch) -> None:
     """If the AI client raises, the message is marked ERROR for retry."""
     _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-raise")
 
@@ -436,9 +432,7 @@ async def test_submission_reviewed_creates_in_app_notification_on_approve(
 
     assert message.state == OutboxMessageState.FINISHED
     notif = (
-        await db_session.execute(
-            select(Notification).where(Notification.user_id == user.id)
-        )
+        await db_session.execute(select(Notification).where(Notification.user_id == user.id))
     ).scalar_one()
     assert "approved" in notif.title or "approved" in notif.body
 
@@ -476,9 +470,7 @@ async def test_submission_reviewed_in_app_notification_survives_email_suppressio
     assert message.state == OutboxMessageState.FINISHED
     assert dispatcher.sent == []  # email suppressed
     notif = (
-        await db_session.execute(
-            select(Notification).where(Notification.user_id == user.id)
-        )
+        await db_session.execute(select(Notification).where(Notification.user_id == user.id))
     ).scalar_one()
     assert "redo" in notif.body  # in-app notification still created
 
@@ -565,12 +557,8 @@ async def _seed_feedback(db: AsyncSession, suffix: str, *, pref_enabled: bool | 
     group = Group(name=f"grp-{suffix}")
     db.add(group)
     await db.flush()
-    student = Student(
-        group_id=group.id, email=f"fb-{suffix}@e.com", full_name=f"FB {suffix}"
-    )
-    teacher = User(
-        username=f"fbt-{suffix}", password_hash="x", role="TEACHER", is_active=True
-    )
+    student = Student(group_id=group.id, email=f"fb-{suffix}@e.com", full_name=f"FB {suffix}")
+    teacher = User(username=f"fbt-{suffix}", password_hash="x", role="TEACHER", is_active=True)
     db.add_all([student, teacher])
     await db.flush()
     subject = Subject(name=f"FbSub {suffix}", owner_id=teacher.id)
@@ -589,9 +577,7 @@ async def _seed_feedback(db: AsyncSession, suffix: str, *, pref_enabled: bool | 
     )
     db.add(fr)
     await db.flush()
-    token = FeedbackToken(
-        feedback_request_id=fr.id, student_id=student.id, token=f"tok-{suffix}"
-    )
+    token = FeedbackToken(feedback_request_id=fr.id, student_id=student.id, token=f"tok-{suffix}")
     db.add(token)
     await db.flush()
     if pref_enabled is not None:
@@ -670,9 +656,7 @@ async def test_feedback_request_unknown_token_noops(
 
 
 @pytest.mark.asyncio
-async def test_new_submission_event_is_noop(
-    db_session: AsyncSession, monkeypatch
-) -> None:
+async def test_new_submission_event_is_noop(db_session: AsyncSession, monkeypatch) -> None:
     """The deprecated NEW_SUBMISSION handler dispatches harmlessly to FINISHED."""
     message = OutboxMessage(
         event_type=OutboxEventType.NEW_SUBMISSION,
@@ -831,9 +815,7 @@ async def test_check_test_failed(
     monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
     _patch_run_check(
         monkeypatch,
-        check_core.CheckOutcome(
-            "failed", 1, 2, [{"name": "t1", "passed": False}]
-        ),
+        check_core.CheckOutcome("failed", 1, 2, [{"name": "t1", "passed": False}]),
     )
 
     message = OutboxMessage(
@@ -874,9 +856,7 @@ async def test_check_test_failed_notifies_student_in_app(
 
     assert message.state == OutboxMessageState.FINISHED
     notif = (
-        await db_session.execute(
-            select(Notification).where(Notification.user_id == user.id)
-        )
+        await db_session.execute(select(Notification).where(Notification.user_id == user.id))
     ).scalar_one()
     assert "didn't pass" in notif.title or "pass" in notif.body.lower()
 
@@ -937,9 +917,7 @@ async def test_check_passed_tests_only_notifies_student_in_app(
 
     assert message.state == OutboxMessageState.FINISHED
     notif = (
-        await db_session.execute(
-            select(Notification).where(Notification.user_id == user.id)
-        )
+        await db_session.execute(select(Notification).where(Notification.user_id == user.id))
     ).scalar_one()
     assert "passed" in notif.title or "passed" in notif.body.lower()
 
@@ -975,12 +953,16 @@ async def test_check_passed_tests_then_ai_enqueues_ai_review(
     assert sub.status == SubmissionStatus.AWAITING_AI_REVIEW
     # A RUN_AI_REVIEW outbox message was enqueued for this submission.
     ai_msgs = (
-        await db_session.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.event_type == OutboxEventType.RUN_AI_REVIEW
+        (
+            await db_session.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.RUN_AI_REVIEW
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert any(m.payload.get("submission_id") == sub.id for m in ai_msgs)
     # Not final yet — no in-app notification at this intermediate step.
     notif_count = await db_session.scalar(
@@ -1003,9 +985,7 @@ async def test_check_no_plugin_config_records_validation_failed(
     submission converges on VALIDATION_FAILED with a teacher-facing reason and
     the message finishes.
     """
-    sub = await _seed_check_submission(
-        db_session, "nocfg", saved_as="nocfg.zip", with_config=False
-    )
+    sub = await _seed_check_submission(db_session, "nocfg", saved_as="nocfg.zip", with_config=False)
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
 
@@ -1120,12 +1100,16 @@ async def test_check_passed_tests_then_ai_then_teacher_enqueues_ai_with_next_ste
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.AWAITING_AI_REVIEW
     ai_msgs = (
-        await db_session.execute(
-            select(OutboxMessage).where(
-                OutboxMessage.event_type == OutboxEventType.RUN_AI_REVIEW
+        (
+            await db_session.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.RUN_AI_REVIEW
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     mine = [m for m in ai_msgs if m.payload.get("submission_id") == sub.id]
     assert mine and mine[0].payload.get("next_step") == "teacher"
 

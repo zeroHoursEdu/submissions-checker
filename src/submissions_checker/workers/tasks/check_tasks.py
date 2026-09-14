@@ -77,7 +77,9 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     if submission.plugin_config_id is None:
         config_record = await _fetch_latest_config(db, subject.id)
         if config_record is None:
-            _fail_validation(submission, "No plugin configuration found for this subject. Contact your teacher.")
+            _fail_validation(
+                submission, "No plugin configuration found for this subject. Contact your teacher."
+            )
             return
         submission.plugin_config_id = config_record.id
     else:
@@ -176,9 +178,10 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         if not outcome.passed:
             transition(submission, "test_failed")
             await _notify_student(
-                db, student_assignment.student_id,
+                db,
+                student_assignment.student_id,
                 title=f"{subjects_assignment.title}: didn't pass",
-                body=f"Your submission for \"{subjects_assignment.title}\" did not pass the automated checks.",
+                body=f'Your submission for "{subjects_assignment.title}" did not pass the automated checks.',
                 link=f"/portal/subjects/{subject.id}/assignments/{subjects_assignment.id}",
             )
             return
@@ -186,7 +189,9 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         await _advance_after_tests(db, submission, review_mode)
 
 
-async def _notify_student(db: AsyncSession, student_id: int, title: str, body: str, link: str) -> None:
+async def _notify_student(
+    db: AsyncSession, student_id: int, title: str, body: str, link: str
+) -> None:
     """Push an in-app notification for a graded submission. No-op if the student
     has no user account (shouldn't happen in practice, but never worth crashing
     the check task over)."""
@@ -242,9 +247,7 @@ def _accept_without_checks(submission: Submission, review_mode: str) -> None:
             _fail_validation(submission, f"Could not open submitted ZIP: {exc}")
             return
         except UnsafeArchiveError as exc:
-            logger.error(
-                "check_task_unsafe_archive", submission_id=submission.id, error=str(exc)
-            )
+            logger.error("check_task_unsafe_archive", submission_id=submission.id, error=str(exc))
             _fail_validation(submission, f"Submitted ZIP archive is unsafe: {exc}")
             return
 
@@ -252,36 +255,40 @@ def _accept_without_checks(submission: Submission, review_mode: str) -> None:
     transition(submission, "start_validation")
     transition(submission, "validation_passed")
     transition(submission, "test_passed_quiz")
-    logger.info(
-        "check_task_skipped_for_quiz", submission_id=submission.id, review_mode=review_mode
-    )
+    logger.info("check_task_skipped_for_quiz", submission_id=submission.id, review_mode=review_mode)
 
 
 async def _advance_after_tests(db: AsyncSession, submission: Submission, review_mode: str) -> None:
     if review_mode == "tests_then_ai":
         transition(submission, "test_passed_ai")
-        db.add(OutboxMessage(
-            event_type=OutboxEventType.RUN_AI_REVIEW,
-            state=OutboxMessageState.PENDING,
-            payload={"submission_id": submission.id},
-        ))
+        db.add(
+            OutboxMessage(
+                event_type=OutboxEventType.RUN_AI_REVIEW,
+                state=OutboxMessageState.PENDING,
+                payload={"submission_id": submission.id},
+            )
+        )
     elif review_mode == "tests_then_teacher":
         transition(submission, "test_passed_teacher")
         await enqueue_teacher_review_notification(db, submission.id)
     elif review_mode in ("tests_then_ai_then_teacher", "tests_then_ai_teacher"):
         transition(submission, "test_passed_ai")
-        db.add(OutboxMessage(
-            event_type=OutboxEventType.RUN_AI_REVIEW,
-            state=OutboxMessageState.PENDING,
-            payload={"submission_id": submission.id, "next_step": "teacher"},
-        ))
+        db.add(
+            OutboxMessage(
+                event_type=OutboxEventType.RUN_AI_REVIEW,
+                state=OutboxMessageState.PENDING,
+                payload={"submission_id": submission.id, "next_step": "teacher"},
+            )
+        )
     elif review_mode == "tests_then_ai_then_quiz":
         transition(submission, "test_passed_ai")
-        db.add(OutboxMessage(
-            event_type=OutboxEventType.RUN_AI_REVIEW,
-            state=OutboxMessageState.PENDING,
-            payload={"submission_id": submission.id, "next_step": "quiz"},
-        ))
+        db.add(
+            OutboxMessage(
+                event_type=OutboxEventType.RUN_AI_REVIEW,
+                state=OutboxMessageState.PENDING,
+                payload={"submission_id": submission.id, "next_step": "quiz"},
+            )
+        )
     elif review_mode == "tests_then_quiz":
         transition(submission, "test_passed_quiz")
     else:
@@ -291,8 +298,9 @@ async def _advance_after_tests(db: AsyncSession, submission: Submission, review_
         sa = submission.students_assignment
         subjects_assignment = sa.subjects_assignment
         await _notify_student(
-            db, sa.student_id,
+            db,
+            sa.student_id,
             title=f"{subjects_assignment.title}: passed",
-            body=f"Your submission for \"{subjects_assignment.title}\" passed the automated checks.",
+            body=f'Your submission for "{subjects_assignment.title}" passed the automated checks.',
             link=f"/portal/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}",
         )

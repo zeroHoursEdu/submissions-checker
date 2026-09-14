@@ -32,7 +32,8 @@ def test_get_engine_creates_once_and_caches(monkeypatch) -> None:
     ctor = MagicMock(return_value=created)
     monkeypatch.setattr(db_module, "create_async_engine", ctor)
     monkeypatch.setattr(
-        db_module, "get_settings",
+        db_module,
+        "get_settings",
         lambda: MagicMock(
             database_url="postgresql+asyncpg://x",
             debug=False,
@@ -77,9 +78,7 @@ async def test_get_db_commits_and_closes_on_success(monkeypatch) -> None:
     cm = AsyncMock()
     cm.__aenter__.return_value = session
     cm.__aexit__.return_value = False
-    monkeypatch.setattr(
-        db_module, "get_session_factory", lambda: MagicMock(return_value=cm)
-    )
+    monkeypatch.setattr(db_module, "get_session_factory", lambda: MagicMock(return_value=cm))
 
     agen = db_module.get_db()
     yielded = await agen.__anext__()
@@ -98,9 +97,7 @@ async def test_get_db_rolls_back_and_reraises_on_exception(monkeypatch) -> None:
     cm = AsyncMock()
     cm.__aenter__.return_value = session
     cm.__aexit__.return_value = False
-    monkeypatch.setattr(
-        db_module, "get_session_factory", lambda: MagicMock(return_value=cm)
-    )
+    monkeypatch.setattr(db_module, "get_session_factory", lambda: MagicMock(return_value=cm))
 
     agen = db_module.get_db()
     await agen.__anext__()
@@ -115,9 +112,7 @@ async def test_get_db_rolls_back_and_reraises_on_exception(monkeypatch) -> None:
 async def test_init_db_warms_singletons(monkeypatch) -> None:
     engine = MagicMock(name="engine")
     monkeypatch.setattr(db_module, "get_engine", MagicMock(return_value=engine))
-    monkeypatch.setattr(
-        db_module, "get_session_factory", MagicMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(db_module, "get_session_factory", MagicMock(return_value=MagicMock()))
 
     await db_module.init_db()
 

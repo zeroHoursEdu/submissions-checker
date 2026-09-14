@@ -85,9 +85,7 @@ def _upload(zip_bytes: bytes, filename: str = "config.zip") -> dict[str, Any]:
 
 async def _post(client: AsyncClient, zip_bytes: bytes, filename: str = "config.zip"):
     # follow_redirects=False so we can assert the 303 + Location directly.
-    return await client.post(
-        ENDPOINT, files=_upload(zip_bytes, filename), follow_redirects=False
-    )
+    return await client.post(ENDPOINT, files=_upload(zip_bytes, filename), follow_redirects=False)
 
 
 def _redirect_query(resp) -> dict[str, list[str]]:
@@ -97,9 +95,7 @@ def _redirect_query(resp) -> dict[str, list[str]]:
 
 async def _count_subjects(db: AsyncSession, code: str = "demo101") -> int:
     return (
-        await db.execute(
-            select(func.count()).select_from(Subject).where(Subject.code == code)
-        )
+        await db.execute(select(func.count()).select_from(Subject).where(Subject.code == code))
     ).scalar_one()
 
 
@@ -142,27 +138,27 @@ async def test_teacher_create_subject_full_side_effects(
     assert _redirect_query(resp)["apply_result"] == ["created"]
     assert urllib.parse.urlparse(resp.headers["location"]).path == "/teacher"
 
-    subject = (
-        await db.execute(select(Subject).where(Subject.code == "demo101"))
-    ).scalar_one()
+    subject = (await db.execute(select(Subject).where(Subject.code == "demo101"))).scalar_one()
     assert subject.name == "Demo 101"
     assert subject.description == "A demo subject"
     assert subject.owner_id == teacher.id  # acting teacher becomes the owner
     assert subject.status == SubjectStatus.ACTIVE
 
     assignments = (
-        await db.execute(
-            select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject.id)
+        (
+            await db.execute(
+                select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [a.code for a in assignments] == ["lab1"]
     assert assignments[0].title == "Lab 1"
 
     cfg = (
         await db.execute(
-            select(SubjectPluginConfig).where(
-                SubjectPluginConfig.subject_id == subject.id
-            )
+            select(SubjectPluginConfig).where(SubjectPluginConfig.subject_id == subject.id)
         )
     ).scalar_one()
     assert cfg.version == 1
@@ -195,30 +191,32 @@ async def test_reupload_by_same_owner_upserts_new_version(
 
     # Same subject row (upsert by code), not a new one.
     assert await _count_subjects(db) == 1
-    subject = (
-        await db.execute(select(Subject).where(Subject.code == "demo101"))
-    ).scalar_one()
+    subject = (await db.execute(select(Subject).where(Subject.code == "demo101"))).scalar_one()
     assert subject.id == subject_id
     assert subject.name == "Demo 101 (v2)"
 
     assignment_codes = sorted(
         (
             await db.execute(
-                select(SubjectsAssignment.code).where(
-                    SubjectsAssignment.subject_id == subject_id
-                )
+                select(SubjectsAssignment.code).where(SubjectsAssignment.subject_id == subject_id)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     assert assignment_codes == ["lab1", "lab2"]
 
     versions = (
-        await db.execute(
-            select(SubjectPluginConfig.version)
-            .where(SubjectPluginConfig.subject_id == subject_id)
-            .order_by(SubjectPluginConfig.version)
+        (
+            await db.execute(
+                select(SubjectPluginConfig.version)
+                .where(SubjectPluginConfig.subject_id == subject_id)
+                .order_by(SubjectPluginConfig.version)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert versions == [1, 2]
 
 
@@ -281,9 +279,7 @@ async def test_non_owner_reupload_is_mapped_to_apply_error_redirect(
 
     # Owner + name unchanged; no second subject created.
     assert await _count_subjects(db) == 1
-    subject = (
-        await db.execute(select(Subject).where(Subject.code == "demo101"))
-    ).scalar_one()
+    subject = (await db.execute(select(Subject).where(Subject.code == "demo101"))).scalar_one()
     assert subject.owner_id == owner.id
     assert subject.name == "Demo 101"
 
@@ -291,9 +287,7 @@ async def test_non_owner_reupload_is_mapped_to_apply_error_redirect(
 # ── 4. Invalid uploads ───────────────────────────────────────────────────────
 
 
-async def test_non_zip_upload_is_rejected(
-    teacher_client: AsyncClient, db: AsyncSession
-) -> None:
+async def test_non_zip_upload_is_rejected(teacher_client: AsyncClient, db: AsyncSession) -> None:
     resp = await _post(teacher_client, b"this is plainly not a zip", filename="config.zip")
 
     assert resp.status_code == 303
@@ -354,9 +348,7 @@ async def test_malformed_config_yml_is_rejected(
     assert await _count_subjects(db) == 0
 
 
-async def test_oversize_zip_is_rejected(
-    teacher_client: AsyncClient, db: AsyncSession
-) -> None:
+async def test_oversize_zip_is_rejected(teacher_client: AsyncClient, db: AsyncSession) -> None:
     # Just over the 50 MB limit enforced in ConfigApplyService.apply.
     big = b"\x00" * (50 * 1024 * 1024 + 1)
     resp = await _post(teacher_client, big)

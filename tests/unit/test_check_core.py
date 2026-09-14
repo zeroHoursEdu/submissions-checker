@@ -59,8 +59,19 @@ class FakeSandbox:
         self.scripted = scripted
         self.calls: list[dict] = []
 
-    async def run(self, *, image, tool, script_path, student_files_dir, plugin_dir,
-                  env=None, memory="256m", cpus=0.5, timeout=30):
+    async def run(
+        self,
+        *,
+        image,
+        tool,
+        script_path,
+        student_files_dir,
+        plugin_dir,
+        env=None,
+        memory="256m",
+        cpus=0.5,
+        timeout=30,
+    ):
         self.calls.append({"script": script_path, "image": image, "env": dict(env or {})})
         for suffix, result in self.scripted.items():
             if script_path.endswith(suffix):
@@ -116,18 +127,27 @@ def test_resolve_no_check_command() -> None:
 
 
 async def test_run_check_passes_above_threshold() -> None:
-    sandbox = FakeSandbox({
-        "validate.py": SandboxResult(0, "", "", {}),
-        "check_common.py": _result_json([
-            {"name": "c1", "passed": True, "points_earned": 40, "max_points": 40},
-        ]),
-        "check.py": _result_json([
-            {"name": "v1", "passed": True, "points_earned": 60, "max_points": 60},
-        ]),
-    })
+    sandbox = FakeSandbox(
+        {
+            "validate.py": SandboxResult(0, "", "", {}),
+            "check_common.py": _result_json(
+                [
+                    {"name": "c1", "passed": True, "points_earned": 40, "max_points": 40},
+                ]
+            ),
+            "check.py": _result_json(
+                [
+                    {"name": "v1", "passed": True, "points_earned": 60, "max_points": 60},
+                ]
+            ),
+        }
+    )
     plan = check_core.resolve_check_plan(COMMON_CONFIG, "lab1", "3")
     outcome = await check_core.run_check(
-        plan=plan, submission_dir=Path("/tmp/x"), plugin_dir=Path("/tmp/p"), sandbox=sandbox,
+        plan=plan,
+        submission_dir=Path("/tmp/x"),
+        plugin_dir=Path("/tmp/p"),
+        sandbox=sandbox,
     )
     assert outcome.passed
     assert outcome.score == 100
@@ -137,18 +157,27 @@ async def test_run_check_passes_above_threshold() -> None:
 
 
 async def test_run_check_fails_below_threshold() -> None:
-    sandbox = FakeSandbox({
-        "validate.py": SandboxResult(0, "", "", {}),
-        "check_common.py": _result_json([
-            {"name": "c1", "passed": False, "points_earned": 0, "max_points": 40},
-        ]),
-        "check.py": _result_json([
-            {"name": "v1", "passed": True, "points_earned": 30, "max_points": 60},
-        ]),
-    })
+    sandbox = FakeSandbox(
+        {
+            "validate.py": SandboxResult(0, "", "", {}),
+            "check_common.py": _result_json(
+                [
+                    {"name": "c1", "passed": False, "points_earned": 0, "max_points": 40},
+                ]
+            ),
+            "check.py": _result_json(
+                [
+                    {"name": "v1", "passed": True, "points_earned": 30, "max_points": 60},
+                ]
+            ),
+        }
+    )
     plan = check_core.resolve_check_plan(COMMON_CONFIG, "lab1", "3")
     outcome = await check_core.run_check(
-        plan=plan, submission_dir=Path("/tmp/x"), plugin_dir=Path("/tmp/p"), sandbox=sandbox,
+        plan=plan,
+        submission_dir=Path("/tmp/x"),
+        plugin_dir=Path("/tmp/p"),
+        sandbox=sandbox,
     )
     # 30/100 = 30% < 60% threshold
     assert not outcome.passed
@@ -157,13 +186,18 @@ async def test_run_check_fails_below_threshold() -> None:
 
 
 async def test_validation_failure_short_circuits() -> None:
-    sandbox = FakeSandbox({
-        "validate.py": SandboxResult(1, "", "bad submission", {}),
-        # check scripts must NOT run
-    })
+    sandbox = FakeSandbox(
+        {
+            "validate.py": SandboxResult(1, "", "bad submission", {}),
+            # check scripts must NOT run
+        }
+    )
     plan = check_core.resolve_check_plan(COMMON_CONFIG, "lab1", "3")
     outcome = await check_core.run_check(
-        plan=plan, submission_dir=Path("/tmp/x"), plugin_dir=Path("/tmp/p"), sandbox=sandbox,
+        plan=plan,
+        submission_dir=Path("/tmp/x"),
+        plugin_dir=Path("/tmp/p"),
+        sandbox=sandbox,
     )
     assert outcome.status == "validation_failed"
     assert outcome.reason == "bad submission"
@@ -171,31 +205,45 @@ async def test_validation_failure_short_circuits() -> None:
 
 
 async def test_validation_error_file_preferred() -> None:
-    sandbox = FakeSandbox({
-        "validate.py": SandboxResult(2, "", "stderr noise",
-                                     {"validate_error.txt": "solution.py missing"}),
-    })
+    sandbox = FakeSandbox(
+        {
+            "validate.py": SandboxResult(
+                2, "", "stderr noise", {"validate_error.txt": "solution.py missing"}
+            ),
+        }
+    )
     plan = check_core.resolve_check_plan(COMMON_CONFIG, "lab1", "3")
     outcome = await check_core.run_check(
-        plan=plan, submission_dir=Path("/tmp/x"), plugin_dir=Path("/tmp/p"), sandbox=sandbox,
+        plan=plan,
+        submission_dir=Path("/tmp/x"),
+        plugin_dir=Path("/tmp/p"),
+        sandbox=sandbox,
     )
     assert outcome.reason == "solution.py missing"
 
 
 async def test_technical_failure_raises() -> None:
-    sandbox = FakeSandbox({
-        "check.py": SandboxResult(137, "", "OOM killed", {}),
-    })
+    sandbox = FakeSandbox(
+        {
+            "check.py": SandboxResult(137, "", "OOM killed", {}),
+        }
+    )
     plan = check_core.resolve_check_plan(FLAT_CONFIG, "lab1", None)
     with pytest.raises(check_core.CheckExecutionError):
         await check_core.run_check(
-            plan=plan, submission_dir=Path("/tmp/x"), plugin_dir=Path("/tmp/p"), sandbox=sandbox,
+            plan=plan,
+            submission_dir=Path("/tmp/x"),
+            plugin_dir=Path("/tmp/p"),
+            sandbox=sandbox,
         )
 
 
 async def test_check_submission_reports_config_error() -> None:
     outcome = await check_core.check_submission(
-        config=COMMON_CONFIG, assignment_code="missing", variant=None,
-        submission_dir=Path("/tmp/x"), plugin_dir=Path("/tmp/p"),
+        config=COMMON_CONFIG,
+        assignment_code="missing",
+        variant=None,
+        submission_dir=Path("/tmp/x"),
+        plugin_dir=Path("/tmp/p"),
     )
     assert outcome.status == "config_error"

@@ -15,7 +15,10 @@ class FeedbackResponse(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     feedback_token_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("feedback_tokens.id", ondelete="CASCADE"), nullable=False, unique=True
+        BigInteger,
+        ForeignKey("feedback_tokens.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
     )
     subject_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False

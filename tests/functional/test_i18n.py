@@ -28,9 +28,7 @@ async def test_set_language_valid_sets_cookie_and_redirects(
     client: AsyncClient,
 ) -> None:
     code = _a_valid_code()
-    resp = await client.post(
-        "/set-language", data={"lang": code}, follow_redirects=False
-    )
+    resp = await client.post("/set-language", data={"lang": code}, follow_redirects=False)
     assert resp.status_code == 302
     assert resp.headers["location"] == "/"
 
@@ -69,9 +67,7 @@ async def test_set_language_rejects_open_redirect_referer(
 
 
 async def test_set_language_unknown_code_400_no_cookie(client: AsyncClient) -> None:
-    resp = await client.post(
-        "/set-language", data={"lang": "zz-not-real"}, follow_redirects=False
-    )
+    resp = await client.post("/set-language", data={"lang": "zz-not-real"}, follow_redirects=False)
     assert resp.status_code == 400
     assert "set-cookie" not in resp.headers
     assert client.cookies.get("lang") is None

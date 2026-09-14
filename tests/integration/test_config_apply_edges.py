@@ -163,7 +163,8 @@ async def test_reapply_changed_image_removes_old_s3_key(
     cfg["gridPicture"] = "old.png"
     await svc.apply(
         _make_zip(cfg, extra_files={"old.png": b"old"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
 
     storage.delete_file.reset_mock()
@@ -171,13 +172,12 @@ async def test_reapply_changed_image_removes_old_s3_key(
     cfg2["gridPicture"] = "new.png"
     await svc.apply(
         _make_zip(cfg2, extra_files={"new.png": b"new"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
 
     # Old image key scheduled for best-effort delete.
-    storage.delete_file.assert_awaited_once_with(
-        "subjects/edge101/images/old.png"
-    )
+    storage.delete_file.assert_awaited_once_with("subjects/edge101/images/old.png")
     subject = (
         await db_session.execute(select(Subject).where(Subject.code == "edge101"))
     ).scalar_one()
@@ -206,11 +206,15 @@ async def test_reapply_updates_all_assignment_field_types(
         {"filename": "spec1.pdf", "displayName": "Spec v1"}
     ]
     await svc.apply(
-        _make_zip(cfg, extra_files={
-            "old.png": b"old",
-            "assignments/lab1/spec1.pdf": b"%PDF v1",
-        }),
-        owner_id=owner.id, db=db_session,
+        _make_zip(
+            cfg,
+            extra_files={
+                "old.png": b"old",
+                "assignments/lab1/spec1.pdf": b"%PDF v1",
+            },
+        ),
+        owner_id=owner.id,
+        db=db_session,
     )
 
     # v2: change the grid image AND every lab1 field type, swap the content file.
@@ -228,11 +232,15 @@ async def test_reapply_updates_all_assignment_field_types(
     }
     storage.delete_file.reset_mock()
     result = await svc.apply(
-        _make_zip(cfg2, extra_files={
-            "new.png": b"new",
-            "assignments/lab1/spec2.pdf": b"%PDF v2",
-        }),
-        owner_id=owner.id, db=db_session,
+        _make_zip(
+            cfg2,
+            extra_files={
+                "new.png": b"new",
+                "assignments/lab1/spec2.pdf": b"%PDF v2",
+            },
+        ),
+        owner_id=owner.id,
+        db=db_session,
     )
     assert result.subject_action == "updated"
 
@@ -274,28 +282,27 @@ async def test_reapply_updates_all_assignment_field_types(
 # ── Removing a content file on re-apply removes its S3 key  248-253 ──────────
 
 
-async def test_reapply_removes_content_file_s3_key(db_session: AsyncSession, tmp_path: Path) -> None:
+async def test_reapply_removes_content_file_s3_key(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
     svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
-    cfg["assignments"]["lab1"]["contentFiles"] = [
-        {"filename": "doc.pdf", "displayName": "Doc"}
-    ]
+    cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "doc.pdf", "displayName": "Doc"}]
     await svc.apply(
         _make_zip(cfg, extra_files={"assignments/lab1/doc.pdf": b"%PDF"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
 
     storage.delete_file.reset_mock()
     cfg2 = _base_config()  # lab1 has no contentFiles now
     await svc.apply(_make_zip(cfg2), owner_id=owner.id, db=db_session)
 
-    storage.delete_file.assert_awaited_once_with(
-        "subjects/edge101/assignments/lab1/doc.pdf"
-    )
+    storage.delete_file.assert_awaited_once_with("subjects/edge101/assignments/lab1/doc.pdf")
     subject = (
         await db_session.execute(select(Subject).where(Subject.code == "edge101"))
     ).scalar_one()
@@ -321,9 +328,7 @@ async def test_reapply_existing_content_file_not_reuploaded(
     svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
 
     cfg = _base_config()
-    cfg["assignments"]["lab1"]["contentFiles"] = [
-        {"filename": "keep.pdf", "displayName": "Keep"}
-    ]
+    cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "keep.pdf", "displayName": "Keep"}]
     extras = {"assignments/lab1/keep.pdf": b"%PDF keep"}
     await svc.apply(_make_zip(cfg, extras), owner_id=owner.id, db=db_session)
     assert storage.upload_file.await_count == 1
@@ -334,9 +339,7 @@ async def test_reapply_existing_content_file_not_reuploaded(
     storage.upload_file.reset_mock()
     cfg2 = _base_config()
     cfg2["assignments"]["lab1"]["title"] = "Lab 1 Renamed"
-    cfg2["assignments"]["lab1"]["contentFiles"] = [
-        {"filename": "keep.pdf", "displayName": "Keep"}
-    ]
+    cfg2["assignments"]["lab1"]["contentFiles"] = [{"filename": "keep.pdf", "displayName": "Keep"}]
     await svc.apply(_make_zip(cfg2, extras), owner_id=owner.id, db=db_session)
     assert storage.upload_file.await_count == 0
 
@@ -354,14 +357,16 @@ async def test_reapply_changes_main_picture_url(db_session: AsyncSession, tmp_pa
     cfg["mainPicture"] = "main_old.png"
     await svc.apply(
         _make_zip(cfg, extra_files={"main_old.png": b"old"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
 
     cfg2 = _base_config()
     cfg2["mainPicture"] = "main_new.png"
     await svc.apply(
         _make_zip(cfg2, extra_files={"main_new.png": b"new"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
 
     subject = (
@@ -384,7 +389,8 @@ async def test_s3_delete_failure_is_swallowed(db_session: AsyncSession, tmp_path
     cfg["gridPicture"] = "g_old.png"
     await svc.apply(
         _make_zip(cfg, extra_files={"g_old.png": b"old"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
 
     # delete_file raises on cleanup — apply() must still succeed (logged warning).
@@ -393,7 +399,8 @@ async def test_s3_delete_failure_is_swallowed(db_session: AsyncSession, tmp_path
     cfg2["gridPicture"] = "g_new.png"
     result = await svc.apply(
         _make_zip(cfg2, extra_files={"g_new.png": b"new"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
     # Despite the delete failure, the apply committed and reports updated.
     assert result.changed is True
@@ -408,7 +415,9 @@ async def test_s3_delete_failure_is_swallowed(db_session: AsyncSession, tmp_path
 # ── Content-file entry without a filename is skipped  563-564 ────────────────
 
 
-async def test_content_file_without_filename_skipped(db_session: AsyncSession, tmp_path: Path) -> None:
+async def test_content_file_without_filename_skipped(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
@@ -423,7 +432,8 @@ async def test_content_file_without_filename_skipped(db_session: AsyncSession, t
     ]
     await svc.apply(
         _make_zip(cfg, extra_files={"assignments/lab1/ok.pdf": b"%PDF ok"}),
-        owner_id=owner.id, db=db_session,
+        owner_id=owner.id,
+        db=db_session,
     )
 
     subject = (
@@ -448,7 +458,9 @@ async def test_content_file_without_filename_skipped(db_session: AsyncSession, t
 # ── Malformed deadline parses to NULL  570-577 ───────────────────────────────
 
 
-async def test_apply_invalid_deadline_stored_as_null(db_session: AsyncSession, tmp_path: Path) -> None:
+async def test_apply_invalid_deadline_stored_as_null(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
     svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)

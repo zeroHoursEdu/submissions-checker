@@ -19,6 +19,4 @@ class Semester(Base):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
 
-    __table_args__ = (
-        Index("ix_semesters_dates", "start_date", "end_date"),
-    )
+    __table_args__ = (Index("ix_semesters_dates", "start_date", "end_date"),)

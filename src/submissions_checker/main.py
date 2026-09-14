@@ -10,7 +10,19 @@ from fastapi.staticfiles import StaticFiles
 
 from pathlib import Path
 
-from submissions_checker.api.routes import admin, analytics, auth, feedback, health, i18n, notifications, student_portal, student_quiz, teacher_portal, users
+from submissions_checker.api.routes import (
+    admin,
+    analytics,
+    auth,
+    feedback,
+    health,
+    i18n,
+    notifications,
+    student_portal,
+    student_quiz,
+    teacher_portal,
+    users,
+)
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.database import close_db, init_db
 from submissions_checker.core.i18n import load_vocabularies

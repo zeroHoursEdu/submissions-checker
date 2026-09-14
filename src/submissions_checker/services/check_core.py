@@ -251,9 +251,7 @@ def resolve_check_plan(
         )
 
     if not common_check and not variant_check:
-        return ConfigError(
-            "No check_command configured for this assignment. Contact your teacher."
-        )
+        return ConfigError("No check_command configured for this assignment. Contact your teacher.")
 
     return CheckPlan(
         image=sandbox_cfg.get("image", _DEFAULT_IMAGE),
@@ -316,7 +314,9 @@ async def run_check(
     all_tests: list[dict[str, Any]] = []
     for script in (plan.common_check, plan.variant_check):
         if script:
-            all_tests.extend(await _run_one_check(sb, plan, script, submission_dir, plugin_dir, env))
+            all_tests.extend(
+                await _run_one_check(sb, plan, script, submission_dir, plugin_dir, env)
+            )
 
     total_score = sum(t.get("points_earned", int(bool(t.get("passed")))) for t in all_tests)
     max_score_total = sum(t.get("max_points", 1) for t in all_tests)

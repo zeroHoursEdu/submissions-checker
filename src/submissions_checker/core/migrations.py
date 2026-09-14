@@ -40,6 +40,7 @@ def _alembic_config_path() -> Path:
         return cwd_ini
     return _PROJECT_ROOT / "alembic.ini"
 
+
 # Distinct from OUTBOX_PROCESSOR_LOCK_ID (7919) and TEACHER_DIGEST_LOCK_ID (7927);
 # sharing an id with either would deadlock startup against a running scheduler.
 MIGRATION_LOCK_ID = 7933

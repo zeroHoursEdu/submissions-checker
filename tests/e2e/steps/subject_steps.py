@@ -38,6 +38,7 @@ def ensure_subject_exists(page, app_url: str, e2e_context: dict, teacher_account
     if subject_id is None:
         # Need to log in and upload
         from tests.e2e.pages.login_page import LoginPage
+
         lp = LoginPage(page, app_url)
         lp.logout()
         lp.navigate()
@@ -76,6 +77,7 @@ def upload_subject_zip(page, app_url: str) -> None:
 def upload_invalid_zip(page, app_url: str) -> None:
     """Create a temp file that is not a valid ZIP and upload it."""
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
         tmp.write(b"not a real zip file content")
         tmp_path = tmp.name

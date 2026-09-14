@@ -57,8 +57,9 @@ class QuizPage:
     def submit_quiz(self) -> None:
         self.page.locator("#quiz-form button[type='submit']").click()
         self.page.wait_for_load_state("networkidle")
-        assert "/portal/quiz/" in self.page.url and "/result" in self.page.url, \
+        assert "/portal/quiz/" in self.page.url and "/result" in self.page.url, (
             f"Expected quiz result URL, got: {self.page.url}"
+        )
 
     def get_result_text(self) -> str:
         self.page.wait_for_load_state("networkidle")
@@ -80,11 +81,14 @@ class QuizPage:
         # UI shows Ukrainian "Не зараховано" or has red/amber styling
         assert (
             "не зараховано" in content.lower()
-            or "зараховано" not in content.lower() and "text-red-700" in content
+            or "зараховано" not in content.lower()
+            and "text-red-700" in content
             or "fail" in content.lower()
         ), f"Expected failed result, page content: {content[:300]}"
 
     def assert_retry_available(self) -> None:
         """Verify there's a retry/start again button on the result page."""
-        retry_btn = self.page.locator('a[href*="quiz"], button:has-text("Try"), a:has-text("Try"), a:has-text("Ще раз"), a[href*="assignments"]')
+        retry_btn = self.page.locator(
+            'a[href*="quiz"], button:has-text("Try"), a:has-text("Try"), a:has-text("Ще раз"), a[href*="assignments"]'
+        )
         expect(retry_btn.first).to_be_visible()

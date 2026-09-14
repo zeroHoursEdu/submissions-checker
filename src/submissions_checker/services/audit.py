@@ -19,11 +19,13 @@ async def audit(
     **detail: Any,
 ) -> None:
     """Append an audit log entry. Does not commit — caller owns the transaction."""
-    db.add(AuditLog(
-        actor_id=actor_id,
-        actor_username=actor_username,
-        action=action,
-        target_type=target_type,
-        target_id=target_id,
-        detail=detail,
-    ))
+    db.add(
+        AuditLog(
+            actor_id=actor_id,
+            actor_username=actor_username,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            detail=detail,
+        )
+    )

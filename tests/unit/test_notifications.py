@@ -18,6 +18,7 @@ from submissions_checker.services.notifications.dispatcher import (
 
 # ── templates ─────────────────────────────────────────────────────────────────
 
+
 def test_submission_reviewed_approve_omits_feedback() -> None:
     subject, body = templates.submission_reviewed_template(
         "Ada", "Lab 1", "approve", "looks great", "http://portal"
@@ -38,9 +39,7 @@ def test_submission_reviewed_reject_includes_feedback() -> None:
 
 
 def test_submission_reviewed_reject_without_reason_omits_line() -> None:
-    _, body = templates.submission_reviewed_template(
-        "Ada", "Lab 1", "reject", "", "http://portal"
-    )
+    _, body = templates.submission_reviewed_template("Ada", "Lab 1", "reject", "", "http://portal")
     assert "Feedback:" not in body
 
 
@@ -76,9 +75,7 @@ def test_quiz_result_failed_attempts_none_uses_used_message() -> None:
 
 
 def test_teacher_digest_singular_vs_plural() -> None:
-    subj1, _ = templates.teacher_digest_template(
-        "T", [("S", "A", "url")], "dash"
-    )
+    subj1, _ = templates.teacher_digest_template("T", [("S", "A", "url")], "dash")
     assert subj1.startswith("1 submission ")
     subj2, body2 = templates.teacher_digest_template(
         "T", [("S1", "A1", "u1"), ("S2", "A2", "u2")], "dash"
@@ -100,9 +97,7 @@ def test_deadline_reminder_mentions_subject_and_deadline() -> None:
 
 
 def test_new_submission_template_addresses_teacher() -> None:
-    subject, body = templates.new_submission_template(
-        "Prof", "Dee", "Lab 4", "http://review"
-    )
+    subject, body = templates.new_submission_template("Prof", "Dee", "Lab 4", "http://review")
     assert "Dee" in subject and "Lab 4" in subject
     assert "Prof" in body
     assert "http://review" in body
@@ -139,6 +134,7 @@ def test_feedback_request_template() -> None:
 
 # ── dispatcher fan-out ────────────────────────────────────────────────────────
 
+
 class _FakeChannel:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str, str]] = []
@@ -161,6 +157,7 @@ async def test_dispatcher_with_no_channels_is_noop() -> None:
 
 
 # ── build_dispatcher channel selection ────────────────────────────────────────
+
 
 class _Cfg:
     """Bare settings stand-in; only attributes set in kwargs exist."""

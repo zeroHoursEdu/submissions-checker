@@ -214,9 +214,7 @@ async def test_flush_threshold_before_window(
 
 
 @pytest.mark.asyncio
-async def test_flush_not_resent(
-    db_session: AsyncSession, test_settings, monkeypatch
-) -> None:
+async def test_flush_not_resent(db_session: AsyncSession, test_settings, monkeypatch) -> None:
     teacher, submission = await _seed(db_session, "once")
     await notification_tasks.enqueue_teacher_review_notification(db_session, submission.id)
     settings = test_settings.model_copy(update={"teacher_digest_window_seconds": 0})

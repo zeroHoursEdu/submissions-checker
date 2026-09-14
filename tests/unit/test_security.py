@@ -18,6 +18,7 @@ from submissions_checker.core.config import get_settings
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 
+
 def test_hash_password_verifies_correct_password() -> None:
     h = security.hash_password("hunter2")
     assert security.verify_password("hunter2", h) is True
@@ -58,6 +59,7 @@ def test_empty_password_round_trips() -> None:
 
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
+
 
 def test_create_and_decode_round_trips_claims() -> None:
     token = security.create_access_token(user_id=42, username="alice", role="TEACHER")

@@ -118,12 +118,13 @@ def _is_flagged(verdict: dict[str, Any], ai_review_cfg: dict[str, Any]) -> bool:
     ai_generated = verdict.get("ai_generated") or {}
     cheat_thr = float(ai_review_cfg.get("cheating_threshold", _DEFAULT_THRESHOLD))
     aigen_thr = float(ai_review_cfg.get("ai_generated_threshold", _DEFAULT_THRESHOLD))
-    cheat_hit = bool(cheating.get("is_cheating")) and float(
-        cheating.get("confidence", 0)
-    ) >= cheat_thr
-    aigen_hit = bool(ai_generated.get("is_ai_generated")) and float(
-        ai_generated.get("confidence", 0)
-    ) >= aigen_thr
+    cheat_hit = (
+        bool(cheating.get("is_cheating")) and float(cheating.get("confidence", 0)) >= cheat_thr
+    )
+    aigen_hit = (
+        bool(ai_generated.get("is_ai_generated"))
+        and float(ai_generated.get("confidence", 0)) >= aigen_thr
+    )
     return cheat_hit or aigen_hit
 
 
@@ -205,4 +206,6 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> N
         transition(submission, "ai_review_done_completed")
         await finalize_grade(db, submission)
 
-    logger.info("execute_ai_review_task_completed", submission_id=submission_id, next_step=next_step)
+    logger.info(
+        "execute_ai_review_task_completed", submission_id=submission_id, next_step=next_step
+    )

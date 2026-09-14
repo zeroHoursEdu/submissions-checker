@@ -120,9 +120,7 @@ async def test_query_pending_outbox_messages(db_session: AsyncSession) -> None:
     await db_session.commit()
 
     result = await db_session.execute(
-        select(OutboxMessage).where(
-            OutboxMessage.state == OutboxMessageState.PENDING
-        )
+        select(OutboxMessage).where(OutboxMessage.state == OutboxMessageState.PENDING)
     )
     messages = result.scalars().all()
 

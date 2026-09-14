@@ -54,6 +54,7 @@ def ensure_student_enrolled(page, app_url: str, e2e_context: dict, teacher_accou
     if not e2e_context.get("student_username"):
         # Need to enroll — log in as teacher first so auth cookies are present
         from tests.e2e.pages.login_page import LoginPage
+
         lp = LoginPage(page, app_url)
         lp.navigate()
         lp.login(teacher_account["username"], teacher_account["password"])
@@ -68,11 +69,14 @@ def ensure_student_enrolled(page, app_url: str, e2e_context: dict, teacher_accou
 
 
 @given(parsers.parse('the student "{email}" has been enrolled via CSV'))
-def student_enrolled_via_csv(email: str, page, app_url: str, e2e_context: dict, teacher_account: dict) -> None:
+def student_enrolled_via_csv(
+    email: str, page, app_url: str, e2e_context: dict, teacher_account: dict
+) -> None:
     subject_id = e2e_context.get("subject_id")
     assert subject_id, "subject_id not in context"
     if not get_student_credentials_from_outbox(email):
         from tests.e2e.pages.login_page import LoginPage
+
         lp = LoginPage(page, app_url)
         lp.navigate()
         lp.login(teacher_account["username"], teacher_account["password"])

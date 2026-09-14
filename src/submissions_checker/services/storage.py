@@ -41,7 +41,9 @@ class StorageService:
         logger.info("file_uploaded", key=key, url=url)
         return url
 
-    async def upload_bytes(self, data: bytes, key: str, content_type: str = "application/octet-stream") -> str:
+    async def upload_bytes(
+        self, data: bytes, key: str, content_type: str = "application/octet-stream"
+    ) -> str:
         """Upload an in-memory byte payload to S3 and return the URL used to address it.
 
         Written without a public ACL — see ``upload_file``.

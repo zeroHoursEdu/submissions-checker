@@ -75,9 +75,7 @@ async def test_garbage_token_is_rejected(client: AsyncClient, path: str) -> None
     assert resp.status_code == 401
 
 
-async def test_token_signed_with_wrong_secret_is_rejected(
-    client: AsyncClient, teacher
-) -> None:
+async def test_token_signed_with_wrong_secret_is_rejected(client: AsyncClient, teacher) -> None:
     forged = jwt.encode(
         {
             "sub": str(teacher.id),

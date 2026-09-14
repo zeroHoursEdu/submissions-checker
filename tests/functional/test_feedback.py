@@ -128,25 +128,25 @@ async def test_get_form_already_used_token_shows_already_submitted(
 # ── POST submission + single-use consumption ──────────────────────────────────
 
 
-async def test_post_records_response_and_consumes_token(
-    client: AsyncClient, teacher, db
-) -> None:
+async def test_post_records_response_and_consumes_token(client: AsyncClient, teacher, db) -> None:
     feedback_token = await _make_feedback_token(db, teacher_id=teacher.id)
 
-    resp = await client.post(
-        "/feedback/tok-valid-123", data=_VALID_FORM, follow_redirects=False
-    )
+    resp = await client.post("/feedback/tok-valid-123", data=_VALID_FORM, follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/feedback/tok-valid-123/thanks"
 
     # Exactly one FeedbackResponse recorded, with the submitted values.
     responses = (
-        await db.execute(
-            select(FeedbackResponse).where(
-                FeedbackResponse.feedback_token_id == feedback_token.id
+        (
+            await db.execute(
+                select(FeedbackResponse).where(
+                    FeedbackResponse.feedback_token_id == feedback_token.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(responses) == 1
     assert responses[0].rating == 4
     assert responses[0].went_well == "lectures"
@@ -157,12 +157,8 @@ async def test_post_records_response_and_consumes_token(
     assert fresh.used_at is not None
 
 
-async def test_post_unknown_token_404_records_nothing(
-    client: AsyncClient, db
-) -> None:
-    resp = await client.post(
-        "/feedback/nope", data=_VALID_FORM, follow_redirects=False
-    )
+async def test_post_unknown_token_404_records_nothing(client: AsyncClient, db) -> None:
+    resp = await client.post("/feedback/nope", data=_VALID_FORM, follow_redirects=False)
     assert resp.status_code == 404
     count = (await db.execute(select(FeedbackResponse))).scalars().all()
     assert count == []
@@ -176,9 +172,7 @@ async def test_post_invalid_rating_rejected(client: AsyncClient, teacher, db) ->
     # No response stored and token NOT consumed.
     assert (await db.execute(select(FeedbackResponse))).scalars().all() == []
     fresh = (
-        await db.execute(
-            select(FeedbackToken).where(FeedbackToken.token == "tok-valid-123")
-        )
+        await db.execute(select(FeedbackToken).where(FeedbackToken.token == "tok-valid-123"))
     ).scalar_one()
     assert fresh.used_at is None
 
@@ -186,9 +180,7 @@ async def test_post_invalid_rating_rejected(client: AsyncClient, teacher, db) ->
 async def test_token_is_single_use(client: AsyncClient, teacher, db) -> None:
     feedback_token = await _make_feedback_token(db, teacher_id=teacher.id)
 
-    first = await client.post(
-        "/feedback/tok-valid-123", data=_VALID_FORM, follow_redirects=False
-    )
+    first = await client.post("/feedback/tok-valid-123", data=_VALID_FORM, follow_redirects=False)
     assert first.status_code == 303
 
     # Second submission with the same (now-consumed) token is refused: it returns
@@ -201,12 +193,16 @@ async def test_token_is_single_use(client: AsyncClient, teacher, db) -> None:
     assert second.status_code == 200
 
     responses = (
-        await db.execute(
-            select(FeedbackResponse).where(
-                FeedbackResponse.feedback_token_id == feedback_token.id
+        (
+            await db.execute(
+                select(FeedbackResponse).where(
+                    FeedbackResponse.feedback_token_id == feedback_token.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(responses) == 1
     assert "SHOULD NOT BE STORED" not in responses[0].went_well
 

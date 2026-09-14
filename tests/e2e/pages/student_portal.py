@@ -43,7 +43,9 @@ class StudentPortal:
         self.page.wait_for_url(f"{self.app_url}/portal/subjects/**/assignments/**")
 
     def get_submission_status_text(self) -> str:
-        status_el = self.page.locator('[data-status], .submission-status, text=PASSED, text=FAILED, text=PENDING').first
+        status_el = self.page.locator(
+            "[data-status], .submission-status, text=PASSED, text=FAILED, text=PENDING"
+        ).first
         return (status_el.text_content() or "").strip().upper()
 
     def assert_submission_pending(self) -> None:
