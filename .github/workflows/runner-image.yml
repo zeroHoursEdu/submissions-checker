@@ -21,9 +21,6 @@ on:
       - "pyproject.toml"
       - "docker/runner/Dockerfile"
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/submissions-checker-runner
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,7 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Derive version
+      # A GitHub owner may contain capitals; an OCI repository name may not, and the
+      # build fails outright on an uppercase tag. Lowercase it here rather than
+      # hardcoding the owner, so a fork stays correct.
+      - name: Derive image name and version
         id: ver
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/runner-v* ]]; then
@@ -41,15 +41,20 @@ jobs:
           else
             V="0.0.0-${GITHUB_SHA::8}"
           fi
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/submissions-checker-runner" >> "$GITHUB_OUTPUT"
           echo "version=${V}" >> "$GITHUB_OUTPUT"
           echo "major=${V%%.*}" >> "$GITHUB_OUTPUT"
 
       - name: Build image
+        env:
+          IMAGE: ${{ steps.ver.outputs.image }}
         run: |
           docker build -f docker/runner/Dockerfile \
             -t "${IMAGE}:${{ steps.ver.outputs.version }}" .
 
       - name: Smoke test (CLI is wired)
+        env:
+          IMAGE: ${{ steps.ver.outputs.image }}
         run: |
           docker run --rm "${IMAGE}:${{ steps.ver.outputs.version }}" --help
 
@@ -63,6 +68,8 @@ jobs:
 
       - name: Push tags
         if: startsWith(github.ref, 'refs/tags/runner-v')
+        env:
+          IMAGE: ${{ steps.ver.outputs.image }}
         run: |
           docker tag "${IMAGE}:${{ steps.ver.outputs.version }}" "${IMAGE}:${{ steps.ver.outputs.major }}"
           docker push "${IMAGE}:${{ steps.ver.outputs.version }}"

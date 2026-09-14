@@ -14,6 +14,7 @@ needs no inbound access beyond ports 80 and 443.
 ## Contents
 
 - [How a deploy works](#how-a-deploy-works)
+- [Releases and deployment tracking](#releases-and-deployment-tracking)
 - [First-time host setup](#first-time-host-setup)
 - [The migration rule](#the-migration-rule-read-this-before-writing-one)
 - [Rollback](#rollback)
@@ -37,6 +38,10 @@ needs no inbound access beyond ports 80 and 443.
 5. It replaces the app replicas **one at a time**. While replica 1 is restarting,
    Caddy routes everything to replica 2.
 
+6. CI opens a GitHub Deployment and polls `https://<your domain>/version` until the
+   host reports the new commit, then marks the deployment successful. If the host
+   never reports it, the deployment goes red — see below.
+
 Two independent mechanisms keep requests from being dropped during step 5:
 
 - **Draining.** `stop_grace_period: 60s` gives uvicorn time to finish requests already
@@ -50,6 +55,51 @@ Two independent mechanisms keep requests from being dropped during step 5:
 
 The first replacement replica applies any pending migrations during startup, guarded by
 a PostgreSQL advisory lock so concurrent boots serialize. The rest find nothing to do.
+
+---
+
+## Releases and deployment tracking
+
+**Releases tab.** Every published build gets a release tagged `app-v<date>-<run>`,
+listing the commits it contains, the image digest, and the exact `APP_IMAGE_TAG`
+to set to roll back to it. Pick a rollback target by reading the releases rather
+than by digging through workflow logs.
+
+The tag prefix is `app-v`, deliberately distinct from the `runner-v` tags that
+publish the subject runner image — those trigger a different workflow.
+
+**Deployments tab.** Publication is not deployment. The host pulls on its own
+schedule, and a stalled updater is a failure mode this project has already hit
+once (Watchtower silently stopped deploying when its Docker API version went
+unpinned). So CI does not call a build deployed just because it was pushed.
+
+Instead the app reports the commit it was built from at `GET /version`:
+
+```json
+{"revision": "24681d36..."}
+```
+
+The revision is baked into the image at build time and cannot be overridden by
+the host's `.env` — a value the host could set would tell you nothing. CI polls
+that endpoint after publishing and requires several consecutive responses to
+carry the new revision, because mid-rollout one replica still answers with the
+old one. Only then does the deployment turn green.
+
+If the host never picks the build up, the deployment turns **red** while the
+build itself stays green, which is the honest split: the image is fine, the
+rollout did not happen. Start with:
+
+```bash
+docker compose -f docker-compose.prod.yml logs watchtower
+```
+
+**Enabling it.** Set a repository variable (not a secret — it is a public URL):
+
+> Settings → Secrets and variables → Actions → Variables → New repository variable
+> `PRODUCTION_URL` = `https://submissions.example.edu`
+
+Without it the tracking job skips and publishing is unaffected, which is what you
+want before the host exists.
 
 ---
 

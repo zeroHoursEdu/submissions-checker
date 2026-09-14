@@ -1,4 +1,6 @@
-"""Health check endpoints."""
+"""Health and build-identity endpoints."""
+
+import os
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import text
@@ -8,6 +10,11 @@ from submissions_checker.core.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["health"])
+
+# Baked into the production image at build time (see docker/app/Dockerfile) and
+# deliberately not a setting: it must describe the code in the image, so it must
+# not be overridable by the host's environment file.
+APP_REVISION = os.environ.get("APP_REVISION") or "unknown"
 
 
 @router.get("/health")
@@ -19,6 +26,21 @@ async def health_check() -> dict[str, str]:
         Simple status indicating the service is running
     """
     return {"status": "healthy"}
+
+
+@router.get("/version")
+async def version() -> dict[str, str]:
+    """Report the commit this image was built from.
+
+    Deployment here is pull-initiated: CI publishes an image and the host's
+    updater decides when to take it. This endpoint is how anything outside the
+    host can tell whether a published build actually arrived, which is what the
+    release workflow polls before calling a deployment successful.
+
+    Unauthenticated on purpose — it reveals only a commit hash of a public
+    repository, and it has to be readable by CI, which holds no host credentials.
+    """
+    return {"revision": APP_REVISION}
 
 
 @router.get("/health/ready")

@@ -77,8 +77,15 @@ RUN uv pip install --python /usr/local/bin/python --prefix /install --no-cache .
 # ---------------------------------------------------------------------------
 FROM python:3.12-slim AS prod
 
+# The commit this image was built from, surfaced at /version. Baked in rather than
+# passed at run time so it always describes the code actually inside the image:
+# the release workflow polls that endpoint to decide whether a published build
+# reached the host, and a value the host could set would make that meaningless.
+ARG APP_REVISION=unknown
+
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    APP_REVISION=${APP_REVISION}
 
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=builder /install /usr/local

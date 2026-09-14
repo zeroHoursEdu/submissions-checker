@@ -46,6 +46,20 @@ async def test_health_is_open(client: AsyncClient) -> None:
     assert resp.json() == {"status": "healthy"}
 
 
+async def test_version_is_open(client: AsyncClient) -> None:
+    """CI polls /version with no credentials to confirm a build reached the host."""
+    resp = await client.get("/version")
+    assert resp.status_code == 200
+    assert set(resp.json()) == {"revision"}
+
+
+async def test_version_reports_unknown_when_not_built_in(client: AsyncClient) -> None:
+    """A locally built image carries no revision and must say so, not fail."""
+    from submissions_checker.api.routes import health
+
+    assert health.APP_REVISION == "unknown"
+
+
 async def test_readiness_uses_overridden_db(client: AsyncClient) -> None:
     """Confirms the get_db override is wired: readiness hits the test DB and passes."""
     resp = await client.get("/health/ready")

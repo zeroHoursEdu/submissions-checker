@@ -63,6 +63,15 @@
 - [x] 6.5 Record the memory budget with per-service figures so it can be re-checked whenever a service is added
 - [x] 6.6 Link the deployment guide from `README.md` and delete `railway.json`
 
+## 6b. Release visibility and deployment tracking
+
+- [x] 6b.1 Bake the source revision into the production image at build time and expose it on an unauthenticated version endpoint
+- [x] 6b.2 Create a GitHub Release for each published build, tagged immutably, naming the rollback image tag and digest
+- [x] 6b.3 Open a GitHub Deployment for each published build and resolve it by polling the production host's version endpoint
+- [x] 6b.4 Mark the deployment failed when the host does not report the published revision within the window
+- [x] 6b.5 Skip deployment tracking cleanly when no production host is configured
+- [x] 6b.6 Document the release and deployment tabs, and the repository variable that enables tracking
+
 ## 7. Verification on the target host
 
 - [ ] 7.1 Bring the stack up on the A1 host; confirm the certificate is issued and login works over HTTPS

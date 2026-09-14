@@ -8,6 +8,10 @@
 #   :main         moves with the default branch; this is what Watchtower follows
 #   :sha-<short>  immutable; this is what you pin to when rolling back
 #
+# Each published build also gets a GitHub Release (what shipped, and what tag to
+# pin to undo it) and a GitHub Deployment that is only marked successful once the
+# production host is observed serving the new revision — see the `deploy` job.
+#
 # The quality gates are what make unattended deployment safe: `main` only ever advances
 # to a build that passed lint, types and the full test suite.
 name: app-image
@@ -61,10 +65,17 @@ jobs:
     # Publication is gated: a failing build never becomes the image production pulls.
     needs: quality
     permissions:
-      contents: read
+      contents: write   # create the release tag
       packages: write
+    outputs:
+      image: ${{ steps.tags.outputs.image }}
+      sha: ${{ steps.tags.outputs.sha }}
+      revision: ${{ steps.tags.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Release notes are generated from the commit range, which needs history.
+          fetch-depth: 0
 
       # A GitHub owner may contain capitals; an OCI repository name may not. Lowercasing
       # here rather than hardcoding the owner keeps the workflow correct in a fork.
@@ -74,6 +85,8 @@ jobs:
           {
             echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/submissions-checker"
             echo "sha=sha-$(git rev-parse --short HEAD)"
+            echo "revision=$(git rev-parse HEAD)"
+            echo "release_tag=app-v$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}"
           } >> "$GITHUB_OUTPUT"
 
       # The production host is ARM (Oracle A1.Flex); contributors are predominantly
@@ -93,11 +106,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/app/Dockerfile
           target: prod
+          build-args: |
+            APP_REVISION=${{ steps.tags.outputs.revision }}
           platforms: linux/amd64,linux/arm64
           # Pull requests validate the build without publishing anything.
           push: ${{ github.event_name == 'push' }}
@@ -116,3 +132,140 @@ jobs:
           echo "Published:"
           echo "  ${IMAGE}:main            (Watchtower follows this)"
           echo "  ${IMAGE}:${{ steps.tags.outputs.sha }}   (pin this to roll back)"
+
+      # A release per published build, so what shipped is legible from the repo
+      # rather than only from workflow logs, and so a rollback target can be
+      # chosen by reading what each build contained.
+      - name: Create release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tags.outputs.release_tag }}
+          name: ${{ steps.tags.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          body: |
+            Image: `${{ steps.tags.outputs.image }}:${{ steps.tags.outputs.sha }}`
+            Digest: `${{ steps.build.outputs.digest }}`
+
+            To roll back to this build, on the production host:
+
+            ```bash
+            docker compose -f docker-compose.prod.yml stop watchtower
+            sed -i 's/^APP_IMAGE_TAG=.*/APP_IMAGE_TAG=${{ steps.tags.outputs.sha }}/' .env
+            docker compose -f docker-compose.prod.yml up -d --force-recreate app
+            ```
+
+            Rolling the image back does not roll the schema back. See
+            `docs/deployment.md` for why that is safe and when it stops being.
+
+
+  # Publication is not deployment. The host pulls on its own schedule, and a
+  # stalled updater is a known failure mode of that design (an unpinned Docker API
+  # version silently stopped deploys once already). So the deployment is only
+  # resolved by observing the host actually serving the new revision.
+  #
+  # Enable by setting the repository variable PRODUCTION_URL, e.g.
+  # https://submissions.example.edu — without it this job skips and publication
+  # is unaffected.
+  deploy:
+    name: Track rollout to production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push'
+    permissions:
+      deployments: write
+    steps:
+      - name: Check whether a production host is configured
+        id: cfg
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "${PRODUCTION_URL}" ]; then
+            echo "No PRODUCTION_URL repository variable set; skipping rollout tracking."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open deployment
+        if: steps.cfg.outputs.configured == 'true'
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              description: 'Awaiting pull by the production host',
+              auto_merge: false,
+              required_contexts: [],
+            });
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: 'in_progress',
+              environment_url: process.env.PRODUCTION_URL,
+              description: 'Published; waiting for the host to pull it',
+            });
+            core.setOutput('id', deployment.data.id);
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+
+      # Watchtower polls every WATCHTOWER_INTERVAL (60s by default) and then
+      # replaces replicas one at a time with a 60s drain each, so a normal
+      # rollout lands well inside this window.
+      - name: Wait for the host to serve the new revision
+        if: steps.cfg.outputs.configured == 'true'
+        id: wait
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          EXPECTED: ${{ needs.build.outputs.revision }}
+          TIMEOUT_SECONDS: "900"
+        run: |
+          deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            # Both replicas must report the new revision: while a rollout is in
+            # flight one of them still answers with the old one.
+            seen=""
+            ok=true
+            for _ in 1 2 3 4; do
+              got="$(curl -fsS --max-time 10 "${PRODUCTION_URL%/}/version" \
+                     | python3 -c 'import json,sys; print(json.load(sys.stdin)["revision"])' 2>/dev/null || echo "")"
+              seen="${seen} ${got}"
+              [ "$got" = "$EXPECTED" ] || ok=false
+            done
+            if [ "$ok" = true ]; then
+              echo "Host is serving ${EXPECTED}."
+              exit 0
+            fi
+            echo "waiting — saw:${seen}"
+            sleep 30
+          done
+          echo "::error::Host did not report revision ${EXPECTED} within ${TIMEOUT_SECONDS}s."
+          echo "The image was published successfully; the host did not deploy it."
+          echo "Check Watchtower on the host: docker compose -f docker-compose.prod.yml logs watchtower"
+          exit 1
+
+      - name: Close deployment
+        if: always() && steps.cfg.outputs.configured == 'true' && steps.deployment.outputs.id != ''
+        uses: actions/github-script@v7
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          OUTCOME: ${{ steps.wait.outcome }}
+        with:
+          script: |
+            const ok = process.env.OUTCOME === 'success';
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.id }},
+              state: ok ? 'success' : 'failure',
+              environment_url: process.env.PRODUCTION_URL,
+              description: ok
+                ? 'Host is serving this revision'
+                : 'Published, but the host did not pick it up in time',
+            });
