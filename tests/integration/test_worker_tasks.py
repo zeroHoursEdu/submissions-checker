@@ -1,12 +1,12 @@
 """Integration tests for outbox worker task handlers.
 
 Covers the four task modules dispatched by the outbox processor:
-  - review_tasks.execute_ai_review_task   (AI / OpenAI path)
+  - review_tasks.execute_ai_review_task   (AI review path)
   - notification_tasks.*                   (email dispatcher + preference gating)
   - send_credentials_tasks.*               (credentials email)
   - check_tasks.execute_check_task         (docker check + state transitions)
 
-All external I/O is mocked: the OpenAI client, the notification dispatcher, and
+All external I/O is mocked: the AI provider, the notification dispatcher, and
 the docker/check-core execution. Tests use the real testcontainer Postgres via
 the `db_session` fixture and drive the real outbox processor end-to-end so the
 dispatch routing table is exercised, mirroring tests/integration/test_workers.py
@@ -19,7 +19,6 @@ import zipfile
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
@@ -48,6 +47,7 @@ from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.db.models.user import User
 from submissions_checker.services import check_core
+from submissions_checker.services.ai.provider import AIProviderError
 from submissions_checker.workers.scheduled import outbox_processor
 from submissions_checker.workers.tasks import (
     check_tasks,
@@ -175,38 +175,44 @@ async def _make_student_user(db: AsyncSession, student: Student) -> User:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class _FakeChoice:
-    def __init__(self, content: str | None, finish_reason: str = "stop") -> None:
-        self.message = SimpleNamespace(content=content)
-        self.finish_reason = finish_reason
+def _verdict(**overrides) -> dict:
+    """A structurally valid verdict, the shape `_validate_verdict` insists on."""
+    base = {
+        "cheating": {"is_cheating": False, "confidence": 0.0, "reason": "none"},
+        "ai_generated": {"is_ai_generated": False, "confidence": 0.0, "reason": "none"},
+        "code_mark": 8,
+        "comment": "Looks good",
+    }
+    base.update(overrides)
+    return base
 
 
-class _FakeCompletion:
-    def __init__(self, content: str | None, finish_reason: str = "stop") -> None:
-        self.choices = [_FakeChoice(content, finish_reason)]
+class _FakeProvider:
+    """Stands in for the configured AI provider.
 
+    The task talks to providers only through `AIProvider.review`, so this is the
+    seam to fake. Faking the vendor client instead would tie these tests to
+    whichever SDK happens to be configured.
+    """
 
-class _FakeOpenAI:
-    """Records the create() call and returns a canned completion (or raises)."""
-
-    def __init__(self, *, content: str | None = None, raises: Exception | None = None) -> None:
-        self._content = content
+    def __init__(self, *, verdict: dict | None = None, raises: Exception | None = None) -> None:
+        self.name = "fake"
+        self.model = "fake-model"
+        self._verdict = verdict
         self._raises = raises
-        self.calls: list[dict] = []
-        outer = self
+        # One entry per call: (system prompt, user prompt).
+        self.calls: list[tuple[str, str]] = []
 
-        class _Completions:
-            async def create(self, **kwargs):
-                outer.calls.append(kwargs)
-                if outer._raises is not None:
-                    raise outer._raises
-                return _FakeCompletion(outer._content)
-
-        self.chat = SimpleNamespace(completions=_Completions())
+    async def review(self, system: str, user: str, schema: dict) -> dict:
+        self.calls.append((system, user))
+        if self._raises is not None:
+            raise self._raises
+        assert self._verdict is not None
+        return dict(self._verdict)
 
 
-def _patch_openai(monkeypatch, fake: _FakeOpenAI) -> None:
-    monkeypatch.setattr(review_tasks, "AsyncOpenAI", lambda *a, **k: fake)
+def _patch_provider(monkeypatch, fake: _FakeProvider) -> None:
+    monkeypatch.setattr(review_tasks, "get_ai_provider", lambda *a, **k: fake)
 
 
 async def _seed_ai_submission(db: AsyncSession, suffix: str):
@@ -222,8 +228,8 @@ async def test_ai_review_completed_path(db_session: AsyncSession, monkeypatch) -
     """RUN_AI_REVIEW with next_step=completed -> COMPLETED + ai_review stored."""
     _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-done")
 
-    fake = _FakeOpenAI(content='{"review": "Looks good"}')
-    _patch_openai(monkeypatch, fake)
+    fake = _FakeProvider(verdict=_verdict())
+    _patch_provider(monkeypatch, fake)
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
@@ -234,10 +240,13 @@ async def test_ai_review_completed_path(db_session: AsyncSession, monkeypatch) -
     assert message.state == OutboxMessageState.FINISHED
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.COMPLETED
-    assert sub.ai_review == {"review": "Looks good"}
-    # AI client was called once with the configured model.
+    # The verdict is stored as returned, stamped with which provider produced it.
+    assert sub.ai_review == _verdict(provider="fake", model="fake-model")
+    # The provider was called once, with both prompts.
     assert len(fake.calls) == 1
-    assert "messages" in fake.calls[0]
+    system_prompt, user_prompt = fake.calls[0]
+    assert system_prompt
+    assert "Student code:" in user_prompt
 
 
 @pytest.mark.asyncio
@@ -247,8 +256,8 @@ async def test_ai_review_teacher_path_enqueues_review(
     """RUN_AI_REVIEW with next_step=teacher -> AWAITING_TEACHER_REVIEW + queue row."""
     _, teacher, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-teach")
 
-    fake = _FakeOpenAI(content='```json\n{"review": "ok"}\n```')
-    _patch_openai(monkeypatch, fake)
+    fake = _FakeProvider(verdict=_verdict(comment="needs a look"))
+    _patch_provider(monkeypatch, fake)
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
@@ -259,8 +268,7 @@ async def test_ai_review_teacher_path_enqueues_review(
     assert message.state == OutboxMessageState.FINISHED
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
-    # Code-fenced JSON is unwrapped and parsed.
-    assert sub.ai_review == {"review": "ok"}
+    assert sub.ai_review == _verdict(comment="needs a look", provider="fake", model="fake-model")
     # A teacher-review queue row was enqueued for the subject owner.
     rows = (
         (
@@ -278,12 +286,14 @@ async def test_ai_review_teacher_path_enqueues_review(
 
 
 @pytest.mark.asyncio
-async def test_ai_review_empty_content_marks_failed(db_session: AsyncSession, monkeypatch) -> None:
-    """Empty AI content -> submission AI_REVIEW_FAILED, message ERROR (raises)."""
+async def test_ai_review_unusable_output_marks_failed(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """Unusable provider output -> submission AI_REVIEW_FAILED, message ERROR (raises)."""
     _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-empty")
 
-    fake = _FakeOpenAI(content="")
-    _patch_openai(monkeypatch, fake)
+    fake = _FakeProvider(raises=AIProviderError("provider returned empty content"))
+    _patch_provider(monkeypatch, fake)
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
@@ -299,12 +309,14 @@ async def test_ai_review_empty_content_marks_failed(db_session: AsyncSession, mo
 
 
 @pytest.mark.asyncio
-async def test_ai_review_client_error_is_handled(db_session: AsyncSession, monkeypatch) -> None:
-    """If the AI client raises, the message is marked ERROR for retry."""
-    _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-raise")
+async def test_ai_review_malformed_verdict_marks_failed(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """A verdict missing required fields is rejected, not stored as a review."""
+    _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-malformed")
 
-    fake = _FakeOpenAI(raises=RuntimeError("openai down"))
-    _patch_openai(monkeypatch, fake)
+    fake = _FakeProvider(verdict={"comment": "no structure here"})
+    _patch_provider(monkeypatch, fake)
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
@@ -313,7 +325,27 @@ async def test_ai_review_client_error_is_handled(db_session: AsyncSession, monke
     message = await _process(db_session, monkeypatch, message)
 
     assert message.state == OutboxMessageState.ERROR
-    assert "openai down" in (message.error_message or "")
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.AI_REVIEW_FAILED
+    assert sub.ai_review is None
+
+
+@pytest.mark.asyncio
+async def test_ai_review_client_error_is_handled(db_session: AsyncSession, monkeypatch) -> None:
+    """If the AI client raises, the message is marked ERROR for retry."""
+    _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-raise")
+
+    fake = _FakeProvider(raises=RuntimeError("provider down"))
+    _patch_provider(monkeypatch, fake)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_AI_REVIEW,
+        payload={"submission_id": sub.id, "next_step": "completed"},
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.ERROR
+    assert "provider down" in (message.error_message or "")
     await db_session.refresh(sub)
     # Transition to AI_REVIEWING happened, but the client raised before completion.
     assert sub.status == SubmissionStatus.AI_REVIEWING
@@ -336,8 +368,8 @@ async def test_ai_review_reads_repository_code(
         repository_path=str(repo),
     )
 
-    fake = _FakeOpenAI(content='{"review": "ok"}')
-    _patch_openai(monkeypatch, fake)
+    fake = _FakeProvider(verdict=_verdict())
+    _patch_provider(monkeypatch, fake)
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
@@ -346,9 +378,9 @@ async def test_ai_review_reads_repository_code(
     message = await _process(db_session, monkeypatch, message)
 
     assert message.state == OutboxMessageState.FINISHED
-    user_msg = fake.calls[0]["messages"][-1]["content"]
-    assert "Implement add()" in user_msg
-    assert "def add" in user_msg
+    _, user_prompt = fake.calls[0]
+    assert "Implement add()" in user_prompt
+    assert "def add" in user_prompt
 
 
 # ══════════════════════════════════════════════════════════════════════════════
