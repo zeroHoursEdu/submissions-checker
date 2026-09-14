@@ -259,6 +259,12 @@ services:
       context: .
       dockerfile: docker/backup/Dockerfile
     image: submissions-checker-backup:local
+    # The only service built on the host rather than pulled. Without this, compose
+    # reads the `image:` name as something to fetch and fails with "pull access
+    # denied for submissions-checker-backup" — there is no such repository, and
+    # there should not be: the image is two packages on top of alpine and is not
+    # worth a registry round trip.
+    pull_policy: build
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

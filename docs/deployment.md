@@ -177,11 +177,21 @@ If the package is **public**, skip this; the mounted config is simply unused.
 ### 5. First start
 
 ```bash
+# The backup image is built on the host, not pulled. Doing it first keeps it out
+# of the way of the rest of the bring-up.
+docker compose -f docker-compose.prod.yml build backup
+
 # Data tier first, then bootstrap the schema explicitly, then everything else.
 docker compose -f docker-compose.prod.yml up -d postgres minio minio-init
 docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+Every other service is pulled; `backup` is the one exception, because it is two
+packages on top of Alpine and not worth a registry. If you pre-pull images by
+hand, note that plain `docker compose pull` will report it as `Skipped` rather
+than trying to fetch a `submissions-checker-backup` repository that does not
+exist.
 
 ### 6. Verify
 
