@@ -250,6 +250,10 @@ Simple SQL-based migration system.
 
 ### Best Practices
 
+- **Migrations must be backward-compatible within a release.** Production runs a rolling
+  deploy, so the previous version is still serving while the new schema is live. Add
+  columns freely; split any drop or rename across two releases. See
+  [docs/deployment.md](docs/deployment.md#the-migration-rule-read-this-before-writing-one).
 - Use `CREATE TABLE IF NOT EXISTS` for idempotency
 - Use `CREATE INDEX IF NOT EXISTS` for indexes
 - Never modify executed migrations (checksum validation fails)
@@ -445,6 +449,18 @@ make e2e-logs    # tail app logs
 |----------|---------|-------------|
 | `E2E_APP_URL` | `http://localhost:8001` | App base URL |
 | `E2E_DB_URL` | `postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e` | Direct DB connection for fixtures |
+
+## Deployment
+
+Production runs as a self-hosted Docker Compose stack on a single VM: Caddy terminating
+TLS in front of two application replicas, PostgreSQL, MinIO, and Watchtower rolling out
+new images one replica at a time so an in-flight quiz submission is never dropped.
+
+Pushing to `main` runs the quality gates, publishes a multi-architecture image to GHCR,
+and the host picks it up on its own — CI holds no credentials for the host.
+
+See **[docs/deployment.md](docs/deployment.md)** for host setup, the migration rule,
+rollback, and backups.
 
 ## License
 

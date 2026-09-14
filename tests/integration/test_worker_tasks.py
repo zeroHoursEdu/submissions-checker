@@ -1170,7 +1170,7 @@ async def test_check_misconfigured_plan_records_validation_failed(
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
 
-    def _bad_plan(config, assignment_code, variant):
+    def _bad_plan(config, assignment_code, variant, **_kwargs):
         return check_core.ConfigError("no check command configured for this assignment")
 
     monkeypatch.setattr(check_tasks.check_core, "resolve_check_plan", _bad_plan)

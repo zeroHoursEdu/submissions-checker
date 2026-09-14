@@ -92,7 +92,8 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks, "get_settings",
-                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None))
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None,
+                                                sandbox_max_memory="512m", sandbox_max_cpus=1.0))
 
     canned_tests = [{"name": "v1", "passed": True, "points_earned": 100, "max_points": 100}]
     recorded: dict = {}
@@ -138,7 +139,8 @@ async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None
     config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
     db = _FakeDB(submission, config_record)
     monkeypatch.setattr(check_tasks, "get_settings",
-                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None))
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None,
+                                                sandbox_max_memory="512m", sandbox_max_cpus=1.0))
 
     # A config error is detected while the submission is still PENDING. _fail_validation
     # steps through start_validation (PENDING -> VALIDATING) before validation_failed, so
@@ -177,7 +179,8 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
 
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks, "get_settings",
-                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None))
+                        lambda: SimpleNamespace(plugins_dir=str(tmp_path), host_plugins_dir=None,
+                                                sandbox_max_memory="512m", sandbox_max_cpus=1.0))
 
     async def crashing_run_check(*, plan, submission_dir, plugin_dir, sandbox):
         raise check_core.CheckExecutionError("check script exited 1: NameError: boom")

@@ -24,32 +24,50 @@ class StorageService:
         self._endpoint_url = settings.s3_endpoint_url
 
     async def upload_file(self, local_path: Path, key: str) -> str:
-        """Upload a file to S3 and return its public URL."""
+        """Upload a file to S3 and return the URL used to address it.
+
+        Objects are written without a public ACL: the bucket is not internet-reachable
+        in production, and possession of a key must not be enough to read an object.
+        Anything user-visible is served through an authenticated application route.
+        """
         async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:
             with local_path.open("rb") as f:
                 await s3.put_object(
                     Bucket=self._bucket,
                     Key=key,
                     Body=f,
-                    ACL="public-read",
                 )
         url = self._build_url(key)
         logger.info("file_uploaded", key=key, url=url)
         return url
 
     async def upload_bytes(self, data: bytes, key: str, content_type: str = "application/octet-stream") -> str:
-        """Upload an in-memory byte payload to S3 and return its public URL."""
+        """Upload an in-memory byte payload to S3 and return the URL used to address it.
+
+        Written without a public ACL — see ``upload_file``.
+        """
         async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:
             await s3.put_object(
                 Bucket=self._bucket,
                 Key=key,
                 Body=data,
                 ContentType=content_type,
-                ACL="public-read",
             )
         url = self._build_url(key)
         logger.info("bytes_uploaded", key=key, url=url, size=len(data))
         return url
+
+    async def download_bytes(self, key: str) -> bytes:
+        """Read an object back from S3.
+
+        Used by the authenticated routes that serve private objects (proctoring
+        evidence) so the client never addresses object storage directly.
+        """
+        async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:
+            response = await s3.get_object(Bucket=self._bucket, Key=key)
+            # aioboto3's streaming body is untyped, so the read result is Any.
+            data: bytes = await response["Body"].read()
+            return data
 
     async def delete_file(self, key: str) -> None:
         """Delete an object from S3."""

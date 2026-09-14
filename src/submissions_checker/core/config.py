@@ -29,6 +29,11 @@ class Settings(BaseSettings):
 
     # Database
     database_url: PostgresDsn
+    # Connection pool per application process. Sized so that
+    # replicas * (pool + overflow) stays under the server's max_connections —
+    # the production stack runs two replicas against max_connections=30.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
 
     # Backend base URL (used to build callback URLs for external services)
     base_url: str = "http://localhost:8000"
@@ -84,6 +89,13 @@ class Settings(BaseSettings):
     # mounts (the host daemon can't resolve plugins_dir's container-relative path). Falls back
     # to plugins_dir when unset.
     host_plugins_dir: str | None = None
+
+    # Upper bound on the sandbox resources a subject's config.yml may request. A subject
+    # declaring more than the host can give is clamped to these values rather than being
+    # honoured, so one subject cannot exhaust the host for every other subject.
+    # Docker-style size string ("256m", "1g") and a CPU share.
+    sandbox_max_memory: str = "512m"
+    sandbox_max_cpus: float = 1.0
 
     # S3-compatible object storage (images and assignment content files)
     s3_bucket_name: str = "submissions-checker"

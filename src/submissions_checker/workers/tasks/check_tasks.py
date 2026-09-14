@@ -100,12 +100,22 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         return
 
     # Resolve the check plan from config (DB-free core). Misconfiguration → validation fail.
-    plan = check_core.resolve_check_plan(config_record.config, assignment_code, variant)
+    # Bounds come from application settings on this path (the standalone runner, which
+    # never instantiates Settings, falls back to the environment inside the core).
+    settings = get_settings()
+    plan = check_core.resolve_check_plan(
+        config_record.config,
+        assignment_code,
+        variant,
+        limits=check_core.SandboxLimits(
+            max_memory=settings.sandbox_max_memory,
+            max_cpus=settings.sandbox_max_cpus,
+        ),
+    )
     if isinstance(plan, check_core.ConfigError):
         _fail_validation(submission, plan.reason)
         return
 
-    settings = get_settings()
     plugins_root = settings.host_plugins_dir or settings.plugins_dir
     plugin_dir = Path(plugins_root) / (config_record.config.get("subjectCode") or "")
 

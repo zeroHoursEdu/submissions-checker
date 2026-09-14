@@ -8,7 +8,8 @@ security-critical branches in ``api/routes/student_quiz.py``:
   finalization (→ ``VIOLATION_FAIL``), events ignored on terminal attempts,
   cross-student → 403, unknown attempt → 404.
 * ``POST /portal/quiz/{id}/snapshot`` — webcam evidence capture: stored when
-  capture enabled + storage configured (asserts a ``QuizAttemptSnapshot`` row),
+  capture enabled + storage configured (asserts a ``QuizAttemptSnapshot`` row, and that
+  the response hands back no publicly fetchable object-storage URL),
   the ``stored: False`` no-storage branch, 403 when capture disabled, 409 on
   terminal attempts, 415 bad content-type, 413 oversize / empty, 404 unknown.
 * Grading per question type (single / multiple / ordering / true-false /
@@ -444,7 +445,9 @@ async def test_snapshot_stored_when_capture_enabled_and_storage_configured(
             files={"frame": ("f.jpg", b"\xff\xd8\xffdata", "image/jpeg")},
         )
     assert r.status_code == 200
-    assert r.json() == {"stored": True, "url": "https://cdn/proctor/1.jpg"}
+    # No URL in the response: evidence is private and is read back only through the
+    # authenticated teacher endpoint (see test_proctoring_snapshot_access.py).
+    assert r.json() == {"stored": True}
     storage.upload_bytes.assert_awaited_once()
 
     rows = (

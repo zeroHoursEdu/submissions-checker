@@ -751,7 +751,10 @@ async def upload_snapshot(
     db.add(snapshot)
     await db.commit()
 
-    return JSONResponse({"stored": True, "url": url})
+    # No URL in the response: evidence is private and is read back only through the
+    # authenticated teacher endpoint. Handing the client an object-storage URL would
+    # reintroduce exactly the public exposure this avoids.
+    return JSONResponse({"stored": True})
 
 
 @router.post("/quiz/{attempt_id}/answer")

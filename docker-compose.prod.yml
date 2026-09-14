@@ -1,0 +1,301 @@
+# Production stack for a single host (target: Oracle A1.Flex, 2 OCPU / 2GB, ARM64).
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+#
+# Deploys are pull-initiated: Watchtower polls the registry and replaces app replicas
+# one at a time. Nothing needs inbound access to this host, and no host credential is
+# stored in CI. See docs/deployment.md for bootstrap, rollback and the migration rule.
+#
+# Memory budget for a 2GB host. These are ceilings, not reservations; steady-state usage
+# is well under them, but the ceilings must still fit or an OOM kill is only a burst away.
+#
+#   OS + dockerd   ~180M
+#   caddy            48M
+#   postgres        384M   (shared_buffers 128M — it must fit inside this limit)
+#   minio           192M
+#   app           2x320M = 640M
+#   watchtower       48M
+#   backup           48M   (pg_dump streams to disk; it is a client, not a server)
+#   ------------------------
+#   committed     ~1540M, leaving ~500M for a transient check sandbox
+#
+# SANDBOX_MAX_MEMORY (default 384m) is what a check may take out of that headroom.
+# Re-do this arithmetic whenever a service is added or a limit is raised.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # The only service published to the host.
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN:?set DOMAIN to the hostname whose A record points at this host}"
+      ACME_EMAIL: "${ACME_EMAIL:?set ACME_EMAIL for Lets Encrypt expiry notices}"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates survive container replacement — re-issuing on every deploy would
+      # hit Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks: [edge]
+    mem_limit: 48m
+    logging: *default-logging
+    labels:
+      # Never auto-update the proxy: a restart here is a full outage.
+      com.centurylinklabs.watchtower.enable: "false"
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/OWNER/submissions-checker}:${APP_IMAGE_TAG:-main}
+    restart: unless-stopped
+    # No container_name — it would collide across replicas.
+    deploy:
+      replicas: ${APP_REPLICAS:-2}
+    # The drain budget. uvicorn stops accepting on SIGTERM and finishes in-flight
+    # requests; Docker's 10s default would cut off a quiz submission mid-grade.
+    stop_grace_period: 60s
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECRET_KEY: "${SECRET_KEY:?generate with openssl rand -hex 32}"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # replicas * (pool + overflow) must stay under postgres max_connections (30),
+      # leaving room for the migration connection and the backup job.
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-4}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-4}
+      BASE_URL: https://${DOMAIN}
+      APP_BASE_URL: https://${DOMAIN}
+      CORS_ORIGINS: '["https://${DOMAIN}"]'
+      # Object storage stays internal; nothing outside this network addresses it.
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-submissions-checker}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      # Ceiling on what a subject's config.yml may request for its sandbox.
+      SANDBOX_MAX_MEMORY: ${SANDBOX_MAX_MEMORY:-384m}
+      SANDBOX_MAX_CPUS: ${SANDBOX_MAX_CPUS:-1.0}
+      # Host-absolute: the daemon resolves sandbox bind mounts on the host, not here.
+      HOST_PLUGINS_DIR: "${HOST_PLUGINS_DIR:?absolute host path to the plugins directory}"
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_ADDRESS: ${RESEND_FROM_ADDRESS:-noreply@example.com}
+    volumes:
+      # Checks run as sibling containers on the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path inside and out: the daemon resolves the sandbox's /output bind mount
+      # on the host, so a container-only path would not exist from its point of view.
+      - /tmp:/tmp
+      - ${HOST_PLUGINS_DIR}:/app/plugins:ro
+      # Shared across replicas: a ZIP received by one replica is read later by whichever
+      # replica drains the outbox. A per-container directory would lose it.
+      - uploads:/app/uploads
+    group_add:
+      # Host docker group id — grants socket access without running the app as root.
+      - "${DOCKER_GID:?find it with getent group docker}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    # The only service on both: it accepts proxied requests and reaches the data tier.
+    networks: [edge, data]
+    mem_limit: 320m
+    logging: *default-logging
+    labels:
+      # The ONLY service Watchtower is allowed to replace.
+      com.centurylinklabs.watchtower.enable: "true"
+
+  # One-shot schema bootstrap and manual migration runner:
+  #   docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate
+  # Ordinary deploys do not need this — replicas migrate on boot under an advisory lock.
+  # Use it to apply a long migration ahead of a release, so no replica's boot stalls.
+  migrate:
+    image: ${APP_IMAGE:-ghcr.io/OWNER/submissions-checker}:${APP_IMAGE_TAG:-main}
+    profiles: ["migrate"]
+    restart: "no"
+    environment:
+      ENVIRONMENT: production
+      SECRET_KEY: ${SECRET_KEY}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [data]
+    mem_limit: 256m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:?set POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?generate with openssl rand -hex 24}"
+      POSTGRES_DB: ${POSTGRES_DB:-submissions_checker}
+    # Tuned for a 2GB host. max_connections is deliberately low: it is the ceiling the
+    # replicas' pools are sized against, not a value to raise when connections run out.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=30
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - effective_cache_size=512MB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [data]
+    mem_limit: 384m
+    logging: *default-logging
+    labels:
+      # Never auto-update the database.
+      com.centurylinklabs.watchtower.enable: "false"
+
+  minio:
+    # quay.io is MinIO's canonical registry; it also avoids Docker Hub's anonymous pull
+    # rate limits, which an unattended host has no way to authenticate past.
+    image: quay.io/minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?set MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?generate with openssl rand -hex 24}"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # Deliberately not on the edge network and not published: proctoring evidence is
+    # served only through the application's authenticated endpoint.
+    networks: [data]
+    mem_limit: 192m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-submissions-checker}
+    entrypoint: ["/bin/sh", "/init.sh"]
+    volumes:
+      - ./docker/minio/init.sh:/init.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [data]
+    mem_limit: 48m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    command: --interval ${WATCHTOWER_INTERVAL:-60}
+    environment:
+      # Watchtower's last release (1.7.1, 2023) negotiates Docker API 1.25, but Docker
+      # Engine 28+ requires 1.44 or newer and refuses the connection outright:
+      #   "client version 1.25 is too old. Minimum supported API version is 1.44"
+      # Pinning the client version here is what makes it work on a current daemon.
+      # Raise this if a future daemon drops 1.44; if Watchtower breaks harder, the
+      # maintained fork (nicholas-fedor/watchtower) is the drop-in replacement.
+      DOCKER_API_VERSION: "1.44"
+      # Label-scoped: without this Watchtower would happily restart PostgreSQL at 3am.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # One replica at a time, so the others keep serving through the rollout.
+      WATCHTOWER_ROLLING_RESTART: "true"
+      # Reclaim the superseded image; disk on this host is not generous.
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_INCLUDE_STOPPED: "false"
+      WATCHTOWER_TIMEOUT: 70s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Registry credentials for a private GHCR package. Create on the host with:
+      #   docker login ghcr.io -u <user> --password-stdin   (token needs read:packages)
+      # Omit this mount if the package is public.
+      - ${DOCKER_CONFIG_DIR:-/root/.docker}/config.json:/config.json:ro
+    # Needs outbound access to the registry to poll for new image digests.
+    networks: [edge]
+    mem_limit: 48m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  backup:
+    build:
+      context: .
+      dockerfile: docker/backup/Dockerfile
+    image: submissions-checker-backup:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-submissions_checker}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-submissions-checker}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      # Point BACKUP_DIR at a second block volume: a backup on the same disk as the
+      # data protects against corruption, not against losing the disk.
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks: [data]
+    mem_limit: 48m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+networks:
+  # Split so a compromised proxy cannot reach the database or object storage directly —
+  # only `app` bridges the two. Neither is marked `internal: true`, because the app needs
+  # outbound access (AI provider, email) and Watchtower needs it to poll the registry.
+  # Nothing on either network is reachable from outside the host: only caddy publishes
+  # ports.
+  edge:
+  data:
+
+volumes:
+  postgres_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
+  uploads:

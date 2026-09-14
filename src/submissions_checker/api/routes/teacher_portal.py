@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 
 import bcrypt
-from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import and_, cast, false, func, nullsfirst, select, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import AppSettings, DBSession, TeacherUser
 from submissions_checker.core.config import get_settings
+from submissions_checker.core.logging import get_logger
 from submissions_checker.core.security import COOKIE_NAME, create_access_token
 from submissions_checker.core.state_machine import transition
 from submissions_checker.core.templates import render
@@ -57,6 +58,7 @@ from submissions_checker.services.storage import StorageService
 
 UPLOADS_DIR = Path("uploads")
 
+logger = get_logger(__name__)
 router = APIRouter(prefix="/teacher", tags=["teacher-portal"])
 
 _SAMPLE_CSV = "student_group,student_name,student_surname,email\nIT-21,Ivan,Petrenko,ivan@example.com\nIT-21,Olena,Kovalenko,olena@example.com\n"
@@ -424,8 +426,8 @@ async def teacher_assignment(
         snap_result = await db.execute(
             select(
                 Submission.students_assignment_id,
+                QuizAttemptSnapshot.id,
                 QuizAttemptSnapshot.event_type,
-                QuizAttemptSnapshot.s3_url,
                 QuizAttemptSnapshot.captured_at,
             )
             .join(QuizAttempt, QuizAttempt.id == QuizAttemptSnapshot.attempt_id)
@@ -434,8 +436,10 @@ async def teacher_assignment(
             .order_by(QuizAttemptSnapshot.captured_at.desc())
         )
         for sr in snap_result:
+            # Address the application's authenticated endpoint, never object storage —
+            # an evidence link must not outlive the viewer's authorization.
             snapshot_flags.setdefault(sr.students_assignment_id, []).append(
-                {"event_type": sr.event_type, "url": sr.s3_url}
+                {"event_type": sr.event_type, "url": f"/teacher/proctoring/snapshots/{sr.id}"}
             )
 
     return render(request, "teacher_assignment.html", {
@@ -446,6 +450,62 @@ async def teacher_assignment(
             "violation_flags": violation_flags,
             "snapshot_flags": snapshot_flags,
         })
+
+
+_SNAPSHOT_CONTENT_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+
+@router.get("/proctoring/snapshots/{snapshot_id}")
+async def proctoring_snapshot(
+    snapshot_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    settings: AppSettings,
+) -> Response:
+    """Stream one webcam evidence frame to a teacher authorized for its subject.
+
+    Evidence is private: object storage is not internet-reachable and objects carry no
+    public ACL, so this endpoint is the only way to read a frame. Authorization is
+    checked against the owning subject before any bytes are fetched.
+    """
+    row = (
+        await db.execute(
+            select(QuizAttemptSnapshot, SubjectsAssignment.subject_id)
+            .join(QuizAttempt, QuizAttempt.id == QuizAttemptSnapshot.attempt_id)
+            .join(Submission, Submission.id == QuizAttempt.submission_id)
+            .join(StudentAssignment, StudentAssignment.id == Submission.students_assignment_id)
+            .join(
+                SubjectsAssignment,
+                SubjectsAssignment.id == StudentAssignment.subjects_assignment_id,
+            )
+            .where(QuizAttemptSnapshot.id == snapshot_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    snapshot, subject_id = row
+    await require_subject_access(db, subject_id, current_user)
+
+    if not settings.s3_endpoint_url:
+        raise HTTPException(status_code=404, detail="Snapshot storage is not configured")
+
+    storage = StorageService(settings)
+    try:
+        data = await storage.download_bytes(snapshot.s3_key)
+    except Exception as exc:  # object missing or storage unreachable
+        logger.warning(
+            "proctoring_snapshot_unreadable", snapshot_id=snapshot_id, error=str(exc)
+        )
+        raise HTTPException(status_code=404, detail="Snapshot is no longer available") from exc
+
+    extension = snapshot.s3_key.rsplit(".", 1)[-1].lower()
+    return Response(
+        content=data,
+        media_type=_SNAPSHOT_CONTENT_TYPES.get(extension, "application/octet-stream"),
+        # Evidence is per-viewer authorized; never let a shared cache hold it.
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.get("/students/sample.csv")

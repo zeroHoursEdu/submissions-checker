@@ -37,6 +37,7 @@ services:
     build:
       context: .
       dockerfile: docker/app/Dockerfile
+      target: dev
     container_name: submissions-checker-app-e2e
     environment:
       - ENVIRONMENT=development

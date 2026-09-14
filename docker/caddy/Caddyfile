@@ -1,0 +1,64 @@
+# Production reverse proxy.
+#
+# Caddy is the only service published to the host. It terminates TLS (certificates
+# obtained and renewed automatically for {$DOMAIN}) and load-balances across the app
+# replicas, which is what makes a rolling deploy invisible to a student mid-quiz.
+
+{
+	email {$ACME_EMAIL}
+	# Certificate storage lives on a named volume, so replacing the container does not
+	# re-request certificates and walk into Let's Encrypt's rate limits.
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Submissions are file uploads. This is a top-level directive in Caddy 2, not a
+	# reverse_proxy subdirective.
+	request_body {
+		max_size 100MB
+	}
+
+	# Upstreams are resolved from Docker's embedded DNS rather than pinned at startup.
+	# A replaced replica gets a new container IP; re-resolving on a short interval picks
+	# it up with no reload, which is what lets Watchtower roll replicas underneath us.
+	reverse_proxy {
+		dynamic a {
+			name app
+			port 8000
+			refresh 5s
+		}
+
+		# Dynamic upstreams cannot use active health checks, so health is passive: a
+		# replica that refuses a connection is taken out of rotation for fail_duration.
+		fail_duration 10s
+		max_fails 1
+		unhealthy_status 5xx
+
+		# Retry only on connection-level failure — the request never reached the
+		# application, so re-sending it cannot double-submit a quiz answer. A request
+		# that was accepted and then errored is returned to the client untouched.
+		lb_policy round_robin
+		lb_try_duration 5s
+		lb_try_interval 250ms
+
+		# Submissions are file uploads; give the proxy time for them.
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 120s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -185,6 +185,9 @@
           {% set snaps = snapshot_flags.get(row.student_assignment_id, []) if snapshot_flags is defined else [] %}
           {% if snaps %}
           <div class="mt-1.5 flex flex-wrap gap-1">
+            {# s.url addresses the authenticated /teacher/proctoring/snapshots/<id>
+               endpoint, never object storage — evidence must not be fetchable without
+               an authorized session. #}
             {% for s in snaps[:6] %}
             <a href="{{ s.url }}" target="_blank" title="{{ s.event_type }}">
               <img src="{{ s.url }}" alt="{{ s.event_type }}"

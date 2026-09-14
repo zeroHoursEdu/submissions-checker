@@ -33,7 +33,12 @@ def test_get_engine_creates_once_and_caches(monkeypatch) -> None:
     monkeypatch.setattr(db_module, "create_async_engine", ctor)
     monkeypatch.setattr(
         db_module, "get_settings",
-        lambda: MagicMock(database_url="postgresql+asyncpg://x", debug=False),
+        lambda: MagicMock(
+            database_url="postgresql+asyncpg://x",
+            debug=False,
+            db_pool_size=4,
+            db_max_overflow=6,
+        ),
     )
 
     first = db_module.get_engine()
@@ -44,8 +49,10 @@ def test_get_engine_creates_once_and_caches(monkeypatch) -> None:
     # Engine constructed exactly once (singleton).
     ctor.assert_called_once()
     _, kwargs = ctor.call_args
-    assert kwargs["pool_size"] == 5
-    assert kwargs["max_overflow"] == 10
+    # Pool sizing is configuration, not a constant — the production stack has to keep
+    # replicas * (pool + overflow) under the server's max_connections.
+    assert kwargs["pool_size"] == 4
+    assert kwargs["max_overflow"] == 6
     assert kwargs["pool_pre_ping"] is True
 
 

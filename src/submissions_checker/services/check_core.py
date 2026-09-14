@@ -12,6 +12,8 @@ production worker (`workers/tasks/check_tasks.py`) and the standalone runner
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -27,6 +29,109 @@ _DEFAULT_MEMORY = "256m"
 _DEFAULT_CPUS = 0.5
 _DEFAULT_TIMEOUT = 30
 _DEFAULT_MIN_PASS = 100
+
+# Upper bounds on what a subject's config.yml may request. A subject picks its own
+# sandbox size, so without a ceiling one subject declaring `memory: 2g` can exhaust a
+# small host and take the platform down for every other subject. Sized for the smallest
+# supported production host; override per host rather than editing these.
+DEFAULT_MAX_MEMORY = "512m"
+DEFAULT_MAX_CPUS = 1.0
+
+_MEMORY_UNITS = {"b": 1, "k": 1024, "m": 1024**2, "g": 1024**3}
+_MEMORY_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([bkmg])?\s*$", re.IGNORECASE)
+
+
+def parse_memory(value: str) -> int | None:
+    """Parse a Docker-style memory string ("512", "100k", "256m", "2g") into bytes.
+
+    Returns None for anything unparseable, so callers can decide what an unreadable
+    request means rather than silently treating it as zero or unlimited.
+    """
+    match = _MEMORY_PATTERN.match(str(value))
+    if not match:
+        return None
+    amount, unit = match.groups()
+    return int(float(amount) * _MEMORY_UNITS[(unit or "b").lower()])
+
+
+@dataclass(frozen=True)
+class SandboxLimits:
+    """Host-imposed ceiling on the sandbox resources a subject may request.
+
+    Read from the environment rather than from Settings: the check core is shared with
+    the standalone runner, which deliberately never instantiates Settings (it has no
+    database URL or secret key). The application passes limits explicitly from its own
+    configuration; the runner falls back to these environment variables.
+    """
+
+    max_memory: str = DEFAULT_MAX_MEMORY
+    max_cpus: float = DEFAULT_MAX_CPUS
+
+    @classmethod
+    def from_env(cls) -> SandboxLimits:
+        max_memory = os.environ.get("SANDBOX_MAX_MEMORY", DEFAULT_MAX_MEMORY)
+        if parse_memory(max_memory) is None:
+            logger.warning(
+                "sandbox_max_memory_unparseable",
+                value=max_memory,
+                fallback=DEFAULT_MAX_MEMORY,
+            )
+            max_memory = DEFAULT_MAX_MEMORY
+
+        raw_cpus = os.environ.get("SANDBOX_MAX_CPUS")
+        try:
+            max_cpus = float(raw_cpus) if raw_cpus is not None else DEFAULT_MAX_CPUS
+        except ValueError:
+            logger.warning(
+                "sandbox_max_cpus_unparseable", value=raw_cpus, fallback=DEFAULT_MAX_CPUS
+            )
+            max_cpus = DEFAULT_MAX_CPUS
+
+        return cls(max_memory=max_memory, max_cpus=max_cpus)
+
+    def clamp_memory(self, requested: str, *, subject: str, assignment: str) -> str:
+        """Bound a requested memory string, logging when the request is not honoured."""
+        requested_bytes = parse_memory(requested)
+        limit_bytes = parse_memory(self.max_memory) or parse_memory(DEFAULT_MAX_MEMORY)
+
+        if requested_bytes is None:
+            # An unreadable request must not become an unbounded one.
+            logger.warning(
+                "sandbox_memory_clamped",
+                subject=subject,
+                assignment=assignment,
+                requested=requested,
+                applied=self.max_memory,
+                reason="unparseable",
+            )
+            return self.max_memory
+
+        if limit_bytes is not None and requested_bytes > limit_bytes:
+            logger.warning(
+                "sandbox_memory_clamped",
+                subject=subject,
+                assignment=assignment,
+                requested=requested,
+                applied=self.max_memory,
+                reason="exceeds_host_limit",
+            )
+            return self.max_memory
+
+        return requested
+
+    def clamp_cpus(self, requested: float, *, subject: str, assignment: str) -> float:
+        """Bound a requested CPU share, logging when the request is not honoured."""
+        if requested > self.max_cpus:
+            logger.warning(
+                "sandbox_cpus_clamped",
+                subject=subject,
+                assignment=assignment,
+                requested=requested,
+                applied=self.max_cpus,
+                reason="exceeds_host_limit",
+            )
+            return self.max_cpus
+        return requested
 
 
 class SandboxRunner(Protocol):
@@ -94,13 +199,22 @@ class CheckOutcome:
 
 
 def resolve_check_plan(
-    config: dict[str, Any], assignment_code: str, variant: str | None
+    config: dict[str, Any],
+    assignment_code: str,
+    variant: str | None,
+    *,
+    limits: SandboxLimits | None = None,
 ) -> CheckPlan | ConfigError:
     """Resolve the effective sandbox plan for an assignment/variant from a subject config.
 
     Returns a ConfigError (not raising) for misconfiguration so callers can surface a
     teacher-facing reason. Mirrors the resolution that production has always used.
+
+    Sandbox resource requests are bounded by ``limits`` (defaulting to the host's
+    environment), so a subject cannot ask for more than the host can give.
     """
+    bounds = limits if limits is not None else SandboxLimits.from_env()
+    subject = str(config.get("subjectCode", "unknown"))
     assignments_config: dict[str, Any] = config.get("assignments", {})
     if not assignment_code or assignment_code not in assignments_config:
         return ConfigError("Assignment is not configured in plugin. Contact your teacher.")
@@ -144,8 +258,16 @@ def resolve_check_plan(
     return CheckPlan(
         image=sandbox_cfg.get("image", _DEFAULT_IMAGE),
         tool=sandbox_cfg.get("tool", _DEFAULT_TOOL),
-        memory=sandbox_cfg.get("memory", _DEFAULT_MEMORY),
-        cpus=float(sandbox_cfg.get("cpus", _DEFAULT_CPUS)),
+        memory=bounds.clamp_memory(
+            str(sandbox_cfg.get("memory", _DEFAULT_MEMORY)),
+            subject=subject,
+            assignment=assignment_code,
+        ),
+        cpus=bounds.clamp_cpus(
+            float(sandbox_cfg.get("cpus", _DEFAULT_CPUS)),
+            subject=subject,
+            assignment=assignment_code,
+        ),
         timeout=int(sandbox_cfg.get("timeout_seconds", _DEFAULT_TIMEOUT)),
         min_pass_score=int(sandbox_cfg.get("min_pass_score", _DEFAULT_MIN_PASS)),
         validate_command=validate_command,

@@ -64,7 +64,13 @@ def test_init_passes_credentials_to_session() -> None:
     )
 
 
-async def test_upload_bytes_puts_object_with_acl_and_content_type() -> None:
+async def test_upload_bytes_puts_object_without_public_acl() -> None:
+    """Objects must not be world-readable: a leaked key would be a leaked webcam frame.
+
+    Proctoring evidence is served only through the authenticated teacher endpoint, and
+    the bucket is never exposed, so a public-read ACL here would reintroduce exactly the
+    exposure that design removes.
+    """
     svc, s3, calls, _ = _service_with_mock_client(_settings())
     url = await svc.upload_bytes(b"hello", "path/to/file.txt", content_type="text/plain")
 
@@ -73,8 +79,9 @@ async def test_upload_bytes_puts_object_with_acl_and_content_type() -> None:
         Key="path/to/file.txt",
         Body=b"hello",
         ContentType="text/plain",
-        ACL="public-read",
     )
+    _, kwargs = s3.put_object.call_args
+    assert "ACL" not in kwargs
     assert calls["service_name"] == "s3"
     # default amazonaws URL branch (no endpoint, no public base)
     assert url == "https://my-bucket.s3.amazonaws.com/path/to/file.txt"
@@ -98,7 +105,7 @@ async def test_upload_file_streams_handle_and_builds_url(tmp_path: Path) -> None
     _, kwargs = s3.put_object.call_args
     assert kwargs["Bucket"] == "my-bucket"
     assert kwargs["Key"] == "subjects/art.bin"
-    assert kwargs["ACL"] == "public-read"
+    assert "ACL" not in kwargs, "uploads must not be world-readable"
     # Body is the opened file handle pointing at the local file (closed by the
     # time control returns here, since upload_file streams it inside a `with`).
     assert Path(kwargs["Body"].name) == f
@@ -142,3 +149,18 @@ def test_build_url_branches_directly() -> None:
 
         public = StorageService(_settings(s3_public_base_url="https://p/"))
         assert public._build_url("a/b") == "https://p/a/b"
+
+
+async def test_download_bytes_reads_the_object_back() -> None:
+    """The authenticated routes read private objects back through this path."""
+    svc, s3, _, _ = _service_with_mock_client(_settings())
+    body = AsyncMock()
+    body.read = AsyncMock(return_value=b"frame-bytes")
+    s3.get_object = AsyncMock(return_value={"Body": body})
+
+    data = await svc.download_bytes("proctoring/attempt-1/1-facelost.jpg")
+
+    assert data == b"frame-bytes"
+    s3.get_object.assert_awaited_once_with(
+        Bucket="my-bucket", Key="proctoring/attempt-1/1-facelost.jpg"
+    )
