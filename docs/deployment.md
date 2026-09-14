@@ -343,13 +343,35 @@ group, so only the latest commit publishes.
 
 ### "Failed to retrieve container image info: No such image: sha256:…"
 
-Benign, and note that `Failed=0` on the same cycle — Watchtower is failing to
-*describe* a container, not to update one. Some stopped container still
-references an image that `WATCHTOWER_CLEANUP` has since deleted, so every scan
-re-reports it.
+Watchtower is failing to *describe* a container, not to update one — note
+`Failed=0` on the same cycle. Some container references an image ID that no
+longer exists on disk. Find it:
 
 ```bash
 docker inspect --format '{{.Name}} {{.State.Status}} {{.Image}}' $(docker ps -aq) | grep <the-sha>
+```
+
+**If it is `backup`, and it is `running`, fix it — this one is not cosmetic.**
+Rebuilding `submissions-checker-backup:local` retags the name to a new image and
+leaves the old ID dangling; a later prune deletes it while the container is
+still running from it. The container survives only until it next stops. After a
+reboot Docker cannot resolve the image, the container does not come back, and
+backups stop with no error anywhere you would look.
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --force-recreate backup
+```
+
+**Always recreate `backup` after rebuilding it**, for the same reason:
+
+```bash
+docker compose -f docker-compose.prod.yml build backup
+docker compose -f docker-compose.prod.yml up -d --force-recreate backup
+```
+
+If it is some other, stopped container, it is genuinely cosmetic — remove it:
+
+```bash
 docker rm <that-container>     # or: docker container prune
 ```
 
