@@ -164,6 +164,22 @@ getent group docker | cut -d: -f3   # DOCKER_GID
 `/opt/submissions-checker/plugins`). The Docker daemon resolves the sandbox's bind
 mounts on the host, so a path that only exists inside the container will not resolve.
 
+Create it and give it to the container's user. The application image runs as the
+unprivileged `app` user, **uid 10001**, and a bind mount keeps its host ownership —
+so a directory made with `sudo mkdir` is owned by root and the app cannot write to
+it. Applying a subject config then fails with `[Errno 13] Permission denied:
+/app/plugins/.tmp-<subject>-...`, after the subject has already been committed to the
+database.
+
+```bash
+sudo mkdir -p /opt/submissions-checker/plugins
+sudo chown -R 10001:10001 /opt/submissions-checker/plugins
+```
+
+The same applies to `BACKUP_DIR`, which the backup container writes to as root, and
+does *not* apply to `uploads`, which is a named volume and inherits the image's
+ownership automatically.
+
 ### 4. Registry access
 
 If the GHCR package is **private**, authenticate the host so Watchtower and `docker
