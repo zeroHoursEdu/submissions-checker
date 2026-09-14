@@ -72,6 +72,10 @@
 - [x] 6b.5 Skip deployment tracking cleanly when no production host is configured
 - [x] 6b.6 Document the release and deployment tabs, and the repository variable that enables tracking
 
+## 6c. Defects found on the target host
+
+- [x] 6c.1 The app's plugins mount was read-only, so applying a subject config failed after the database had committed — subject present, files absent. The app owns that tree; read-only belongs at the sandbox, which already applies it.
+
 ## 7. Verification on the target host
 
 - [ ] 7.1 Bring the stack up on the A1 host; confirm the certificate is issued and login works over HTTPS

@@ -99,7 +99,12 @@ services:
       # Same path inside and out: the daemon resolves the sandbox's /output bind mount
       # on the host, so a container-only path would not exist from its point of view.
       - /tmp:/tmp
-      - ${HOST_PLUGINS_DIR}:/app/plugins:ro
+      # Writable: the app OWNS this tree. Applying a subject config extracts the
+      # uploaded ZIP to plugins/<subjectCode>/, so a read-only mount fails the apply
+      # after the database has already committed — the subject appears, its files do
+      # not. Read-only belongs one level down, where untrusted checker code actually
+      # runs: docker_sandbox mounts the subject's directory into the sandbox as :ro.
+      - ${HOST_PLUGINS_DIR}:/app/plugins
       # Shared across replicas: a ZIP received by one replica is read later by whichever
       # replica drains the outbox. A per-container directory would lose it.
       - uploads:/app/uploads
