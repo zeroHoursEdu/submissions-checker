@@ -3,9 +3,11 @@
 import os
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy import text
 
 from submissions_checker.api.dependencies import DBSession
+from submissions_checker.core import metrics
 from submissions_checker.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -71,3 +73,13 @@ async def readiness_check(db: DBSession) -> dict[str, str]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection failed",
         ) from e
+
+
+@router.get("/metrics", include_in_schema=False)
+async def prometheus_metrics() -> Response:
+    """Prometheus exposition, scraped by Alloy on the compose network.
+
+    Caddy answers 404 for this path publicly. It touches no database on purpose: it must
+    stay up when Postgres is down, which is exactly when app_db_healthy=0 is worth reading.
+    """
+    return Response(content=metrics.render(), media_type=metrics.CONTENT_TYPE)
