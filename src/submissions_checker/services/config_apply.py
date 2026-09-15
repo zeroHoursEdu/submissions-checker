@@ -295,23 +295,14 @@ class ConfigApplyService:
         new_assignments_cfg: dict[str, Any] = new_cfg.get("assignments", {})
 
         for code, new_a_cfg in new_assignments_cfg.items():
+            self._collect_content_file_uploads(
+                tmp_dir, new_cfg["subjectCode"], code, new_a_cfg, plan
+            )
+
             if code not in prev_assignments_cfg:
                 plan.assignments_to_create.append(code)
-                # All content files for a new assignment are new S3 uploads
-                self._collect_new_content_files(
-                    tmp_dir, new_cfg["subjectCode"], code, new_a_cfg, [], plan
-                )
             else:
                 changed_fields = self._diff_assignment(new_a_cfg, prev_assignments_cfg[code])
-                # Content file diff
-                self._collect_new_content_files(
-                    tmp_dir,
-                    new_cfg["subjectCode"],
-                    code,
-                    new_a_cfg,
-                    prev_assignments_cfg[code].get("contentFiles", []),
-                    plan,
-                )
                 # Old content files no longer referenced
                 for old_entry in prev_assignments_cfg[code].get("contentFiles", []):
                     old_fn = old_entry.get("filename")
@@ -376,19 +367,25 @@ class ConfigApplyService:
 
         return changed
 
-    def _collect_new_content_files(
+    def _collect_content_file_uploads(
         self,
         tmp_dir: Path,
         subject_code: str,
         assignment_code: str,
         a_cfg: dict[str, Any],
-        prev_content_files: list[dict[str, Any]],
         plan: ConfigApplyPlan,
     ) -> None:
-        prev_filenames = {e.get("filename") for e in prev_content_files}
+        """Queue every listed content file for upload, including ones already in S3.
+
+        The S3 key is derived from the filename alone, so a teacher who edits a handout
+        without renaming it keeps the same key. Skipping the upload because the filename
+        is already known would leave students downloading the previous document with no
+        way to tell. Re-uploading overwrites the object in place, so the stored URL — and
+        therefore every page linking to it — stays valid.
+        """
         for entry in a_cfg.get("contentFiles", []):
             filename: str | None = entry.get("filename")
-            if not filename or filename in prev_filenames:
+            if not filename:
                 continue
             local_path = tmp_dir / "assignments" / assignment_code / filename
             if local_path.exists():
@@ -544,11 +541,13 @@ class ConfigApplyService:
                 except Exception as exc:
                     logger.warning("config_apply_s3_delete_failed", key=key, error=str(exc))
 
-        action = (
-            "created"
-            if subject_created
-            else ("updated" if plan.subject_action != "none" else "unchanged")
-        )
+        # Anything that gets this far is a ZIP whose bytes differ from every stored version:
+        # a new config version was inserted and the plugin tree on disk was replaced. Report
+        # that as an update even when no DB column moved — the field-level diff only looks at
+        # the handful of keys mirrored into columns, so edits to the quiz bank, to checker
+        # scripts or to a content file's contents all leave it empty. Calling those
+        # "unchanged" tells the teacher their upload was rejected when it was applied.
+        action = "created" if subject_created else "updated"
         return ApplyResult(changed=True, subject_action=action, subject_name=subject.name)
 
     def _apply_subject_fields(

@@ -589,3 +589,118 @@ async def test_duplicate_zip_with_missing_disk_dir_still_extracts(
         )
     ).scalar_one()
     assert version_count == 1, "self-heal must not insert a duplicate SubjectPluginConfig row"
+
+
+# ---------------------------------------------------------------------------
+# 8. A new ZIP always reports as applied, whatever part of it changed
+# ---------------------------------------------------------------------------
+
+
+async def test_reapply_quiz_only_change_reports_updated(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Quiz config lives only in the raw config blob, not in any DB column the
+    field-level diff inspects. A re-upload whose only edit is the question bank
+    must still be reported as an update — reporting 'unchanged' tells the teacher
+    their edit was rejected when in fact a new version was stored."""
+    owner = await _make_owner(db_session)
+    await db_session.commit()
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+
+    cfg = _base_config()
+    cfg["assignments"]["lab1"]["review_mode"] = "tests_then_quiz"
+    cfg["assignments"]["lab1"]["quiz"] = {
+        "pass_threshold_pct": 0.7,
+        "questions": [{"type": "single_choice", "text": "Old question?", "points": 1}],
+    }
+    await svc.apply(_make_zip(cfg), owner_id=owner.id, db=db_session)
+
+    cfg2 = _base_config()
+    cfg2["assignments"]["lab1"]["review_mode"] = "tests_then_quiz"
+    cfg2["assignments"]["lab1"]["quiz"] = {
+        "pass_threshold_pct": 0.7,
+        "questions": [{"type": "single_choice", "text": "New question?", "points": 1}],
+    }
+    result = await svc.apply(_make_zip(cfg2), owner_id=owner.id, db=db_session)
+
+    assert result.changed is True
+    assert result.subject_action == "updated"
+
+    subject = (
+        await db_session.execute(select(Subject).where(Subject.code == "demo101"))
+    ).scalar_one()
+    latest = (
+        await db_session.execute(
+            select(SubjectPluginConfig)
+            .where(SubjectPluginConfig.subject_id == subject.id)
+            .order_by(SubjectPluginConfig.version.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert latest.version == 2
+    questions = latest.config["assignments"]["lab1"]["quiz"]["questions"]
+    assert questions[0]["text"] == "New question?"
+
+
+async def test_reapply_file_only_change_reports_updated(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """config.yml identical, checker script edited: the plugin tree on disk is
+    replaced, so this is an update, not a no-op."""
+    owner = await _make_owner(db_session)
+    await db_session.commit()
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+
+    cfg = _base_config()
+    await svc.apply(
+        _make_zip(cfg, extra_files={"assignments/lab1/check.py": b"old"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
+    result = await svc.apply(
+        _make_zip(cfg, extra_files={"assignments/lab1/check.py": b"new"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
+
+    assert result.subject_action == "updated"
+    assert (tmp_path / "demo101" / "assignments" / "lab1" / "check.py").read_bytes() == b"new"
+
+
+async def test_reapply_edited_content_file_is_reuploaded(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """A teacher who fixes a typo in TASK.md keeps the filename. The S3 object is
+    keyed by that filename, so skipping the upload leaves students downloading the
+    old document forever."""
+    owner = await _make_owner(db_session)
+    await db_session.commit()
+
+    uploaded: list[tuple[str, bytes]] = []
+
+    async def _capture(local_path: Path, s3_key: str) -> str:
+        # The bytes must be read here: apply() deletes its temp tree on return.
+        uploaded.append((s3_key, Path(local_path).read_bytes()))
+        return f"https://cdn/{s3_key}"
+
+    storage = AsyncMock()
+    storage.upload_file = AsyncMock(side_effect=_capture)
+    storage.delete_file = AsyncMock()
+    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+
+    cfg = _base_config()
+    cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "task.md", "displayName": "Task"}]
+    await svc.apply(
+        _make_zip(cfg, extra_files={"assignments/lab1/task.md": b"# Task v1"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
+    uploaded.clear()
+
+    await svc.apply(
+        _make_zip(cfg, extra_files={"assignments/lab1/task.md": b"# Task v2, typo fixed"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
+
+    assert uploaded == [("subjects/demo101/assignments/lab1/task.md", b"# Task v2, typo fixed")]

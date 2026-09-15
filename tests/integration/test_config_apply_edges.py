@@ -313,13 +313,19 @@ async def test_reapply_removes_content_file_s3_key(
     assert a.content_files in (None, [])
 
 
-# ── Unchanged content file is not re-uploaded on re-apply  311-315 ───────────
+# ── A listed content file is re-uploaded on every apply  311-315 ─────────────
 
 
-async def test_reapply_existing_content_file_not_reuploaded(
+async def test_reapply_existing_content_file_is_reuploaded(
     db_session: AsyncSession,
     tmp_path: Path,
 ) -> None:
+    """Every listed content file is uploaded again on re-apply, even under an
+    unchanged filename. The S3 key is the filename, so the previous behaviour —
+    skip anything already named in the stored config — silently pinned students
+    to the first version of a handout the teacher ever uploaded. Overwriting the
+    same key keeps the stored URL valid, so the redundant upload costs nothing
+    but bandwidth on a rare, manual action."""
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
@@ -327,19 +333,24 @@ async def test_reapply_existing_content_file_not_reuploaded(
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "keep.pdf", "displayName": "Keep"}]
-    extras = {"assignments/lab1/keep.pdf": b"%PDF keep"}
-    await svc.apply(_make_zip(cfg, extras), owner_id=owner.id, db=db_session)
+    await svc.apply(
+        _make_zip(cfg, {"assignments/lab1/keep.pdf": b"%PDF keep"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
     assert storage.upload_file.await_count == 1
 
-    # Re-apply with the SAME content file but a changed title so the plan still
-    # registers an assignment update → _collect_new_content_files sees keep.pdf
-    # already present (line 314-315) and does not schedule another upload.
     storage.upload_file.reset_mock()
     cfg2 = _base_config()
     cfg2["assignments"]["lab1"]["title"] = "Lab 1 Renamed"
     cfg2["assignments"]["lab1"]["contentFiles"] = [{"filename": "keep.pdf", "displayName": "Keep"}]
-    await svc.apply(_make_zip(cfg2, extras), owner_id=owner.id, db=db_session)
-    assert storage.upload_file.await_count == 0
+    await svc.apply(
+        _make_zip(cfg2, {"assignments/lab1/keep.pdf": b"%PDF keep, corrected"}),
+        owner_id=owner.id,
+        db=db_session,
+    )
+    assert storage.upload_file.await_count == 1
+    assert storage.upload_file.await_args.args[1] == "subjects/edge101/assignments/lab1/keep.pdf"
 
 
 # ── Changing the MAIN picture on re-apply  486-491 ───────────────────────────
