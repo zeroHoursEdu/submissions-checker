@@ -22,7 +22,9 @@ from submissions_checker.db.models.base import Base, TimestampMixin
 from submissions_checker.db.models.enums import QuizAttemptStatus
 
 if TYPE_CHECKING:
+    from submissions_checker.db.models.quiz_attempt_pause import QuizAttemptPause
     from submissions_checker.db.models.quiz_attempt_snapshot import QuizAttemptSnapshot
+    from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
     from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
     from submissions_checker.db.models.submission import Submission
 
@@ -55,6 +57,15 @@ class QuizAttempt(Base, TimestampMixin):
     question_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Air-raid pause. Non-NULL means the attempt is paused RIGHT NOW and every clock is
+    # frozen; `paused_seconds` accumulates the pauses that have already closed. Kept in
+    # columns rather than in the `violations` JSONB because a pause is not a violation and
+    # the timing helpers must be able to read it without parsing anti-cheat bookkeeping.
+    # Invariant: a paused attempt is always IN_PROGRESS — finalizing clears `paused_at`.
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -78,12 +89,19 @@ class QuizAttempt(Base, TimestampMixin):
     snapshots: Mapped[list[QuizAttemptSnapshot]] = relationship(
         "QuizAttemptSnapshot", back_populates="attempt", cascade="all, delete-orphan"
     )
+    disputes: Mapped[list[QuizQuestionDispute]] = relationship(
+        "QuizQuestionDispute", back_populates="attempt", cascade="all, delete-orphan"
+    )
+    pauses: Mapped[list[QuizAttemptPause]] = relationship(
+        "QuizAttemptPause", back_populates="attempt", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint(
             "score IS NULL OR (score >= 0 AND max_score IS NOT NULL AND score <= max_score)",
             name="ck_quiz_attempts_score",
         ),
+        CheckConstraint("paused_seconds >= 0", name="ck_quiz_attempts_paused_seconds"),
         Index("ix_quiz_attempts_submission_id", "submission_id"),
         Index("ix_quiz_attempts_status", "status"),
     )

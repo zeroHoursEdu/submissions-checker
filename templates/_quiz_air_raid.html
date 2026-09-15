@@ -1,0 +1,89 @@
+{#
+  Air-raid pause button. Include ONCE per quiz page. Expects `attempt`.
+
+  `type="button"`: on the quiz pages this sits inside `#quiz-form`, where a bare <button>
+  defaults to submit and would hand in the whole quiz.
+
+  Geolocation refusal is handled entirely here — nothing is posted, so a student who denies
+  location simply sees why no pause happened. No alert()/confirm(): a modal dialog would
+  block the page, and the rest of the quiz UI already reports through inline banners.
+#}
+<div class="inline-flex flex-col items-start">
+  <button type="button" id="air-raid-btn"
+          class="inline-flex items-center gap-2 text-sm font-medium text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-3 py-2 rounded-lg transition-colors">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+    </svg>
+    {{ vocab.quiz.air_raid_button }}
+  </button>
+  <p id="air-raid-msg" class="hidden mt-2 text-xs max-w-sm rounded-lg px-3 py-2 bg-slate-100 text-slate-700 border border-slate-200"></p>
+</div>
+
+<script>
+(function () {
+  const ATTEMPT_ID = {{ attempt.id }};
+  const btn = document.getElementById('air-raid-btn');
+  const msg = document.getElementById('air-raid-msg');
+  const MSG = {
+    checking: {{ vocab.quiz.air_raid_checking | tojson }},
+    denied: {{ vocab.quiz.air_raid_denied | tojson }},
+    unsupported: {{ vocab.quiz.air_raid_unsupported | tojson }},
+    no_alert: {{ vocab.quiz.air_raid_no_alert | tojson }},
+    unavailable: {{ vocab.quiz.air_raid_unavailable | tojson }},
+    outside_coverage: {{ vocab.quiz.air_raid_outside_coverage | tojson }},
+    attempt_closed: {{ vocab.quiz.air_raid_attempt_closed | tojson }},
+    failed: {{ vocab.quiz.air_raid_failed | tojson }}
+  };
+
+  function show(text) {
+    msg.textContent = text;
+    msg.classList.remove('hidden');
+  }
+
+  btn.addEventListener('click', function () {
+    if (!navigator.geolocation) {
+      show(MSG.unsupported);
+      return;
+    }
+    btn.disabled = true;
+    show(MSG.checking);
+
+    navigator.geolocation.getCurrentPosition(
+      function (position) {
+        fetch('/portal/quiz/' + ATTEMPT_ID + '/airraid/pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          })
+        })
+          .then(function (response) {
+            if (!response.ok) { throw new Error('pause request failed'); }
+            return response.json();
+          })
+          .then(function (data) {
+            if (data.paused) {
+              // Reload into the paused screen, which is what actually hides the questions.
+              window.location.href = data.redirect || ('/portal/quiz/' + ATTEMPT_ID);
+              return;
+            }
+            btn.disabled = false;
+            show(MSG[data.reason] || MSG.failed);
+          })
+          .catch(function () {
+            btn.disabled = false;
+            show(MSG.failed);
+          });
+      },
+      function () {
+        // Covers PERMISSION_DENIED, POSITION_UNAVAILABLE and TIMEOUT alike: without
+        // coordinates there is nothing to verify, so nothing is sent and nothing pauses.
+        btn.disabled = false;
+        show(MSG.denied);
+      },
+      { timeout: 10000, maximumAge: 60000 }
+    );
+  });
+})();
+</script>

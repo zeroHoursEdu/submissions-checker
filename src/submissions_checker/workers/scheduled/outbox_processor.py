@@ -13,6 +13,7 @@ from submissions_checker.workers.tasks.notification_tasks import (
     execute_deadline_reminder_task,
     execute_feedback_request_task,
     execute_new_submission_task,
+    execute_quiz_dispute_resolved_task,
     execute_quiz_result_task,
     execute_submission_reviewed_task,
 )
@@ -185,6 +186,9 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     elif message.event_type == OutboxEventType.FEEDBACK_REQUEST_SENT:
         await execute_feedback_request_task(db, message.payload)
+
+    elif message.event_type == OutboxEventType.QUIZ_DISPUTE_RESOLVED:
+        await execute_quiz_dispute_resolved_task(db, message.payload)
 
     elif message.event_type in _RETIRED_EVENT_TYPES:
         logger.error(

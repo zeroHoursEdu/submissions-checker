@@ -177,6 +177,40 @@ quiz:
   proctor_camera_required: Для цього тесту потрібна камера. Надайте доступ до камери та перезавантажте сторінку.
   proctor_camera_denied: Доступ до камери відхилено. Тест заблоковано — зверніться до викладача.
 
+  # Report a broken question (student side).
+  report_question: Повідомити про помилку
+  report_question_title: Повідомити про некоректне запитання
+  report_note_label: Чому ви вважаєте запитання некоректним?
+  report_note_placeholder: "Наприклад: обидва варіанти правильні, або в умові помилка…"
+  report_note_optional: Пояснення не обов'язкове, але воно допомагає викладачу швидше розібратися.
+  report_send: Надіслати скаргу
+  report_cancel: Скасувати
+  report_sent_badge: Скаргу надіслано
+  report_sent_hint: Викладач перегляне запитання. Тест можна продовжувати — це нічого не змінює у ваших відповідях.
+  report_failed: Не вдалося надіслати скаргу. Спробуйте ще раз.
+
+  # Air-raid pause.
+  air_raid_button: Повітряна тривога
+  air_raid_checking: Перевіряємо тривогу у вашому регіоні…
+  air_raid_denied: Щоб перевірити тривогу, потрібен доступ до вашого місцезнаходження. Без нього тест не можна поставити на паузу.
+  air_raid_unsupported: Ваш браузер не може передати місцезнаходження. Зверніться до викладача.
+  air_raid_no_alert: У вашому регіоні зараз немає активної повітряної тривоги, тому тест не зупинено.
+  air_raid_unavailable: Не вдалося перевірити тривогу. Зверніться до викладача — тест не зупинено.
+  air_raid_outside_coverage: Ваше місцезнаходження поза межами системи оповіщення України.
+  air_raid_attempt_closed: Цю спробу вже завершено.
+  air_raid_failed: Не вдалося надіслати запит. Спробуйте ще раз.
+  paused_title: Тест на паузі — повітряна тривога
+  paused_region: "Регіон тривоги:"
+  paused_body: Перейдіть в укриття. Таймер зупинено, і запитання приховані до вашого повернення. Продовжіть, коли будете в безпеці.
+  paused_time_frozen: Час зупинено на
+  paused_progress: Запитання
+  paused_since: "На паузі з"
+  paused_continue: Я в безпеці — продовжити тест
+  paused_continue_hint: Таймер відновиться з того самого значення.
+  paused_questions_hidden: Запитання приховані, доки тест на паузі.
+  paused_anticheat_off: Перевірки антишахрайства (камера, перехід між вкладками) на паузі не діють.
+  paused_close_tab_ok: Можна закрити вкладку — пауза та час збережуться.
+
 consent:
   page_title: Згода на запис
   heading: Згода на запис під час проктерингу
@@ -192,6 +226,37 @@ consent:
     викладача для організації очного іспиту.
 
 teacher:
+  # Reported quiz questions awaiting a ruling.
+  disputes_title: Скарги на запитання
+  disputes_subtitle: Запитання, які студенти позначили як некоректні. Кожне рішення потребує пояснення.
+  disputes_nav_link: Скарги на запитання
+  disputes_empty: Немає скарг, що очікують розгляду.
+  disputes_review: Розглянути
+  disputes_back: Назад до списку скарг
+  disputes_col_student: Студент
+  disputes_col_assignment: Завдання
+  disputes_col_question: Запитання
+  disputes_col_reported: Надіслано
+  dispute_panel_title: Розгляд скарги на запитання
+  dispute_panel_subtitle: Скарга на запитання із завдання
+  dispute_question_label: Запитання
+  dispute_config_version: Версія конфігурації
+  dispute_answer_key: Правильна відповідь
+  dispute_correct_badge: правильна
+  dispute_shuffle_note: Варіанти показані в тому порядку, в якому їх бачив цей студент — порядок перемішується для кожної спроби.
+  dispute_student_answer: Відповідь студента
+  dispute_student_note: Пояснення студента
+  dispute_no_student_note: Студент не додав пояснення.
+  dispute_affected_count: "Зарахування запитання перерахує спроб:"
+  dispute_note_label: Пояснення рішення
+  dispute_note_placeholder: Чому запитання коректне або некоректне. Студент побачить цей текст.
+  dispute_note_required: Потрібно пояснити рішення.
+  dispute_accept: Запитання некоректне
+  dispute_accept_hint: Запитання буде зараховано всім студентам, які його отримали, а оцінки перераховано.
+  dispute_reject: Запитання коректне
+  dispute_reject_hint: Оцінки не змінюються. Студент отримає ваше пояснення.
+  dispute_status_accepted: Скаргу прийнято — запитання зараховано.
+  dispute_status_rejected: Скаргу відхилено — запитання залишається без змін.
   dashboard_title: Панель управління
   no_subjects_configured: Предмети не налаштовано
   no_subjects_configured_hint: Додайте предмети до бази даних для початку роботи.

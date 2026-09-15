@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from math import ceil
 from typing import Any
 
@@ -12,13 +13,21 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from submissions_checker.api.dependencies import AppSettings, DBSession, StudentId, StudentUser
+from submissions_checker.api.dependencies import (
+    AirRaid,
+    AppSettings,
+    DBSession,
+    StudentId,
+    StudentUser,
+)
+from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     OutboxMessage,
     QuizAnswer,
     QuizAttempt,
+    QuizAttemptPause,
     QuizAttemptSnapshot,
     Student,
     StudentAssignment,
@@ -29,13 +38,26 @@ from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
     QuizAttemptStatus,
+    QuizDisputeStatus,
 )
+from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from submissions_checker.services.air_raid.base import AirRaidProviderError
+from submissions_checker.services.air_raid.geo import resolve_region
+from submissions_checker.services.audit import audit
 from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services.quiz_scoring import (
+    apply_question_overrides,
+    load_question_overrides,
+    score_attempt,
+)
 from submissions_checker.services.storage import StorageService
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
+    push_dispute_notifications,
 )
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/portal", tags=["student-quiz"])
 
@@ -67,8 +89,51 @@ async def _needs_consent(db: Any, student_id: int) -> bool:
     return consented is None
 
 
+def _open_pause_seconds(attempt: QuizAttempt) -> float:
+    """Seconds elapsed inside the pause that is currently open, or 0 when not paused."""
+    paused_at: datetime | None = getattr(attempt, "paused_at", None)
+    if paused_at is None:
+        return 0.0
+    return (_utcnow() - paused_at.replace(tzinfo=UTC)).total_seconds()
+
+
+def _effective_now(attempt: QuizAttempt) -> datetime:
+    """Wall clock, frozen at the moment the attempt was paused for an air raid.
+
+    Every quiz clock in this module is a delta from a stored timestamp, so freezing "now"
+    is what stops all of them at once — there is no second place a duration accumulates.
+    """
+    return _utcnow() - timedelta(seconds=_open_pause_seconds(attempt))
+
+
+def _close_open_pause(attempt: QuizAttempt) -> int:
+    """End an open pause, folding its length into ``paused_seconds``. Returns that length.
+
+    The per-question anchor is walked FORWARD by the pause, the mirror image of the
+    ``reduce_time`` violation penalty that walks it backwards. That is what makes a resumed
+    question clock continue at exactly the value the student left it at, and it composes
+    with a penalty taken before the pause rather than cancelling it.
+    """
+    if getattr(attempt, "paused_at", None) is None:
+        return 0
+    elapsed = int(_open_pause_seconds(attempt))
+    attempt.paused_seconds = (attempt.paused_seconds or 0) + elapsed
+    if attempt.question_started_at is not None:
+        attempt.question_started_at = attempt.question_started_at.replace(tzinfo=UTC) + timedelta(
+            seconds=elapsed
+        )
+    attempt.paused_at = None
+    return elapsed
+
+
 def _elapsed_seconds(attempt: QuizAttempt) -> float:
-    return (_utcnow() - attempt.started_at.replace(tzinfo=UTC)).total_seconds()
+    """Quiz time consumed so far, with every air-raid pause taken out.
+
+    The frozen "now" removes the pause that is currently open; ``paused_seconds`` removes
+    all the ones that have already closed.
+    """
+    wall = (_effective_now(attempt) - attempt.started_at.replace(tzinfo=UTC)).total_seconds()
+    return wall - (getattr(attempt, "paused_seconds", 0) or 0)
 
 
 def _time_penalty(attempt: QuizAttempt) -> int:
@@ -123,9 +188,30 @@ def _question_seconds_remaining(attempt: QuizAttempt) -> int | None:
     limit = question.get("time_limit_seconds")
     if not limit or attempt.question_started_at is None:
         return None
-    elapsed = (_utcnow() - attempt.question_started_at.replace(tzinfo=UTC)).total_seconds()
+    elapsed = (
+        _effective_now(attempt) - attempt.question_started_at.replace(tzinfo=UTC)
+    ).total_seconds()
     # Ceil, so a question opens showing its full limit rather than one second short.
     return max(0, ceil(int(limit) - elapsed))
+
+
+async def _open_pause(db: DBSession, attempt_id: int) -> QuizAttemptPause | None:
+    """The pause row that is still open for this attempt, if any."""
+    result = await db.execute(
+        select(QuizAttemptPause)
+        .where(QuizAttemptPause.attempt_id == attempt_id, QuizAttemptPause.ended_at.is_(None))
+        .order_by(QuizAttemptPause.started_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _disputed_question_ids(db: DBSession, attempt_id: int) -> set[int]:
+    """Questions of this attempt the student has already reported, for the badge."""
+    rows = await db.execute(
+        select(QuizQuestionDispute.question_id).where(QuizQuestionDispute.attempt_id == attempt_id)
+    )
+    return set(rows.scalars().all())
 
 
 def _record_timed_out(attempt: QuizAttempt, db: DBSession) -> None:
@@ -152,7 +238,13 @@ def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
     longer than a single window — the clock runs whether or not their browser is open.
     Questions with no limit never expire, so the loop stops at the first of those.
     """
+    # Belt and braces: the frozen clock already makes a paused window un-expirable, but a
+    # pause must never cost the student a question even if that arithmetic is ever wrong.
+    if getattr(attempt, "paused_at", None) is not None:
+        return 0
+
     burned = 0
+    now = _effective_now(attempt)
     questions: list[dict[str, Any]] = attempt.questions_snapshot or []
     while attempt.current_index < len(questions):
         question = questions[attempt.current_index]
@@ -160,9 +252,9 @@ def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
         if not limit:
             break
         if attempt.question_started_at is None:
-            attempt.question_started_at = _utcnow()
+            attempt.question_started_at = now
             break
-        elapsed = (_utcnow() - attempt.question_started_at.replace(tzinfo=UTC)).total_seconds()
+        elapsed = (now - attempt.question_started_at.replace(tzinfo=UTC)).total_seconds()
         if elapsed <= limit:
             break
         _record_timed_out(attempt, db)
@@ -347,24 +439,26 @@ async def _grade_and_finalize(
     db: DBSession,
     status: QuizAttemptStatus = QuizAttemptStatus.COMPLETED,
 ) -> None:
-    force_fail = (attempt.violations or {}).get("_force_fail", False)
+    # A question a teacher has already ruled broken is credited here, so an attempt that
+    # was in progress when the ruling landed needs no separate regrade.
+    overrides = await load_question_overrides(
+        db, attempt.plugin_config_id, attempt.plugin_config_version
+    )
+    if apply_question_overrides(attempt, overrides, db):
+        await db.flush()
 
-    if force_fail:
-        is_passed = False
+    score, max_score, is_passed, force_failed = score_attempt(attempt)
+    if force_failed:
         status = QuizAttemptStatus.VIOLATION_FAIL
-        score = sum(a.points_earned or 0 for a in attempt.answers)
-        max_score = sum(q["points"] for q in attempt.questions_snapshot)
-    else:
-        score = sum(a.points_earned or 0 for a in attempt.answers)
-        max_score = sum(q["points"] for q in attempt.questions_snapshot)
-        threshold = attempt.config_snapshot.get("pass_threshold_pct", 0.6)
-        is_passed = (score / max_score) >= threshold if max_score > 0 else False
 
     attempt.score = score
     attempt.max_score = max_score
     attempt.is_passed = is_passed
     attempt.submitted_at = _utcnow()
     attempt.status = status
+    # A terminal attempt is never "paused". Fold any open pause into the total and clear the
+    # flag, or the frozen clock would outlive the attempt that needed it.
+    _close_open_pause(attempt)
 
     attempts_left: int | None = None
     submission = attempt.submission
@@ -560,6 +654,31 @@ async def show_quiz(
         await _grade_and_finalize(attempt, db, status=QuizAttemptStatus.VIOLATION_FAIL)
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
 
+    if attempt.paused_at is not None:
+        # Paused for an air raid. This page carries no question text, no options and no
+        # answer form: pausing must not become a way to read a question at leisure. It also
+        # does NOT include the anti-cheat partial, which is what suspends the camera gate
+        # and every violation reporter while the student is in a shelter.
+        pause = await _open_pause(db, attempt.id)
+        return render(
+            request,
+            "student_quiz_paused.html",
+            {
+                "current_user": current_user,
+                "attempt": attempt,
+                "seconds_remaining": (
+                    _question_seconds_remaining(attempt)
+                    if _is_stepped(attempt)
+                    else _seconds_remaining(attempt)
+                ),
+                "question_number": attempt.current_index + 1,
+                "total_questions": len(attempt.questions_snapshot or []),
+                "is_stepped": _is_stepped(attempt),
+                "paused_since": attempt.paused_at,
+                "region_title": pause.region_title if pause else None,
+            },
+        )
+
     if _is_timed_out(attempt):
         await _grade_and_finalize(attempt, db, status=QuizAttemptStatus.TIMED_OUT)
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
@@ -591,6 +710,7 @@ async def show_quiz(
                 "seconds_remaining": _question_seconds_remaining(attempt),
                 "anti_cheat_config": anti_cheat_config,
                 "proctoring_config": proctoring_config,
+                "disputed_ids": await _disputed_question_ids(db, attempt.id),
             },
         )
 
@@ -608,6 +728,7 @@ async def show_quiz(
             "seconds_remaining": seconds_remaining,
             "anti_cheat_config": anti_cheat_config,
             "proctoring_config": proctoring_config,
+            "disputed_ids": await _disputed_question_ids(db, attempt.id),
         },
     )
 
@@ -639,6 +760,12 @@ async def report_violation(
 
     if attempt.status != QuizAttemptStatus.IN_PROGRESS:
         return JSONResponse({"action": "none", "violation_count": 0})
+
+    if attempt.paused_at is not None:
+        # Anti-cheat is suspended during an air-raid pause. Returning before `violations` is
+        # touched is the point: a student running for a shelter must not accumulate
+        # tab-switch counts, let alone cross a _force_fail threshold.
+        return JSONResponse({"action": "none", "violation_count": 0, "paused": True})
 
     violations = dict(attempt.violations or {})
     violations[event_type] = violations.get(event_type, 0) + 1
@@ -719,6 +846,258 @@ async def report_violation(
     )
 
 
+@router.post("/quiz/{attempt_id}/dispute")
+async def report_question(
+    attempt_id: int,
+    request: Request,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+) -> JSONResponse:
+    """Report a question as incorrect or invalid, for a teacher to rule on later.
+
+    Deliberately non-blocking, and deliberately free of every side effect the other quiz
+    endpoints carry: it does not advance the stepper, does not call ``_advance_expired``,
+    does not touch ``violations``, and does not restart any clock. Flagging a question must
+    cost the student nothing — otherwise nobody would risk pressing the button mid-exam.
+
+    Accepted in any attempt state: the same endpoint serves the live quiz and the result
+    page, because an appeal is most often filed after seeing the score.
+    """
+    attempt = await db.get(QuizAttempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status_code=404)
+
+    sub_result = await db.execute(
+        select(Submission)
+        .where(Submission.id == attempt.submission_id)
+        .options(selectinload(Submission.students_assignment))
+    )
+    submission = sub_result.scalar_one_or_none()
+    if submission is None or submission.students_assignment.student_id != student_id:
+        raise HTTPException(status_code=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    raw_question_id = body.get("question_id")
+    try:
+        question_id = int(raw_question_id)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="question_id is required") from None
+
+    # The snapshot is a random draw, so a question the student never saw is not theirs to
+    # flag — and crediting it later would reach attempts this one has no standing over.
+    q_snap = next(
+        (q for q in (attempt.questions_snapshot or []) if q.get("id") == question_id), None
+    )
+    if q_snap is None:
+        raise HTTPException(status_code=400, detail="Question is not part of this attempt")
+
+    note = str(body.get("note") or "").strip() or None
+
+    dispute = QuizQuestionDispute(
+        attempt_id=attempt.id,
+        question_id=question_id,
+        student_id=student_id,
+        plugin_config_id=attempt.plugin_config_id,
+        plugin_config_version=attempt.plugin_config_version,
+        student_note=note,
+        status=QuizDisputeStatus.OPEN,
+    )
+    db.add(dispute)
+    await db.flush()
+
+    student = await db.get(Student, student_id)
+    await push_dispute_notifications(
+        db,
+        submission.id,
+        dispute_id=dispute.id,
+        question_text=str(q_snap.get("text", "")),
+        student_name=(student.full_name if student else f"Student {student_id}"),
+    )
+    await audit(
+        db,
+        action="student_reported_question",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="quiz_attempt",
+        target_id=attempt.id,
+        dispute_id=dispute.id,
+        question_id=question_id,
+        note=note,
+    )
+    await db.commit()
+
+    return JSONResponse({"ok": True, "dispute_id": dispute.id})
+
+
+@router.post("/quiz/{attempt_id}/airraid/pause")
+async def request_air_raid_pause(
+    attempt_id: int,
+    request: Request,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+    air_raid: AirRaid,
+) -> JSONResponse:
+    """Pause the attempt if an air-raid alert is really active over the student's location.
+
+    Refusals come back as HTTP 200 with a ``reason``, because every one of them is a normal
+    outcome the page has to explain rather than an error. Nothing is paused on an unverified
+    claim: no coordinates, no coverage, no alert and no reachable provider all mean no pause.
+
+    Geolocation denial never reaches here — the browser reports that to the student directly
+    and posts nothing, which also means a request with no coordinates is simply a 400.
+    """
+    attempt = await db.get(QuizAttempt, attempt_id, options=[selectinload(QuizAttempt.answers)])
+    if attempt is None:
+        raise HTTPException(status_code=404)
+
+    sub_result = await db.execute(
+        select(Submission)
+        .where(Submission.id == attempt.submission_id)
+        .options(selectinload(Submission.students_assignment))
+    )
+    submission = sub_result.scalar_one_or_none()
+    if submission is None or submission.students_assignment.student_id != student_id:
+        raise HTTPException(status_code=403)
+
+    if attempt.status != QuizAttemptStatus.IN_PROGRESS:
+        return JSONResponse({"paused": False, "reason": "attempt_closed"})
+
+    if attempt.paused_at is not None:
+        # Double click, or a second tab. Idempotent.
+        return JSONResponse({"paused": True, "already": True})
+
+    # Settle the clock BEFORE stopping it. Otherwise a student could pause at 0:00 and
+    # freeze a window that has in fact already closed.
+    if _is_timed_out(attempt):
+        await _grade_and_finalize(attempt, db, status=QuizAttemptStatus.TIMED_OUT)
+        return JSONResponse({"paused": False, "reason": "attempt_closed"})
+    if _is_stepped(attempt):
+        if _advance_expired(attempt, db):
+            await db.commit()
+        if _current_question(attempt) is None:
+            await _grade_and_finalize(attempt, db)
+            return JSONResponse({"paused": False, "reason": "attempt_closed"})
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    try:
+        lat = float(body["lat"])
+        lng = float(body["lng"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="lat and lng are required") from None
+
+    if air_raid is None:
+        return JSONResponse({"paused": False, "reason": "unavailable"})
+
+    region = resolve_region(lat, lng)
+    if region is None:
+        return JSONResponse({"paused": False, "reason": "outside_coverage"})
+
+    try:
+        alert = await air_raid.active_alert(region.uid)
+    except AirRaidProviderError:
+        # An outage must neither pause nor brick the quiz; the student keeps answering.
+        logger.warning("air_raid_check_unavailable", attempt_id=attempt_id, region=region.uid)
+        return JSONResponse({"paused": False, "reason": "unavailable"})
+
+    if alert is None:
+        return JSONResponse({"paused": False, "reason": "no_alert", "region": region.title})
+
+    now = _utcnow()
+    attempt.paused_at = now
+    db.add(
+        QuizAttemptPause(
+            attempt_id=attempt.id,
+            started_at=now,
+            latitude=Decimal(str(round(lat, 6))),
+            longitude=Decimal(str(round(lng, 6))),
+            region_uid=region.uid,
+            region_title=region.title,
+            alert_started_at=alert.started_at,
+        )
+    )
+    await audit(
+        db,
+        action="student_air_raid_pause",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="quiz_attempt",
+        target_id=attempt.id,
+        region_uid=region.uid,
+        region_title=region.title,
+        latitude=round(lat, 6),
+        longitude=round(lng, 6),
+    )
+    await db.commit()
+
+    logger.info("air_raid_pause_started", attempt_id=attempt.id, region=region.uid)
+    return JSONResponse(
+        {"paused": True, "region": region.title, "redirect": f"/portal/quiz/{attempt.id}"}
+    )
+
+
+@router.post("/quiz/{attempt_id}/airraid/resume")
+async def resume_after_air_raid(
+    attempt_id: int,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+) -> RedirectResponse:
+    """Resume a paused attempt. The student decides when they are safe; nothing re-checks.
+
+    A plain form POST, so it works with JavaScript disabled, and the redirect re-renders the
+    question page — which re-includes the anti-cheat partial. That re-inclusion IS the
+    re-arming of proctoring.
+    """
+    attempt = await db.get(QuizAttempt, attempt_id)
+    if attempt is None:
+        raise HTTPException(status_code=404)
+
+    sub_result = await db.execute(
+        select(Submission)
+        .where(Submission.id == attempt.submission_id)
+        .options(selectinload(Submission.students_assignment))
+    )
+    submission = sub_result.scalar_one_or_none()
+    if submission is None or submission.students_assignment.student_id != student_id:
+        raise HTTPException(status_code=403)
+
+    if attempt.paused_at is None:
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
+
+    pause = await _open_pause(db, attempt.id)
+    paused_at = attempt.paused_at
+    elapsed = _close_open_pause(attempt)
+    if pause is not None:
+        pause.ended_at = paused_at.replace(tzinfo=UTC) + timedelta(seconds=elapsed)
+
+    await audit(
+        db,
+        action="student_air_raid_resume",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="quiz_attempt",
+        target_id=attempt.id,
+        paused_seconds=elapsed,
+    )
+    await db.commit()
+
+    logger.info("air_raid_pause_ended", attempt_id=attempt.id, paused_seconds=elapsed)
+    return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
+
+
 @router.post("/quiz/{attempt_id}/snapshot")
 async def upload_snapshot(
     attempt_id: int,
@@ -745,6 +1124,11 @@ async def upload_snapshot(
 
     if attempt.status != QuizAttemptStatus.IN_PROGRESS:
         raise HTTPException(status_code=409, detail="Attempt is not in progress")
+
+    if attempt.paused_at is not None:
+        # Proctoring is suspended during a pause: nothing is stored, and 200 keeps the
+        # best-effort client uploader quiet rather than making it retry.
+        return JSONResponse({"stored": False, "paused": True})
 
     camera = attempt.config_snapshot.get("anti_cheat", {}).get("camera", {})
     if not camera.get("capture_snapshots"):
@@ -820,6 +1204,11 @@ async def answer_question(
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
 
     if not _is_stepped(attempt):
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
+
+    if attempt.paused_at is not None:
+        # A stale tab posting mid-pause. Record nothing and burn nothing — answering with
+        # the clock stopped would be exactly the abuse the pause must not enable.
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
 
     if (attempt.violations or {}).get("_force_fail"):
@@ -900,6 +1289,11 @@ async def submit_quiz(
     if _is_stepped(attempt):
         # A stepped attempt is finalized by its last question, not by a bulk submit. Anything
         # posting here is a stale form, so send them back to the question they are actually on.
+        return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
+
+    if attempt.paused_at is not None:
+        # Before the answer-wiping regrade below: a stale submit arriving during a pause
+        # would otherwise delete everything the student had already answered.
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
 
     if (attempt.violations or {}).get("_force_fail"):
@@ -1017,5 +1411,6 @@ async def quiz_result(
             "show_correct": show_correct,
             "subject_id": subject_id,
             "student_assignment_id": sa.id,
+            "disputed_ids": await _disputed_question_ids(db, attempt.id),
         },
     )

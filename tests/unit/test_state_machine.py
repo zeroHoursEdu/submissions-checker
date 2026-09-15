@@ -43,6 +43,10 @@ LEGAL = [
     (S.AWAITING_TEACHER_REVIEW, "teacher_approve", S.COMPLETED),
     (S.AWAITING_TEACHER_REVIEW, "teacher_reject", S.FAILED),
     (S.AWAITING_TEACHER_REVIEW, "teacher_send_quiz", S.QUIZ_SENT),
+    # The one way out of a terminal FAILED: a teacher accepted a broken-question
+    # dispute, the attempt was re-scored and now passes.
+    (S.FAILED, "dispute_regrade_passed", S.COMPLETED),
+    (S.FAILED, "dispute_regrade_passed_teacher", S.AWAITING_TEACHER_REVIEW),
     # Legacy flow
     (S.CHECKING, "check_passed_quiz", S.QUIZ_SENT),
     (S.CHECKING, "check_passed_teacher_review", S.WAITING_FOR_TEACHER_REVIEW),
@@ -71,7 +75,13 @@ ILLEGAL = [
     (S.TESTING, "validation_passed"),
     (S.COMPLETED, "teacher_approve"),  # terminal
     (S.COMPLETED, "start_validation"),
-    (S.FAILED, "teacher_reject"),  # terminal
+    (S.FAILED, "teacher_reject"),  # still terminal for everything but a dispute regrade
+    (S.FAILED, "quiz_passed"),  # a plain quiz outcome must never resurrect a failure
+    (S.FAILED, "teacher_approve"),
+    # The regrade edge is pinned to FAILED alone.
+    (S.COMPLETED, "dispute_regrade_passed"),
+    (S.QUIZ_SENT, "dispute_regrade_passed"),
+    (S.AWAITING_TEACHER_REVIEW, "dispute_regrade_passed"),
     (S.VALIDATION_FAILED, "validation_passed"),
     (S.TEST_FAILED, "test_passed_ai"),
     (S.AWAITING_TEACHER_REVIEW, "teacher_approve_done"),  # legacy event on new state

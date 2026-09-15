@@ -1,0 +1,49 @@
+{#
+  Report-a-broken-question control. Include once per question, passing `q_id`.
+
+  Expects in context: `attempt`, `q_id`, and `disputed_ids` (defaulted below, because
+  `DebugUndefined` in development would otherwise render the placeholder rather than fail).
+
+  Every control here is `type="button"`. On the quiz pages this markup sits INSIDE
+  `#quiz-form`, where a bare <button> defaults to submit and would silently hand in the
+  whole quiz. Nothing in here touches an answer field, and it never navigates — reporting a
+  question must cost the student nothing.
+#}
+{% set _disputed = disputed_ids if disputed_ids is defined and disputed_ids else [] %}
+<div class="mt-4 pt-3 border-t border-slate-100" data-report-question="{{ q_id }}">
+  {% if q_id in _disputed %}
+    <span class="inline-flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+      </svg>
+      {{ vocab.quiz.report_sent_badge }}
+    </span>
+  {% else %}
+    <button type="button"
+            class="js-report-open inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-amber-700 transition-colors"
+            data-q="{{ q_id }}">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+      </svg>
+      {{ vocab.quiz.report_question }}
+    </button>
+
+    <div class="js-report-panel hidden mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3" data-q="{{ q_id }}">
+      <p class="text-xs font-medium text-amber-900 mb-2">{{ vocab.quiz.report_question_title }}</p>
+      <label for="report-note-{{ q_id }}" class="block text-xs text-amber-800 mb-1">{{ vocab.quiz.report_note_label }}</label>
+      <textarea id="report-note-{{ q_id }}" rows="2"
+                class="js-report-note w-full text-xs border border-amber-300 rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                placeholder="{{ vocab.quiz.report_note_placeholder }}"></textarea>
+      <p class="text-xs text-amber-700 mt-1 mb-2">{{ vocab.quiz.report_note_optional }}</p>
+      <div class="flex items-center gap-2">
+        <button type="button" class="js-report-send bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
+          {{ vocab.quiz.report_send }}
+        </button>
+        <button type="button" class="js-report-cancel text-xs text-amber-700 hover:text-amber-900 px-2 py-1.5 transition-colors">
+          {{ vocab.quiz.report_cancel }}
+        </button>
+        <span class="js-report-error hidden text-xs text-red-700">{{ vocab.quiz.report_failed }}</span>
+      </div>
+    </div>
+  {% endif %}
+</div>

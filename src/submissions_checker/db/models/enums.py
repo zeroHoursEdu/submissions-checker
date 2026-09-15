@@ -64,6 +64,7 @@ class OutboxEventType(enum.StrEnum):
     RUN_CHECKS = "RUN_CHECKS"
     RUN_AI_REVIEW = "RUN_AI_REVIEW"
     FEEDBACK_REQUEST_SENT = "FEEDBACK_REQUEST_SENT"
+    QUIZ_DISPUTE_RESOLVED = "QUIZ_DISPUTE_RESOLVED"
 
     def __str__(self) -> str:
         return self.value
@@ -94,6 +95,17 @@ class QuizAttemptStatus(enum.StrEnum):
     COMPLETED = "COMPLETED"
     TIMED_OUT = "TIMED_OUT"
     VIOLATION_FAIL = "VIOLATION_FAIL"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class QuizDisputeStatus(enum.StrEnum):
+    """Lifecycle of a student's report that a quiz question is wrong or unanswerable."""
+
+    OPEN = "OPEN"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
 
     def __str__(self) -> str:
         return self.value

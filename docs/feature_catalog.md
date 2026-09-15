@@ -144,11 +144,87 @@ names/details a student sees is controlled by the subject config.
 | Submit a webcam proctoring snapshot (when enabled + consented; skipped silently if storage absent) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/snapshot` |
 | Submit the quiz (auto-graded; status COMPLETED / TIMED_OUT / VIOLATION_FAIL; pass marks the submission COMPLETED) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/submit` |
 | See quiz result (score, pass/fail, per-question breakdown; correct answers only if the teacher enabled it) | STUDENT (owner) | `GET /portal/quiz/{attempt_id}/result` |
+| Report a question as incorrect / invalid (non-blocking: works mid-attempt and from the result page, changes no answer and no clock; unlimited) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/dispute` |
+| Review reported questions | TEACHER (subject owner) / ADMIN | `GET /teacher/disputes`, `GET /teacher/disputes/{id}` |
+| Rule on a reported question — a note is mandatory either way | TEACHER (subject owner) / ADMIN | `POST /teacher/disputes/{id}/resolve` |
+| Pause the attempt for an air raid (verified against alerts.in.ua for the student's location) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/airraid/pause` |
+| Resume after an air raid | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/airraid/resume` |
 
 Question types (`QuizQuestionType`): `SINGLE_CHOICE`, `MULTIPLE_CHOICE`, `ORDERING`,
 `TRUE_FALSE`, `SHORT_ANSWER` (short answers are recorded but not auto-scored). Quiz
 violation flags and webcam thumbnails surface to the teacher on the assignment review board
 (§4).
+
+### Reported questions ("disputes")
+
+A student who thinks a question is wrong or unanswerable flags it with a button next to the
+question. The report reaches the subject owner's notification bell (all active admins when
+the subject has no owner) with a link straight to the ruling panel; there is no email, since
+the review digest is keyed per submission and would coalesce disputes away.
+
+In the panel the teacher sees the question **as that student saw it** — option order is
+shuffled per attempt, so the snapshot's key is the only one their stored answer index means
+anything against — plus the student's answer, their note, and how many attempts an accept
+would re-score. A note explaining the decision is required for accept and reject alike,
+because the student is shown that text verbatim.
+
+Accepting writes a `quiz_question_overrides` row for `(plugin_config_id,
+plugin_config_version, question_id)` and credits the question to **everyone who drew it from
+that config version**:
+
+- finished attempts that are not already passing are re-scored immediately (`max_score` is
+  untouched, so only the earned score rises), and an attempt that never reached the question
+  gets a credited answer row;
+- attempts still in progress are left alone and read the override when they finalize —
+  writing an answer row for a live attempt would be double-counted, because answering always
+  INSERTs and `quiz_answers` has no uniqueness on `(attempt_id, question_id)`;
+- `VIOLATION_FAIL` attempts are excluded: they failed for cheating, not for a bad question;
+- re-uploading the subject config bumps the version, so a repaired question stops being
+  credited rather than crediting whatever moved into its index.
+
+Where that flips an attempt to passing, the submission follows — including out of a terminal
+`FAILED`, via the `dispute_regrade_passed` / `dispute_regrade_passed_teacher` transitions
+added for exactly this (named distinctly so an ordinary late-finishing attempt can never
+resurrect a failed submission). `finalize_grade` then rewrites the grade. Every affected
+student is notified, including classmates who never reported anything. Accepting also closes
+every other open report on the same question, since reports are unlimited.
+
+### Air-raid pause
+
+A student under an air-raid alert presses a button next to the report control; the browser
+asks for their location and posts the coordinates. The backend maps them to an
+alerts.in.ua oblast (bundled boundaries — the API has no coordinate endpoint) and pauses the
+attempt only if an `air_raid` alert is actually active there. Every other outcome refuses
+with a reason the page explains: geolocation denied (never even reaches the server), outside
+Ukraine, no active alert, or the provider unreachable/unconfigured. An unverified claim never
+stops a graded clock.
+
+While paused:
+
+- **every clock is frozen** — one `_effective_now` helper stops "now" for the attempt, and
+  `paused_seconds` accumulates closed pauses, so nothing can time out and no per-question
+  window can burn;
+- **the questions are not sent at all** — `student_quiz_paused.html` renders no question
+  text, options or answer form, so pausing is not a free read;
+- **anti-cheat is suspended** — that template omits the anti-cheat partial, so the camera
+  gate and every violation listener are gone; violation events and snapshot uploads are
+  ignored server-side, and answering or submitting is rejected.
+
+Only the student ends the pause, whenever they choose; nothing re-checks the alert. The pause
+survives closing the tab (re-entering shows the same question and the same timer value), and
+an attempt that is never resumed stays `IN_PROGRESS` indefinitely — there is no reaper.
+Each pause is recorded in `quiz_attempt_pauses` with the coordinates, region and the alert's
+start time, so a suspicious pause can be audited afterwards.
+
+Configuration: `ALERTS_IN_UA_TOKEN` (absent ⇒ feature reports unavailable),
+`AIR_RAID_PAUSE_ENABLED`, `AIR_RAID_CACHE_SECONDS`. Geolocation needs a secure context, so
+the pause button does nothing over plain HTTP other than `localhost`.
+
+Two known limits, both recorded in `docs/known_bugs.md`: region resolution is oblast-level,
+so a student within a kilometre or two of an oblast border can resolve to the neighbour (or
+to nothing, which refuses the pause); and in single-page mode the tab that pressed pause has
+already loaded every question, so stopping the clock gives unbounded time to research
+questions they have seen. Per-question (stepper) mode bounds that to one question.
 
 ## 6. Feedback
 

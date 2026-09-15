@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}{{ vocab.teacher.disputes_title }}{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.teacher.dashboard_title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.teacher.disputes_title }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-slate-900 mb-1">{{ vocab.teacher.disputes_title }}</h1>
+  <p class="text-slate-500 text-sm">{{ vocab.teacher.disputes_subtitle }}</p>
+</div>
+
+{% if disputes %}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 border-b border-slate-200">
+        <tr>
+          <th class="text-left font-medium text-slate-500 px-4 py-3">{{ vocab.teacher.disputes_col_student }}</th>
+          <th class="text-left font-medium text-slate-500 px-4 py-3">{{ vocab.teacher.disputes_col_assignment }}</th>
+          <th class="text-left font-medium text-slate-500 px-4 py-3">{{ vocab.teacher.disputes_col_question }}</th>
+          <th class="text-left font-medium text-slate-500 px-4 py-3">{{ vocab.teacher.disputes_col_reported }}</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for d in disputes %}
+        <tr class="hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3 font-medium text-slate-900 whitespace-nowrap">{{ d.student_name }}</td>
+          <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ d.assignment_title }}</td>
+          <td class="px-4 py-3 text-slate-700 max-w-md">
+            <span class="block truncate">{{ d.question_text }}</span>
+            {% if d.student_note %}
+              <span class="block text-xs text-slate-400 truncate italic">{{ d.student_note }}</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{{ d.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="px-4 py-3 text-right whitespace-nowrap">
+            <a href="/teacher/disputes/{{ d.id }}"
+               class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
+              {{ vocab.teacher.disputes_review }} &rarr;
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
+  <svg class="w-10 h-10 mx-auto text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+  </svg>
+  <p class="text-slate-500 text-sm">{{ vocab.teacher.disputes_empty }}</p>
+</div>
+{% endif %}
+{% endblock %}

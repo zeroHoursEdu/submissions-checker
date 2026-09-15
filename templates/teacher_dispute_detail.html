@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}{{ vocab.teacher.dispute_panel_title }}{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.teacher.dashboard_title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/disputes" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.teacher.disputes_title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.teacher.dispute_panel_title }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-slate-900 mb-1">{{ vocab.teacher.dispute_panel_title }}</h1>
+  <p class="text-slate-500 text-sm">
+    {{ vocab.teacher.dispute_panel_subtitle }} <strong class="text-slate-700">{{ assignment_title }}</strong>.
+  </p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+  <div class="lg:col-span-2 space-y-5">
+
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+      <h2 class="font-semibold text-slate-900 mb-4">{{ vocab.teacher.student_card_label }}</h2>
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 font-semibold flex items-center justify-center shrink-0 text-base">
+          {{ student.full_name[0] }}
+        </div>
+        <div>
+          <p class="font-medium text-slate-900">{{ student.full_name }}</p>
+          <p class="text-xs text-slate-400">{{ student.email }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+      <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.teacher.dispute_question_label }}</h2>
+      <p class="text-xs text-slate-400 mb-4">
+        {{ vocab.teacher.dispute_config_version }} {{ config_version }} &middot; #{{ dispute.question_id }} &middot; {{ question.type }}
+      </p>
+      <p class="text-slate-900 mb-5">{{ question.text }}</p>
+
+      {% if options %}
+      <h3 class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">{{ vocab.teacher.dispute_answer_key }}</h3>
+      <ul class="space-y-1.5 mb-5">
+        {% for opt in options %}
+        <li data-option-index="{{ loop.index0 }}"
+            {% if loop.index0 in correct_indexes %}data-correct-option="{{ loop.index0 }}"{% endif %}
+            class="flex items-start gap-2 text-sm rounded-lg px-3 py-2 {% if loop.index0 in correct_indexes %}bg-green-50 text-green-900 border border-green-200{% else %}bg-slate-50 text-slate-600 border border-slate-100{% endif %}">
+          <span class="font-mono text-xs text-slate-400 shrink-0 mt-0.5">{{ loop.index0 }}</span>
+          <span class="flex-1">{{ opt }}</span>
+          {% if loop.index0 in correct_indexes %}
+            <span class="text-xs font-medium text-green-700 shrink-0">{{ vocab.teacher.dispute_correct_badge }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="text-xs text-slate-400 italic">{{ vocab.teacher.dispute_shuffle_note }}</p>
+      {% elif question.type == "TRUE_FALSE" %}
+      <p class="text-sm text-slate-600">
+        {{ vocab.teacher.dispute_answer_key }}:
+        <strong class="text-green-700">{{ "True" if question.config.correct else "False" }}</strong>
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+      <h2 class="font-semibold text-slate-900 mb-4">{{ vocab.teacher.dispute_student_answer }}</h2>
+      <p class="text-sm px-3 py-2 rounded-lg border {% if answer_is_correct %}bg-green-50 border-green-200 text-green-900{% else %}bg-red-50 border-red-200 text-red-900{% endif %}">
+        {{ student_answer }}
+      </p>
+
+      <h3 class="font-semibold text-slate-900 mt-5 mb-2 text-sm">{{ vocab.teacher.dispute_student_note }}</h3>
+      {% if dispute.student_note %}
+        <p class="text-sm text-slate-600 italic">&ldquo;{{ dispute.student_note }}&rdquo;</p>
+      {% else %}
+        <p class="text-sm text-slate-400">{{ vocab.teacher.dispute_no_student_note }}</p>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <div class="lg:col-span-1">
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 sticky top-20">
+      <h2 class="font-semibold text-slate-900 mb-4">{{ vocab.teacher.decision_label }}</h2>
+
+      {% if error %}
+      <p class="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{{ error }}</p>
+      {% endif %}
+
+      {% if is_open %}
+      <div class="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        {{ vocab.teacher.dispute_affected_count }} <strong>{{ affected_count }}</strong>
+      </div>
+
+      <form method="post" action="/teacher/disputes/{{ dispute.id }}/resolve" id="dispute-form">
+        <input type="hidden" name="action" id="action-input" value="">
+
+        <label for="note" class="block text-xs font-medium text-slate-600 mb-1">
+          {{ vocab.teacher.dispute_note_label }} <span class="text-red-500">*</span>
+        </label>
+        <textarea id="note" name="note" rows="4" required
+                  class="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none"
+                  placeholder="{{ vocab.teacher.dispute_note_placeholder }}"></textarea>
+
+        <div class="space-y-3">
+          <button type="button" onclick="submitAction('accept')"
+                  class="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors">
+            {{ vocab.teacher.dispute_accept }}
+          </button>
+          <p class="text-xs text-slate-400 -mt-1">{{ vocab.teacher.dispute_accept_hint }}</p>
+
+          <button type="button" onclick="submitAction('reject')"
+                  class="w-full flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-medium text-sm px-4 py-2.5 rounded-lg transition-colors">
+            {{ vocab.teacher.dispute_reject }}
+          </button>
+          <p class="text-xs text-slate-400 -mt-1">{{ vocab.teacher.dispute_reject_hint }}</p>
+        </div>
+      </form>
+      {% else %}
+      <div class="text-sm">
+        <p class="font-medium text-slate-900 mb-1">
+          {% if dispute.status == "ACCEPTED" %}{{ vocab.teacher.dispute_status_accepted }}{% else %}{{ vocab.teacher.dispute_status_rejected }}{% endif %}
+        </p>
+        <p class="text-slate-600 italic">&ldquo;{{ dispute.teacher_note }}&rdquo;</p>
+      </div>
+      {% endif %}
+
+      <div class="mt-4 pt-4 border-t border-slate-100">
+        <a href="/teacher/disputes" class="text-sm text-slate-400 hover:text-slate-600 transition-colors">
+          {{ vocab.teacher.disputes_back }}
+        </a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function submitAction(action) {
+  const note = document.getElementById('note');
+  if (!note.value.trim()) {
+    note.focus();
+    return;
+  }
+  document.getElementById('action-input').value = action;
+  document.getElementById('dispute-form').submit();
+}
+</script>
+{% endblock %}

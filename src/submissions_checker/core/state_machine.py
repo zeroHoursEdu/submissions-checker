@@ -47,6 +47,15 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
         "teacher_reject": SubmissionStatus.FAILED,
         "teacher_send_quiz": SubmissionStatus.QUIZ_SENT,
     },
+    # FAILED is otherwise terminal. The single exception is a teacher accepting a
+    # broken-question dispute: the attempt is re-scored, now clears the threshold, and the
+    # submission has to follow — a student must not stay failed on a question the teacher
+    # has agreed was wrong. Named distinctly from `quiz_passed` on purpose, so that an
+    # ordinary late-finishing attempt can never resurrect a failed submission by accident.
+    SubmissionStatus.FAILED: {
+        "dispute_regrade_passed": SubmissionStatus.COMPLETED,
+        "dispute_regrade_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
+    },
     # ── Legacy flow (kept for backward compat with existing data) ─────────────
     SubmissionStatus.CHECKING: {
         "check_passed_quiz": SubmissionStatus.QUIZ_SENT,

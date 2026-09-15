@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{#
+  The air-raid pause screen.
+
+  Two omissions are load-bearing, not oversights:
+   1. No question text, no options, no answer form. Pausing must not become a way to read a
+      question with the clock stopped.
+   2. No `{% include "_quiz_anticheat.html" %}`. That partial holds the camera gate, the
+      getUserMedia call and every violation listener, so leaving it out is what suspends
+      anti-cheat while the student is in a shelter. It comes back on resume, because the
+      question page includes it again.
+
+  The timer is rendered as static text with no countdown script — it is frozen, and a ticking
+  number would be a lie.
+#}
+
+{% block title %}{{ vocab.quiz.paused_title }}{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.quiz.paused_title }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto">
+  <div class="bg-white rounded-xl border-2 border-amber-300 shadow-sm overflow-hidden">
+
+    <div class="bg-amber-50 border-b border-amber-200 px-6 py-5 text-center">
+      <svg class="w-10 h-10 mx-auto text-amber-600 mb-2" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+      </svg>
+      <h1 class="text-xl font-bold text-amber-900">{{ vocab.quiz.paused_title }}</h1>
+      {% if region_title %}
+      <p class="text-sm text-amber-800 mt-1">{{ vocab.quiz.paused_region }} {{ region_title }}</p>
+      {% endif %}
+    </div>
+
+    <div class="px-6 py-6 space-y-5">
+      <p class="text-sm text-slate-700">{{ vocab.quiz.paused_body }}</p>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+          <p class="text-xs text-slate-500 mb-1">{{ vocab.quiz.paused_time_frozen }}</p>
+          <p class="text-lg font-semibold text-slate-900 font-mono">
+            {% if seconds_remaining is not none %}
+              {{ '%02d:%02d' % (seconds_remaining // 60, seconds_remaining % 60) }}
+            {% else %}
+              &infin;
+            {% endif %}
+          </p>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+          <p class="text-xs text-slate-500 mb-1">{{ vocab.quiz.paused_progress }}</p>
+          <p class="text-lg font-semibold text-slate-900">
+            {% if is_stepped %}{{ question_number }} / {{ total_questions }}{% else %}{{ total_questions }}{% endif %}
+          </p>
+        </div>
+      </div>
+
+      <ul class="text-xs text-slate-500 space-y-1.5">
+        <li class="flex items-start gap-2">
+          <span class="text-amber-600 mt-px">&bull;</span>{{ vocab.quiz.paused_questions_hidden }}
+        </li>
+        <li class="flex items-start gap-2">
+          <span class="text-amber-600 mt-px">&bull;</span>{{ vocab.quiz.paused_anticheat_off }}
+        </li>
+        <li class="flex items-start gap-2">
+          <span class="text-amber-600 mt-px">&bull;</span>{{ vocab.quiz.paused_close_tab_ok }}
+        </li>
+      </ul>
+
+      {% if paused_since %}
+      <p class="text-xs text-slate-400">
+        {{ vocab.quiz.paused_since }} {{ paused_since.strftime('%H:%M') }}
+      </p>
+      {% endif %}
+
+      <form method="POST" action="/portal/quiz/{{ attempt.id }}/airraid/resume">
+        <button type="submit"
+                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-3 rounded-lg transition-colors">
+          {{ vocab.quiz.paused_continue }}
+        </button>
+        <p class="text-xs text-slate-400 text-center mt-2">{{ vocab.quiz.paused_continue_hint }}</p>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

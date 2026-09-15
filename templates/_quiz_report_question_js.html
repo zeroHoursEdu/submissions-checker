@@ -1,0 +1,69 @@
+{#
+  One delegated handler for every report control on the page. Include ONCE, after the
+  questions. Expects `attempt` in context.
+#}
+<script>
+(function () {
+  const ATTEMPT_ID = {{ attempt.id }};
+  const SENT_LABEL = {{ vocab.quiz.report_sent_badge | tojson }};
+  const SENT_HINT = {{ vocab.quiz.report_sent_hint | tojson }};
+
+  function panelFor(qId) {
+    return document.querySelector('.js-report-panel[data-q="' + qId + '"]');
+  }
+
+  document.addEventListener('click', function (event) {
+    const open = event.target.closest('.js-report-open');
+    if (open) {
+      const panel = panelFor(open.dataset.q);
+      if (panel) {
+        panel.classList.remove('hidden');
+        const note = panel.querySelector('.js-report-note');
+        if (note) { note.focus(); }
+      }
+      return;
+    }
+
+    const cancel = event.target.closest('.js-report-cancel');
+    if (cancel) {
+      const panel = cancel.closest('.js-report-panel');
+      if (panel) { panel.classList.add('hidden'); }
+      return;
+    }
+
+    const send = event.target.closest('.js-report-send');
+    if (!send) { return; }
+
+    const panel = send.closest('.js-report-panel');
+    const wrapper = panel.closest('[data-report-question]');
+    const qId = parseInt(panel.dataset.q, 10);
+    const noteEl = panel.querySelector('.js-report-note');
+    const errorEl = panel.querySelector('.js-report-error');
+
+    send.disabled = true;
+    errorEl.classList.add('hidden');
+
+    fetch('/portal/quiz/' + ATTEMPT_ID + '/dispute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_id: qId, note: noteEl ? noteEl.value : '' })
+    })
+      .then(function (response) {
+        if (!response.ok) { throw new Error('report failed'); }
+        return response.json();
+      })
+      .then(function () {
+        // Swap the whole control for a confirmation. No reload, no navigation: the
+        // student's answers and their clock are untouched.
+        wrapper.innerHTML =
+          '<span class="inline-flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 ' +
+          'border border-amber-200 rounded-full px-2.5 py-1">' + SENT_LABEL + '</span>' +
+          '<p class="text-xs text-slate-400 mt-2">' + SENT_HINT + '</p>';
+      })
+      .catch(function () {
+        send.disabled = false;
+        errorEl.classList.remove('hidden');
+      });
+  });
+})();
+</script>

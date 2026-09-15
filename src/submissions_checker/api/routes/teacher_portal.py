@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import AppSettings, DBSession, TeacherUser
+from submissions_checker.api.routes.teacher_disputes import count_open_disputes
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.security import COOKIE_NAME, create_access_token
@@ -123,6 +124,7 @@ async def teacher_dashboard(
             "subjects": subjects,
             "apply_result": apply_result,
             "apply_error": apply_error,
+            "open_dispute_count": await count_open_disputes(db, current_user),
         },
     )
 

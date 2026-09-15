@@ -8,6 +8,7 @@ from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
     QuizAttemptStatus,
+    QuizDisputeStatus,
     QuizQuestionType,
     SubjectStatus,
     SubmissionSourceType,
@@ -22,7 +23,12 @@ from submissions_checker.db.models.notification import Notification
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.models.password_reset import PasswordResetToken
+from submissions_checker.db.models.quiz_attempt_pause import QuizAttemptPause
 from submissions_checker.db.models.quiz_attempt_snapshot import QuizAttemptSnapshot
+from submissions_checker.db.models.quiz_dispute import (
+    QuizQuestionDispute,
+    QuizQuestionOverride,
+)
 from submissions_checker.db.models.quiz_template import QuizAnswer, QuizAttempt
 from submissions_checker.db.models.semester import Semester
 from submissions_checker.db.models.student import Student
@@ -52,7 +58,11 @@ __all__ = [
     "QuizAttemptStatus",
     "QuizAnswer",
     "QuizAttempt",
+    "QuizAttemptPause",
     "QuizAttemptSnapshot",
+    "QuizDisputeStatus",
+    "QuizQuestionDispute",
+    "QuizQuestionOverride",
     "QuizQuestionType",
     "SubmissionSourceType",
     "SubmissionStatus",

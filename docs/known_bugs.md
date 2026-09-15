@@ -243,3 +243,50 @@ Not a runtime bug, but likely to confuse anyone who goes looking for it in this 
 ---
 
 *See `docs/missing_features.md` for planned-but-unshipped work and half-built scaffolding.*
+
+---
+
+## 14. 🟡 Air-raid region resolution is oblast-level, so borders are approximate
+
+**Where:** `src/submissions_checker/services/air_raid/geo.py` + the bundled
+`src/submissions_checker/data/ua_oblasts.json`.
+
+**Why it is like this:** alerts.in.ua has no latitude/longitude endpoint — every one of its
+APIs is keyed by a `location_uid` — so coordinates have to be mapped to a region in-process.
+The bundled file is geoBoundaries ADM1 (OpenStreetMap, ODbL 1.0) simplified with
+Ramer-Douglas-Peucker at 0.01° and rounded to four decimals, which keeps it around 110 KB and
+needs no geometry dependency.
+
+**Impact:** measured against the unsimplified source over a 0.05° grid of Ukrainian land,
+0.15% of points fall in a border sliver the file does not cover (they resolve to nothing, so
+the pause is refused) and 0.26% resolve to a neighbouring oblast. In practice a student within
+a kilometre or two of an oblast border may be told there is no alert when their own oblast is
+alerting, or be granted a pause on the neighbour's alert.
+
+**If it needs fixing:** `resolve_region` is one pure function over one data file, so dropping
+in finer geometry is a single-file change with no call-site churn. Every pause logs its
+coordinates and resolved region (`quiz_attempt_pauses`, plus an audit row), so real misses can
+be measured before deciding.
+
+---
+
+## 15. 🟡 A single-page quiz leaks its whole question set across an air-raid pause
+
+**Where:** `src/submissions_checker/api/routes/student_quiz.py` (`show_quiz` paused branch)
+and `templates/student_quiz_paused.html`.
+
+**What happens:** the paused screen deliberately sends no question text, so a *fresh* visit
+while paused reveals nothing. But in single-page mode the tab that pressed the button had
+already rendered all N questions, and the pause stops the clock — so that student has
+unbounded time to research questions they have already read. Rejecting `POST .../submit` and
+`POST .../answer` while paused stops them *recording* anything, but not reading.
+
+**Why it is not fixed:** the pause exists so a student can leave for a shelter without losing
+the exam, and it is explicitly meant to work for a quiz already on screen. Any fix that
+withheld the questions retroactively would either lose the answers already typed or make the
+control useless.
+
+**Mitigation available today:** per-question (stepper) delivery bounds the leak to the single
+question on screen. Set `question_time_default_seconds` (or a per-question
+`time_limit_seconds`) in the subject's quiz config for exams where this matters —
+`_advance_expired` then governs delivery and only one question is ever loaded.

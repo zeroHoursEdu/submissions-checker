@@ -75,10 +75,19 @@ class _Recorder:
         self.added.append(obj)
 
 
-def _attempt(seconds: list[int | None], *, started_ago: float, index: int = 0):
+def _attempt(
+    seconds: list[int | None],
+    *,
+    started_ago: float,
+    index: int = 0,
+    paused_at: datetime | None = None,
+    paused_seconds: int = 0,
+):
     return SimpleNamespace(
         id=1,
         current_index=index,
+        paused_at=paused_at,
+        paused_seconds=paused_seconds,
         question_started_at=datetime.now(UTC) - timedelta(seconds=started_ago),
         questions_snapshot=[
             {
@@ -294,3 +303,145 @@ async def test_quiz_first_mode_rejects_a_traversal_archive(tmp_path, monkeypatch
 
     assert submission.status == SubmissionStatus.VALIDATION_FAILED
     assert "unsafe" in submission.test_results["check_reason"].lower()
+
+
+# ── air-raid pause: the frozen clock ─────────────────────────────────────────
+#
+# Every quiz clock is a delta from a stored timestamp, so freezing "now" is what stops all
+# of them at once. These tests pin that: while `paused_at` is set no clock advances, and
+# after the resume arithmetic each one continues from exactly where it stopped.
+
+
+def _timed_attempt(
+    *,
+    limit_minutes: int | None = 10,
+    started_ago: float = 60,
+    paused_at: datetime | None = None,
+    paused_seconds: int = 0,
+    penalty_seconds: int = 0,
+):
+    """A single-page attempt with an attempt-wide clock."""
+    violations: dict = {}
+    if penalty_seconds:
+        violations["_time_penalty_seconds"] = penalty_seconds
+    config: dict = {}
+    if limit_minutes is not None:
+        config["time_limit_minutes"] = limit_minutes
+    return SimpleNamespace(
+        id=1,
+        current_index=0,
+        started_at=datetime.now(UTC) - timedelta(seconds=started_ago),
+        question_started_at=None,
+        paused_at=paused_at,
+        paused_seconds=paused_seconds,
+        questions_snapshot=[],
+        answers=[],
+        config_snapshot=config,
+        violations=violations,
+    )
+
+
+def test_attempt_clock_is_frozen_while_paused() -> None:
+    """Two pauses of very different ages report the same remaining time."""
+    just_paused = _timed_attempt(started_ago=60, paused_at=datetime.now(UTC))
+    long_paused = _timed_attempt(
+        started_ago=60 + 3600, paused_at=datetime.now(UTC) - timedelta(seconds=3600)
+    )
+    assert student_quiz._seconds_remaining(just_paused) == pytest.approx(
+        student_quiz._seconds_remaining(long_paused), abs=1
+    )
+
+
+def test_attempt_cannot_time_out_while_paused() -> None:
+    """A student sheltering for two hours has not run out of time."""
+    attempt = _timed_attempt(
+        limit_minutes=10,
+        started_ago=60 + 7200,
+        paused_at=datetime.now(UTC) - timedelta(seconds=7200),
+    )
+    assert student_quiz._is_timed_out(attempt) is False
+    assert student_quiz._seconds_remaining(attempt) == pytest.approx(540, abs=2)
+
+
+def test_attempt_clock_excludes_closed_pauses() -> None:
+    attempt = _timed_attempt(limit_minutes=20, started_ago=1260, paused_seconds=600)
+    assert student_quiz._is_timed_out(attempt) is False
+    # 1260s wall clock minus a 600s pause is 660s of quiz time against a 1200s limit.
+    assert student_quiz._seconds_remaining(attempt) == pytest.approx(540, abs=2)
+
+
+def test_resume_hands_back_the_exact_remaining_value() -> None:
+    """Close the tab, come back later, continue — the timer reads what it read before."""
+    paused_for = 1800
+    attempt = _timed_attempt(
+        limit_minutes=30,
+        started_ago=300 + paused_for,
+        paused_at=datetime.now(UTC) - timedelta(seconds=paused_for),
+    )
+    while_paused = student_quiz._seconds_remaining(attempt)
+
+    student_quiz._close_open_pause(attempt)
+
+    assert attempt.paused_at is None
+    assert attempt.paused_seconds == pytest.approx(paused_for, abs=2)
+    assert student_quiz._seconds_remaining(attempt) == pytest.approx(while_paused, abs=2)
+
+
+def test_a_time_penalty_survives_a_pause() -> None:
+    """A reduce_time violation taken before the raid is still owed after it."""
+    attempt = _timed_attempt(
+        limit_minutes=10, started_ago=720, penalty_seconds=60, paused_seconds=600
+    )
+    # 720s of wall clock less a 600s pause is 120s of quiz time; the 600s limit then owes
+    # 600 - 60 penalty - 120 spent.
+    assert student_quiz._seconds_remaining(attempt) == pytest.approx(420, abs=2)
+
+
+def test_question_clock_is_frozen_while_paused() -> None:
+    just_paused = _attempt([30], started_ago=10, paused_at=datetime.now(UTC))
+    long_paused = _attempt(
+        [30], started_ago=10 + 900, paused_at=datetime.now(UTC) - timedelta(seconds=900)
+    )
+    assert student_quiz._question_seconds_remaining(just_paused) == pytest.approx(20, abs=1)
+    assert student_quiz._question_seconds_remaining(
+        long_paused
+    ) == student_quiz._question_seconds_remaining(just_paused)
+
+
+def test_advance_expired_burns_nothing_while_paused() -> None:
+    """The guard that stops a pause from costing the student their questions."""
+    attempt = _attempt(
+        [30, 30, 30], started_ago=600, paused_at=datetime.now(UTC) - timedelta(seconds=570)
+    )
+    db = _Recorder()
+    assert student_quiz._advance_expired(attempt, db) == 0
+    assert attempt.current_index == 0
+    assert db.added == []
+
+
+def test_resume_shifts_the_question_clock_forward() -> None:
+    attempt = _attempt(
+        [60], started_ago=20 + 900, paused_at=datetime.now(UTC) - timedelta(seconds=900)
+    )
+    while_paused = student_quiz._question_seconds_remaining(attempt)
+    assert while_paused == pytest.approx(40, abs=1)
+
+    student_quiz._close_open_pause(attempt)
+
+    assert attempt.paused_at is None
+    assert student_quiz._question_seconds_remaining(attempt) == pytest.approx(while_paused, abs=1)
+
+
+def test_a_second_pause_accumulates() -> None:
+    attempt = _timed_attempt(
+        started_ago=1000, paused_seconds=300, paused_at=datetime.now(UTC) - timedelta(seconds=200)
+    )
+    student_quiz._close_open_pause(attempt)
+    assert attempt.paused_seconds == pytest.approx(500, abs=2)
+
+
+def test_closing_a_pause_that_is_not_open_does_nothing() -> None:
+    attempt = _timed_attempt(started_ago=100, paused_seconds=42)
+    student_quiz._close_open_pause(attempt)
+    assert attempt.paused_at is None
+    assert attempt.paused_seconds == 42

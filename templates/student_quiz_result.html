@@ -74,6 +74,7 @@
   <div class="divide-y divide-slate-100">
     {% for qr in question_results %}
     {% set q = qr.question %}
+    {% set q_id = q.id %}
     <div class="p-4">
       <div class="flex items-start gap-3">
         <div class="shrink-0 mt-0.5">
@@ -130,6 +131,8 @@
             {% endif %}
           </p>
           {% endif %}
+
+          {% include "_quiz_report_question.html" %}
         </div>
         <span class="shrink-0 text-xs text-slate-400 mt-0.5">{{ qr.points_earned }}/{{ q.points }}</span>
       </div>
@@ -152,5 +155,7 @@
   <p class="text-xs text-slate-400">{{ vocab.quiz.resubmit_for_new_quiz }}</p>
   {% endif %}
 </div>
+
+{% include "_quiz_report_question_js.html" %}
 
 {% endblock %}

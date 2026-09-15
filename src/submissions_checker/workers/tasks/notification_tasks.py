@@ -14,6 +14,7 @@ from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models.enums import NotificationCase, NotificationMethod
 from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.notification_preference import NotificationPreference
+from submissions_checker.db.models.quiz_template import QuizAttempt
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject
@@ -26,6 +27,7 @@ from submissions_checker.services.notifications.dispatcher import build_dispatch
 from submissions_checker.services.notifications.templates import (
     deadline_reminder_template,
     feedback_request_template,
+    quiz_dispute_resolved_template,
     quiz_result_template,
     submission_reviewed_template,
 )
@@ -370,3 +372,122 @@ async def execute_new_submission_task(db: AsyncSession, payload: dict[str, Any])
     emitted; this handler stays so the dispatch branch remains harmless for any stray row.
     """
     logger.info("new_submission_task_noop", payload=payload)
+
+
+async def push_dispute_notifications(
+    db: AsyncSession,
+    submission_id: int,
+    *,
+    dispute_id: int,
+    question_text: str,
+    student_name: str,
+) -> None:
+    """In-app notify every teacher responsible for a submission that a question was reported.
+
+    Goes straight to the notification bell rather than through the outbox or the review
+    digest: the digest is keyed ``(teacher_id, submission_id)`` and its body says
+    "submissions awaiting review", so a dispute riding along would be coalesced away and
+    mislabelled. Caller owns the transaction.
+    """
+    recipients = await _resolve_review_recipients(db, submission_id)
+    if not recipients:
+        logger.warning("dispute_notify_no_recipients", submission_id=submission_id)
+        return
+
+    excerpt = question_text if len(question_text) <= 120 else f"{question_text[:117]}..."
+    for teacher in recipients:
+        await push_notification(
+            db,
+            teacher.id,
+            "Quiz question reported",
+            f"{student_name} reported a question as incorrect: {excerpt}",
+            link=f"/teacher/disputes/{dispute_id}",
+        )
+
+    logger.info(
+        "dispute_notifications_pushed",
+        dispute_id=dispute_id,
+        submission_id=submission_id,
+        teacher_count=len(recipients),
+    )
+
+
+async def execute_quiz_dispute_resolved_task(db: AsyncSession, payload: dict[str, Any]) -> None:
+    """Email a student the outcome of a reported quiz question.
+
+    The in-app notification was already pushed synchronously when the teacher ruled, so the
+    bell is right immediately; this handler only owns the email. Payload: attempt_id,
+    question_id, decision ('accept'|'reject'|'regraded'), note, score, max_score, is_passed.
+    """
+    settings = get_settings()
+    attempt_id: int = payload["attempt_id"]
+    decision: str = payload.get("decision", "regraded")
+    note: str = payload.get("note", "")
+    question_id: int = payload.get("question_id", -1)
+
+    attempt = await db.get(QuizAttempt, attempt_id)
+    if attempt is None:
+        logger.warning("quiz_dispute_resolved_attempt_not_found", attempt_id=attempt_id)
+        return
+
+    result = await db.execute(
+        select(Submission)
+        .where(Submission.id == attempt.submission_id)
+        .options(
+            selectinload(Submission.students_assignment).selectinload(StudentAssignment.student),
+            selectinload(Submission.students_assignment).selectinload(
+                StudentAssignment.subjects_assignment
+            ),
+        )
+    )
+    submission = result.scalar_one_or_none()
+    if submission is None:
+        logger.warning("quiz_dispute_resolved_submission_not_found", attempt_id=attempt_id)
+        return
+
+    sa = submission.students_assignment
+    student = sa.student
+    assignment = sa.subjects_assignment
+
+    question_text = next(
+        (
+            str(q.get("text", ""))
+            for q in (attempt.questions_snapshot or [])
+            if q.get("id") == question_id
+        ),
+        f"#{question_id}",
+    )
+    portal_url = f"{settings.app_base_url.rstrip('/')}/portal/quiz/{attempt_id}/result"
+
+    email_subject, body = quiz_dispute_resolved_template(
+        full_name=student.full_name,
+        assignment_title=assignment.title,
+        question_text=question_text,
+        decision=decision,
+        note=note,
+        score=payload.get("score"),
+        max_score=payload.get("max_score"),
+        is_passed=payload.get("is_passed"),
+        portal_url=portal_url,
+    )
+
+    if not await _is_email_enabled(db, student.id, NotificationCase.SUBMISSION_CHECKED):
+        logger.info(
+            "quiz_dispute_resolved_email_suppressed",
+            attempt_id=attempt_id,
+            student_id=student.id,
+        )
+        return
+
+    dispatcher = build_dispatcher(settings)
+    if not dispatcher._channels:
+        logger.warning("quiz_dispute_resolved_no_channel", student_email=student.email)
+        return
+
+    await dispatcher.notify(student.email, email_subject, body)
+    logger.info(
+        "quiz_dispute_resolved_email_sent",
+        attempt_id=attempt_id,
+        student_email=student.email,
+        decision=decision,
+    )

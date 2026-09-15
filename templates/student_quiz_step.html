@@ -134,19 +134,26 @@
       <p class="text-xs text-slate-400 mt-1">{{ vocab.quiz.short_answer_hint }}</p>
     </div>
     {% endif %}
+
+    {% include "_quiz_report_question.html" %}
   </div>
 
   </div>
 
   <!-- Answer bar -->
-  <div class="mt-6 flex items-center justify-between">
-    <p class="text-xs text-slate-400">{{ vocab.quiz.no_going_back }}</p>
+  <div class="mt-6 flex items-center justify-between gap-4 flex-wrap">
+    <div class="flex items-center gap-3 flex-wrap">
+      {% include "_quiz_air_raid.html" %}
+      <p class="text-xs text-slate-400">{{ vocab.quiz.no_going_back }}</p>
+    </div>
     <button type="submit" id="answer-btn"
             class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2.5 rounded-lg transition-colors">
       {{ vocab.quiz.answer_and_next }}
     </button>
   </div>
 </form>
+
+{% include "_quiz_report_question_js.html" %}
 
 <script>
 // ─── Drag & drop ordering ─────────────────────────────────────────

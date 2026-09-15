@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     brevo_api_key: str | None = None
     brevo_from_address: str = "noreply@example.com"
 
+    # Air-raid pause (https://devs.alerts.in.ua). Without a token the pause button reports
+    # that the check is unavailable and no attempt is ever paused — an unverified claim must
+    # not stop a graded clock. The upstream rate limit is roughly a dozen requests per
+    # minute per IP, so responses are cached; at 30s and two app replicas that is 4/min.
+    alerts_in_ua_token: str | None = None
+    alerts_in_ua_base_url: str = "https://api.alerts.in.ua"
+    air_raid_pause_enabled: bool = True
+    air_raid_cache_seconds: int = 30
+
     # SMTP (all optional — if smtp_host is unset, email channel is disabled)
     smtp_host: str | None = None
     smtp_port: int = 587

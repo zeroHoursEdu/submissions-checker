@@ -13,6 +13,7 @@ from submissions_checker.core.database import get_db
 from submissions_checker.core.security import COOKIE_NAME, decode_access_token
 from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models.user import User
+from submissions_checker.services.air_raid import AirRaidProvider, build_air_raid_provider
 
 # Type aliases for common dependencies
 DBSession = Annotated[AsyncSession, Depends(get_db)]
@@ -95,8 +96,20 @@ async def _get_student_id_for_user(
     return student_id
 
 
+def get_air_raid_provider(
+    settings: AppSettings,
+) -> AirRaidProvider | None:
+    """The configured air-raid alert source, or None when unconfigured.
+
+    A dependency rather than a direct call so tests can override it with a fake and never
+    reach the network.
+    """
+    return build_air_raid_provider(settings)
+
+
 CurrentUser = Annotated[CurrentUserData, Depends(_get_current_user)]
 TeacherUser = Annotated[CurrentUserData, Depends(_require_teacher)]
 StudentUser = Annotated[CurrentUserData, Depends(_require_student)]
 AdminUser = Annotated[CurrentUserData, Depends(_require_admin)]
 StudentId = Annotated[int, Depends(_get_student_id_for_user)]
+AirRaid = Annotated[AirRaidProvider | None, Depends(get_air_raid_provider)]

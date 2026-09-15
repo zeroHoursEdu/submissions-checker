@@ -195,3 +195,52 @@ def credentials_template(
         f"Best regards,\nThe Teaching Team"
     )
     return subject, body
+
+
+def quiz_dispute_resolved_template(
+    full_name: str,
+    assignment_title: str,
+    question_text: str,
+    decision: str,
+    note: str,
+    score: int | None,
+    max_score: int | None,
+    is_passed: bool | None,
+    portal_url: str,
+) -> tuple[str, str]:
+    """Return (subject, body) for the outcome of a reported quiz question.
+
+    Three audiences: the student whose report was accepted, the student whose report was
+    rejected, and a classmate who never reported anything but whose result changed because
+    someone else's report was upheld.
+    """
+    if decision == "accept":
+        subject = f"Your reported question for '{assignment_title}' was accepted"
+        opening = (
+            "You reported a question as incorrect, and your teacher agreed. The question "
+            "has been credited to everyone who received it."
+        )
+    elif decision == "reject":
+        subject = f"Your reported question for '{assignment_title}' was reviewed"
+        opening = (
+            "You reported a question as incorrect. After reviewing it, your teacher "
+            "decided the question stands as written, so your score is unchanged."
+        )
+    else:
+        subject = f"Your quiz result for '{assignment_title}' was recalculated"
+        opening = (
+            "A question on your quiz was found to be incorrect and has been credited to "
+            "everyone who received it, so your result has been recalculated."
+        )
+
+    lines = [f"Hi {full_name},", "", opening, "", f"Question: {question_text}"]
+    if note:
+        lines += ["", f"Teacher's note: {note}"]
+    if score is not None and max_score is not None:
+        outcome = ""
+        if is_passed is not None:
+            outcome = " — passed" if is_passed else " — not passed"
+        lines += ["", f"Your new score: {score}/{max_score}{outcome}"]
+    lines += ["", f"View your result: {portal_url}", "", "Best regards,", "The Teaching Team"]
+
+    return subject, "\n".join(lines)
