@@ -19,6 +19,10 @@
 		max_size 100MB
 	}
 
+	# Prometheus exposition is for Alloy on the compose network only.
+	@metrics path /metrics
+	respond @metrics 404
+
 	# Upstreams are resolved from Docker's embedded DNS rather than pinned at startup.
 	# A replaced replica gets a new container IP; re-resolving on a short interval picks
 	# it up with no reload, which is what lets Watchtower roll replicas underneath us.

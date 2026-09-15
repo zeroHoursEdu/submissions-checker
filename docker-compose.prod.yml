@@ -16,8 +16,9 @@
 #   app           2x320M = 640M
 #   watchtower       48M
 #   backup           48M   (pg_dump streams to disk; it is a client, not a server)
+#   alloy            96M   (profile `observability`; nothing when the profile is off)
 #   ------------------------
-#   committed     ~1540M, leaving ~500M for a transient check sandbox
+#   committed     ~1636M, leaving ~400M for a transient check sandbox
 #
 # SANDBOX_MAX_MEMORY (default 384m) is what a check may take out of that headroom.
 # Re-do this arithmetic whenever a service is added or a limit is raised.
@@ -320,6 +321,42 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
+  # Grafana Alloy: scrapes both app replicas over the compose network and pushes to Grafana
+  # Cloud. Behind a profile because without credentials it can only crash-loop; enable it
+  # with COMPOSE_PROFILES=observability in .env (see docs/observability.md).
+  alloy:
+    image: grafana/alloy:v1.10.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Write-ahead log: samples survive a Grafana Cloud hiccup or a container restart.
+      - alloy_data:/var/lib/alloy/data
+    environment:
+      # Not `:?`-guarded: compose interpolates every service, profile or not, so a guard
+      # here would refuse to start a stack that never asked for metrics. Empty values
+      # mean Alloy starts and fails every push — visible in its log, harmless to the app.
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL:-}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER:-}
+      GRAFANA_CLOUD_PROM_TOKEN: ${GRAFANA_CLOUD_PROM_TOKEN:-}
+      SUBCHK_ENV: ${SUBCHK_ENV:-prod}
+      APP_METRICS_HOST: app
+    # No published port: Alloy's UI would otherwise face the internet. Debug with
+    #   docker compose -f docker-compose.prod.yml --env-file .env logs alloy
+    depends_on:
+      - app
+    # `edge` reaches the app replicas and has outbound access for the push.
+    networks: [edge]
+    mem_limit: 96m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
 networks:
   # Split so a compromised proxy cannot reach the database or object storage directly —
   # only `app` bridges the two. Neither is marked `internal: true`, because the app needs
@@ -335,3 +372,4 @@ volumes:
   caddy_data:
   caddy_config:
   uploads:
+  alloy_data:

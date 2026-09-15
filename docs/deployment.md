@@ -225,6 +225,14 @@ curl -s https://$DOMAIN/version       # the commit this host is running
 Then, in a browser: log in, submit an assignment, confirm the check runs, and confirm a
 proctoring snapshot is viewable from the teacher's assignment view.
 
+If `COMPOSE_PROFILES=observability` is set, also confirm metrics leave the host:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env logs --tail 50 alloy   # no 401/403
+```
+
+and that *Replicas up* on the Technical dashboard reads 2 (see `docs/observability.md`).
+
 ---
 
 ## The migration rule (read this before writing one)
@@ -553,6 +561,8 @@ docker compose -f docker-compose.prod.yml exec postgres psql -U "$POSTGRES_USER"
 # Pause automatic deploys (e.g. during an exam)
 docker compose -f docker-compose.prod.yml stop watchtower
 ```
+
+Service health, usage and alerting live in Grafana Cloud — see `docs/observability.md`.
 
 ### Watchtower and the Docker API version
 
