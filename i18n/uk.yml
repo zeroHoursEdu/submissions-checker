@@ -209,6 +209,20 @@ teacher:
   edit: Редагувати
   export_csv: Експорт CSV
   enrolled_students: Записані студенти
+  # Enrolment of existing students into a subject from an email,variant CSV.
+  enroll_title: Записати студентів на предмет
+  enroll_hint: Студенти мають бути вже зареєстровані. Цей файл лише записує їх на предмет і не надсилає листів.
+  enroll_download_template: Завантажити зразок CSV
+  enroll_columns: "Стовпці:"
+  enroll_submit: Записати
+  enroll_result_enrolled: Записано нових студентів
+  enroll_result_already: Уже були записані
+  enroll_result_rejected: Відхилено рядків
+  enroll_rejected_title: Відхилені рядки
+  enroll_row_label: Рядок
+  enroll_reason_unknown: такого email немає серед зареєстрованих студентів
+  enroll_reason_empty: порожня комірка email
+  enroll_rejected_overflow: "…та ще стільки рядків:"
   no_students_enrolled: Студентів не записано
   assignments: Завдання
   add: Додати

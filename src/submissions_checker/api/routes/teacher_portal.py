@@ -69,6 +69,12 @@ def _generate_password() -> str:
     return secrets.token_urlsafe(9)
 
 
+def _query_int(request: Request, name: str) -> int:
+    """Read a non-negative integer flash value from the query string."""
+    raw = request.query_params.get(name, "0")
+    return int(raw) if raw.isdigit() else 0
+
+
 async def _generate_username(base: str, db: DBSession) -> str:
     """Return base username if available, else base_2, base_3, …"""
     candidate = base
@@ -327,6 +333,24 @@ async def teacher_subject(
 
     test_student_flash = request.query_params.get("test_student")
 
+    # Enrolment result, round-tripped through the redirect from the CSV import.
+    enroll_result = None
+    if request.query_params.get("enrolled") is not None:
+        raw_rows = request.query_params.get("rejected_rows", "")
+        rejected_rows = []
+        for pair in raw_rows.split(";") if raw_rows else []:
+            line, _, reason = pair.partition(":")
+            if line.isdigit():
+                rejected_rows.append({"line": int(line), "reason": reason})
+        rejected_total = _query_int(request, "rejected")
+        enroll_result = {
+            "enrolled": _query_int(request, "enrolled"),
+            "already": _query_int(request, "already"),
+            "rejected": rejected_total,
+            "rejected_rows": rejected_rows,
+            "rejected_overflow": max(rejected_total - len(rejected_rows), 0),
+        }
+
     return render(
         request,
         "teacher_subject.html",
@@ -341,6 +365,7 @@ async def teacher_subject(
             "feedback_error": feedback_error,
             "test_student_info": test_student_info,
             "test_student_flash": test_student_flash,
+            "enroll_result": enroll_result,
         },
     )
 
@@ -537,52 +562,94 @@ async def download_sample_csv(current_user: TeacherUser) -> StreamingResponse:
     )
 
 
+# Enrolment rejections are round-tripped through the redirect URL, like apply_error.
+# The cap keeps a CSV full of bad addresses from building a URL long enough to be
+# truncated by a browser or proxy.
+_MAX_REPORTED_REJECTIONS = 20
+
+# RFC 6761 reserves example.invalid: it can never resolve or belong to a real
+# person, so an unedited template enrols nobody and says so.
+_TEMPLATE_PLACEHOLDER_DOMAIN = "example.invalid"
+
+
+def _sorted_variant_ids(variant_ids: set[str]) -> list[str]:
+    """Order variant ids numerically when they all look like numbers, else lexically.
+
+    Config keys are strings, so plain sorting would put "10" before "2".
+    """
+    if variant_ids and all(v.lstrip("-").isdigit() for v in variant_ids):
+        return sorted(variant_ids, key=int)
+    return sorted(variant_ids)
+
+
+async def _ensure_assignment_rows(
+    db: DBSession,
+    student_id: int,
+    subject_assignment_ids: list[int],
+    variant: str | None,
+) -> None:
+    """Give a student one students_assignments row per assignment of the subject.
+
+    Mirrors the fan-out `enroll_student` performs, and additionally writes
+    ``variant`` to every row when one was supplied. An empty variant leaves any
+    stored value alone, so re-enrolling never flattens per-assignment variants
+    that were set elsewhere.
+    """
+    for sa_id in subject_assignment_ids:
+        existing = await db.execute(
+            select(StudentAssignment).where(
+                StudentAssignment.student_id == student_id,
+                StudentAssignment.subjects_assignment_id == sa_id,
+            )
+        )
+        student_assignment = existing.scalar_one_or_none()
+        if student_assignment is None:
+            student_assignment = StudentAssignment(
+                student_id=student_id, subjects_assignment_id=sa_id
+            )
+            db.add(student_assignment)
+        if variant:
+            student_assignment.variant = variant
+
+
 @router.get("/subjects/{subject_id}/students/template.csv")
 async def download_subject_enrollment_template(
     subject_id: int,
     db: DBSession,
     current_user: TeacherUser,
 ) -> StreamingResponse:
-    """Generate enrollment+variant CSV template for a subject.
+    """Example enrolment CSV, with the subject's real variant ids.
 
-    Columns: student_group, student_name, student_surname, email
-    + one variant_{assignment.code} column per assignment with variants_required=true.
+    Columns: email, variant. One row per variant declared anywhere in the
+    subject's config, so the ids a teacher copies are the ones the checker
+    accepts. A subject with no variants still gets rows, with the cell empty,
+    so the expected shape is obvious.
     """
     await require_subject_access(db, subject_id, current_user)
 
+    # `variants` is copied into each assignment's config at apply time
+    # (config_apply._build_assignment_config), so the assignment rows carry the
+    # same ids as the plugin config and no second lookup is needed.
     assignments_result = await db.execute(
-        select(SubjectsAssignment)
-        .where(SubjectsAssignment.subject_id == subject_id)
-        .order_by(SubjectsAssignment.title)
+        select(SubjectsAssignment.config).where(SubjectsAssignment.subject_id == subject_id)
     )
-    assignments = assignments_result.scalars().all()
-
-    variant_columns = [
-        f"variant_{sa.code}" for sa in assignments if sa.code and sa.config.get("variants_required")
-    ]
+    variant_ids: set[str] = set()
+    for (config,) in assignments_result:
+        for key in (config or {}).get("variants") or {}:
+            variant_ids.add(str(key))
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["student_group", "student_name", "student_surname", "email"] + variant_columns)
+    writer.writerow(["email", "variant"])
+    if variant_ids:
+        for index, variant in enumerate(_sorted_variant_ids(variant_ids), start=1):
+            writer.writerow([f"student{index}@{_TEMPLATE_PLACEHOLDER_DOMAIN}", variant])
+    else:
+        for index in (1, 2):
+            writer.writerow([f"student{index}@{_TEMPLATE_PLACEHOLDER_DOMAIN}", ""])
 
-    # Include currently enrolled real students as example rows
-    students_result = await db.execute(
-        select(Student, Group.name.label("group_name"))
-        .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
-        .join(Group, Group.id == Student.group_id)
-        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
-        .order_by(Student.full_name)
-    )
-    for row in students_result:
-        student = row.Student
-        name_parts = student.full_name.split(" ", 1)
-        first = name_parts[0] if name_parts else ""
-        last = name_parts[1] if len(name_parts) > 1 else ""
-        writer.writerow([row.group_name, first, last, student.email] + [""] * len(variant_columns))
-
-    csv_content = output.getvalue()
     return StreamingResponse(
-        iter([csv_content]),
+        iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=subject_{subject_id}_students.csv"},
     )
@@ -595,9 +662,12 @@ async def import_subject_students(
     current_user: TeacherUser,
     file: UploadFile,
 ) -> RedirectResponse:
-    """Import enrollment+variant CSV for a specific subject.
+    """Enrol existing students into a subject from an ``email,variant`` CSV.
 
-    Creates/enrolls students and sets per-assignment variants from variant_ columns.
+    Enrol-only: the e-mail must already belong to a registered student. This
+    endpoint never creates students, groups or accounts and never sends an
+    invitation — that stays with POST /teacher/students/import — so it can be
+    re-run freely without re-inviting anyone.
     """
     await require_subject_access(db, subject_id, current_user)
 
@@ -611,91 +681,40 @@ async def import_subject_students(
         raise HTTPException(status_code=422, detail="File must be UTF-8 encoded") from exc
 
     reader = csv.DictReader(io.StringIO(text_content))
-    required = {"student_group", "student_name", "student_surname", "email"}
-    fieldnames = set(reader.fieldnames or [])
-    if not required.issubset(fieldnames):
-        missing = required - fieldnames
-        raise HTTPException(
-            status_code=422, detail=f"Missing CSV columns: {', '.join(sorted(missing))}"
-        )
+    # Accept any capitalisation or stray spacing in the header: map the normalised
+    # column name back to the key DictReader actually produced.
+    columns = {(name or "").strip().lower(): name for name in (reader.fieldnames or [])}
+    if "email" not in columns:
+        raise HTTPException(status_code=422, detail="Missing CSV columns: email")
+    email_key = columns["email"]
+    variant_key = columns.get("variant")
 
-    # Identify variant columns and their assignment codes
-    variant_col_map: dict[str, str] = {}  # col_name → assignment_code
-    for col in fieldnames:
-        if col.startswith("variant_"):
-            variant_col_map[col] = col[len("variant_") :]
+    sa_ids_result = await db.execute(
+        select(SubjectsAssignment.id).where(SubjectsAssignment.subject_id == subject_id)
+    )
+    subject_assignment_ids = [row[0] for row in sa_ids_result]
 
-    # Load subject assignments by code for variant validation
-    assignments_by_code: dict[str, SubjectsAssignment] = {}
-    if variant_col_map:
-        sa_result = await db.execute(
-            select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject_id)
-        )
-        for sa in sa_result.scalars():
-            if sa.code:
-                assignments_by_code[sa.code] = sa
+    enrolled_count = 0
+    already_count = 0
+    rejections: list[tuple[int, str]] = []
 
-    imported_count = 0
-    skipped_count = 0
-    variants_updated = 0
+    # The header is line 1, so data rows start at 2 — the number the teacher
+    # sees in their spreadsheet.
+    for line_number, row in enumerate(reader, start=2):
+        email = (row.get(email_key) or "").strip().lower()
+        raw_variant = (row.get(variant_key) or "").strip() if variant_key else ""
+        variant = raw_variant or None
 
-    for row in reader:
-        group_name = row["student_group"].strip()
-        first_name = row["student_name"].strip()
-        last_name = row["student_surname"].strip()
-        email = row["email"].strip().lower()
-
-        if not all([group_name, first_name, last_name, email]):
+        if not email:
+            rejections.append((line_number, "empty"))
             continue
 
-        # Get or create student
-        existing_result = await db.execute(select(Student).where(Student.email == email))
-        student = existing_result.scalar_one_or_none()
-
+        student_result = await db.execute(select(Student).where(Student.email == email))
+        student = student_result.scalar_one_or_none()
         if student is None:
-            group_result = await db.execute(select(Group).where(Group.name == group_name))
-            group = group_result.scalar_one_or_none()
-            if group is None:
-                group = Group(name=group_name)
-                db.add(group)
-                await db.flush()
+            rejections.append((line_number, "unknown"))
+            continue
 
-            full_name = f"{first_name} {last_name}"
-            student = Student(group_id=group.id, full_name=full_name, email=email)
-            db.add(student)
-            await db.flush()
-
-            base_username = f"{first_name.lower()}.{last_name.lower()}"
-            username = await _generate_username(base_username, db)
-            password = _generate_password()
-            password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
-
-            user = User(
-                username=username,
-                password_hash=password_hash,
-                role=UserRole.STUDENT,
-                student_id=student.id,
-            )
-            db.add(user)
-            await db.flush()
-
-            db.add(
-                OutboxMessage(
-                    event_type=OutboxEventType.SEND_CREDENTIALS,
-                    state=OutboxMessageState.PENDING,
-                    payload={
-                        "student_email": email,
-                        "full_name": full_name,
-                        "username": username,
-                        "password": password,
-                    },
-                )
-            )
-            imported_count += 1
-        else:
-            skipped_count += 1
-
-        # Enroll in subject if not already enrolled
         enrollment_result = await db.execute(
             select(SubjectsStudents).where(
                 SubjectsStudents.subject_id == subject_id,
@@ -704,45 +723,25 @@ async def import_subject_students(
         )
         if enrollment_result.scalar_one_or_none() is None:
             db.add(SubjectsStudents(subject_id=subject_id, student_id=student.id))
-            sa_ids_result = await db.execute(
-                select(SubjectsAssignment.id).where(SubjectsAssignment.subject_id == subject_id)
-            )
-            for (sa_id_val,) in sa_ids_result:
-                existing_sa = await db.execute(
-                    select(StudentAssignment.id).where(
-                        StudentAssignment.student_id == student.id,
-                        StudentAssignment.subjects_assignment_id == sa_id_val,
-                    )
-                )
-                if existing_sa.scalar_one_or_none() is None:
-                    db.add(
-                        StudentAssignment(student_id=student.id, subjects_assignment_id=sa_id_val)
-                    )
-            await db.flush()
+            enrolled_count += 1
+        else:
+            already_count += 1
 
-        # Set variants from variant_ columns
-        for col_name, assignment_code in variant_col_map.items():
-            variant_value = row.get(col_name, "").strip()
-            if not variant_value:
-                continue
-            subject_assignment = assignments_by_code.get(assignment_code)
-            if subject_assignment is None:
-                continue
-            student_sa_result = await db.execute(
-                select(StudentAssignment).where(
-                    StudentAssignment.student_id == student.id,
-                    StudentAssignment.subjects_assignment_id == subject_assignment.id,
-                )
-            )
-            student_assignment = student_sa_result.scalar_one_or_none()
-            if student_assignment is not None:
-                student_assignment.variant = variant_value
-                variants_updated += 1
+        await _ensure_assignment_rows(db, student.id, subject_assignment_ids, variant)
+        await db.flush()
 
     await db.commit()
 
+    reported = rejections[:_MAX_REPORTED_REJECTIONS]
+    params = {
+        "enrolled": str(enrolled_count),
+        "already": str(already_count),
+        "rejected": str(len(rejections)),
+    }
+    if reported:
+        params["rejected_rows"] = ";".join(f"{line}:{reason}" for line, reason in reported)
     return RedirectResponse(
-        url=f"/teacher/subjects/{subject_id}?imported={imported_count}&skipped={skipped_count}&variants_updated={variants_updated}",
+        url=f"/teacher/subjects/{subject_id}?{urllib.parse.urlencode(params)}",
         status_code=303,
     )
 
@@ -1115,20 +1114,12 @@ async def enroll_student(
     )
     if existing.scalar_one_or_none() is None:
         db.add(SubjectsStudents(subject_id=subject_id, student_id=student_id_param))
-        # Create StudentAssignment records for all existing assignments in this subject
         assignments_result = await db.execute(
             select(SubjectsAssignment.id).where(SubjectsAssignment.subject_id == subject_id)
         )
-        for (sa_id,) in assignments_result:
-            # Only if not already exists
-            existing_sa = await db.execute(
-                select(StudentAssignment.id).where(
-                    StudentAssignment.student_id == student_id_param,
-                    StudentAssignment.subjects_assignment_id == sa_id,
-                )
-            )
-            if existing_sa.scalar_one_or_none() is None:
-                db.add(StudentAssignment(student_id=student_id_param, subjects_assignment_id=sa_id))
+        await _ensure_assignment_rows(
+            db, student_id_param, [row[0] for row in assignments_result], variant=None
+        )
         await audit(
             db,
             action="enroll_student",

@@ -183,6 +183,15 @@ flow (`POST /teacher/subjects/apply-config`, see `docs/PLUGIN_AUTHORING.md`). Ev
 in these three templates 404s on submit. (For contrast, `teacher_add_student.html` and the
 delete-subject form in `teacher_subject_form.html` DO have working backends.)
 
+**Partially fixed (2026-09-15):** `config-only-subject-management` removed every link into
+these templates — the "Manage Quiz", "Edit assignment", "Edit subject", "Add assignment",
+"Remove Subject" and "Export CSV" affordances are all gone from `teacher_subject.html` and
+`teacher_assignment.html`, so nothing can reach a dead form any more. That change also made
+config-only editing a *stated requirement* rather than an accident, in
+`openspec/specs/subject-management/spec.md`. What remains open is cosmetic: the orphaned
+templates (`teacher_subject_form.html`, `teacher_assignment_form.html`,
+`teacher_quiz_editor.html`) are still in the tree and can be deleted whenever convenient.
+
 ---
 
 ## 11. 🟡 No nested-archive / output-file-count limits

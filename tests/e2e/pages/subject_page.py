@@ -22,20 +22,31 @@ class SubjectPage:
         except ValueError:
             return 0
 
-    def import_students_via_api(self, subject_id: int, csv_path: Path) -> dict:
-        """Submit CSV to the subject import endpoint via Playwright request API.
-
-        Returns the URL params after redirect (imported, skipped counts).
-        """
-        with open(csv_path, "rb") as f:
-            csv_bytes = f.read()
+    def _post_csv(self, url: str, csv_bytes: bytes) -> dict:
         response = self.page.request.post(
-            f"{self.app_url}/teacher/subjects/{subject_id}/students/import",
+            url,
             multipart={
                 "file": {"name": "students.csv", "mimeType": "text/csv", "buffer": csv_bytes}
             },
         )
         return {"status": response.status, "url": response.url}
+
+    def create_students_via_api(self, csv_path: Path) -> dict:
+        """Create accounts (and queue credential e-mails) via the GLOBAL import.
+
+        The per-subject endpoint enrols only, so accounts must exist first.
+        """
+        with open(csv_path, "rb") as f:
+            csv_bytes = f.read()
+        return self._post_csv(f"{self.app_url}/teacher/students/import", csv_bytes)
+
+    def enrol_students_via_api(self, subject_id: int, emails: list[str]) -> dict:
+        """Enrol already-created students into the subject from an ``email,variant`` CSV."""
+        body = "email,variant\n" + "".join(f"{email},\n" for email in emails)
+        return self._post_csv(
+            f"{self.app_url}/teacher/subjects/{subject_id}/students/import",
+            body.encode("utf-8"),
+        )
 
     def get_assignment_links(self) -> list[dict]:
         """Return list of {id, title} for all assignments."""

@@ -53,20 +53,25 @@ detail.
 | Teacher dashboard (your active subjects + enrolled counts) | TEACHER/ADMIN | `GET /teacher` |
 | Create / update a subject from a **config ZIP** (versioned, content-hashed, deduplicated; upsert by `subjectCode`; uploader becomes owner of a new subject) | TEACHER/ADMIN (update requires ownership) | `POST /teacher/subjects/apply-config` |
 | View a subject (students, assignments, test-student + feedback panels) | Owner / ADMIN | `GET /teacher/subjects/{id}` |
-| Soft-delete a subject (marks `DELETED`, data preserved) | Owner only | `POST /teacher/subjects/{id}/delete` |
+| Soft-delete a subject (marks `DELETED`, data preserved) — **endpoint only, no UI button** | Owner only | `POST /teacher/subjects/{id}/delete` |
 | Provision a TEST student for the subject (excluded from analytics) | Owner only | `POST /teacher/subjects/{id}/test-student` |
 | Enter the portal **as** the test student (pilots the student journey) | Owner only | `POST /teacher/subjects/{id}/test-student/enter` |
 
 > There is **no on-screen subject/assignment editor**. A subject's name, assignments,
 > deadlines, grade ranges, review mode, late policy, attempt caps, variants, sandbox limits,
 > and quiz/anti-cheat rules all come from the config ZIP — the single source of truth.
+>
+> The teacher UI carries **no affordance that mutates subject or assignment content**: no
+> subject edit, no subject delete, no create/edit assignment, no quiz editor, no grade
+> export button, and no analytics link. Those routes still exist and still enforce their
+> own authorization, but the only path a teacher is offered is config re-apply.
 
 ## 3. Enrollment & students
 
 | Feature | Who | Route(s) |
 |---|---|---|
-| Download enrollment template CSV (pre-filled, with a `variant_<code>` column per variant-requiring assignment) | Owner / ADMIN | `GET /teacher/subjects/{id}/students/template.csv` |
-| Import students into a subject (creates accounts, enrolls, sets variants, emails credentials; ≤ 1 MB UTF-8) | Owner / ADMIN | `POST /teacher/subjects/{id}/students/import` |
+| Download enrollment example CSV (`email,variant`; one row per variant declared in the subject's config, placeholder `example.invalid` addresses) | Owner / ADMIN | `GET /teacher/subjects/{id}/students/template.csv` |
+| Enrol **existing** students into a subject from `email,variant` (fans out per-assignment records, sets the variant on all of them; unknown e-mails rejected per row; never creates accounts or sends e-mail; ≤ 1 MB UTF-8) | Owner / ADMIN | `POST /teacher/subjects/{id}/students/import` |
 | Global student import (creates accounts only, no enrollment) | TEACHER/ADMIN | `POST /teacher/students/import`, sample `GET /teacher/students/sample.csv` |
 | Add a single student — audited `add_student` | TEACHER/ADMIN | `GET /teacher/students/add`, `POST /teacher/students/add` |
 | Browse the full roster (account/email/login status) | TEACHER/ADMIN | `GET /teacher/students` |
@@ -87,7 +92,7 @@ detail.
 | Assignment review board (per-student latest submission, grade, integrity flags) | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}` |
 | Review one submission (test results, AI review, submitted code) | Owner / ADMIN | `GET /teacher/submissions/{id}/review` |
 | Approve / reject a submission (emails the student) — audited `teacher_approve_submission` / `teacher_reject_submission` | Owner / ADMIN | `POST /teacher/submissions/{id}/review` |
-| Export grades CSV | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
+| Export grades CSV — **endpoint only, no UI button** | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
 
 ### The submission state machine
 
@@ -169,7 +174,7 @@ violation flags and webcam thumbnails surface to the teacher on the assignment r
 
 | Feature | Who | Route(s) |
 |---|---|---|
-| Platform overview (headline scalars, grade histogram, per-subject + difficulty tables, exhausted-quiz failures) — aggregates across **all** teachers | **ADMIN only** | `GET /teacher/analytics` |
+| Platform overview (headline scalars, grade histogram, per-subject + difficulty tables, exhausted-quiz failures) — aggregates across **all** teachers; **no dashboard link**, enter the URL | **ADMIN only** | `GET /teacher/analytics` |
 | Fraud / anti-cheat dashboard (risk-scored integrity signals + login-activity overview) | **ADMIN only** | `GET /teacher/analytics/fraud` |
 | Single-student profile (cross-subject grades, timeline, login stats) | TEACHER (own students) / ADMIN (any) | `GET /teacher/analytics/students/{id}` |
 

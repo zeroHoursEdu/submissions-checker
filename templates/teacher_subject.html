@@ -38,23 +38,6 @@
       </button>
     </form>
     {% endif %}
-    <a href="/teacher/subjects/{{ subject.id }}/edit"
-       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 text-sm hover:bg-slate-50 transition-colors">
-      {{ vocab.teacher.edit }}
-    </a>
-    <a href="/teacher/subjects/{{ subject.id }}/export.csv"
-       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 text-sm hover:bg-slate-50 transition-colors">
-      {{ vocab.teacher.export_csv }}
-    </a>
-    {% if current_user.user_id == subject.owner_id %}
-    <form method="POST" action="/teacher/subjects/{{ subject.id }}/delete"
-          onsubmit="return confirm('{{ vocab.teacher.remove_subject_confirm }}')">
-      <button type="submit"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm hover:bg-red-100 transition-colors">
-        {{ vocab.teacher.remove_subject_button }}
-      </button>
-    </form>
-    {% endif %}
   </div>
 </div>
 
@@ -81,6 +64,58 @@
   A test student already exists for this subject.
 </div>
 {% endif %}
+
+{% if enroll_result %}
+<div class="mb-4 px-4 py-3 rounded-lg border text-sm {% if enroll_result.rejected %}bg-amber-50 border-amber-200 text-amber-800{% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}">
+  <p>
+    {{ vocab.teacher.enroll_result_enrolled }}: <strong>{{ enroll_result.enrolled }}</strong> ·
+    {{ vocab.teacher.enroll_result_already }}: <strong>{{ enroll_result.already }}</strong> ·
+    {{ vocab.teacher.enroll_result_rejected }}: <strong>{{ enroll_result.rejected }}</strong>
+  </p>
+  {% if enroll_result.rejected_rows %}
+  <p class="mt-2 font-medium">{{ vocab.teacher.enroll_rejected_title }}</p>
+  <ul class="mt-1 space-y-0.5">
+    {% for r in enroll_result.rejected_rows %}
+    <li>
+      {{ vocab.teacher.enroll_row_label }} {{ r.line }} —
+      {% if r.reason == "unknown" %}{{ vocab.teacher.enroll_reason_unknown }}
+      {% else %}{{ vocab.teacher.enroll_reason_empty }}{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if enroll_result.rejected_overflow %}
+  <p class="mt-1">{{ vocab.teacher.enroll_rejected_overflow }} {{ enroll_result.rejected_overflow }}</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+  <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.teacher.enroll_title }}</h2>
+  <p class="text-sm text-slate-500 mb-4">{{ vocab.teacher.enroll_hint }}</p>
+  <div class="flex flex-col sm:flex-row gap-4 items-start">
+    <a href="/teacher/subjects/{{ subject.id }}/students/template.csv"
+       class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-slate-50 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors shrink-0">
+      <svg class="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+      </svg>
+      {{ vocab.teacher.enroll_download_template }}
+    </a>
+    <form action="/teacher/subjects/{{ subject.id }}/students/import" method="POST"
+          enctype="multipart/form-data" class="flex flex-col sm:flex-row gap-3 items-start w-full">
+      <div class="flex flex-col gap-1 w-full sm:max-w-xs">
+        <label class="sr-only" for="enroll-csv">CSV</label>
+        <input id="enroll-csv" type="file" name="file" accept=".csv,text/csv" required
+               class="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 border border-slate-300 rounded-lg cursor-pointer" />
+        <p class="text-xs text-slate-400">{{ vocab.teacher.enroll_columns }} <code class="bg-slate-100 px-1 rounded">email, variant</code></p>
+      </div>
+      <button type="submit"
+              class="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+        {{ vocab.teacher.enroll_submit }}
+      </button>
+    </form>
+  </div>
+</div>
 
 <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
@@ -119,13 +154,6 @@
     <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
         <h2 class="font-semibold text-slate-900">{{ vocab.teacher.assignments }}</h2>
-        <a href="/teacher/subjects/{{ subject.id }}/assignments/create"
-           class="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          {{ vocab.teacher.add }}
-        </a>
       </div>
 
       {% if assignments %}

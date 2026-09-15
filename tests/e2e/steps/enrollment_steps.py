@@ -36,10 +36,28 @@ def _get_enrolled_count(subject_id: int) -> int:
         conn.close()
 
 
+def _fixture_emails() -> list[str]:
+    """E-mail column of the students fixture, so both steps use the same roster."""
+    import csv
+
+    with open(FIXTURES_DIR / "students.csv", encoding="utf-8") as f:
+        return [row["email"].strip() for row in csv.DictReader(f) if row.get("email", "").strip()]
+
+
 def _do_enrollment(page, app_url: str, subject_id: int) -> None:
+    """Create the accounts, then enrol them.
+
+    These are two separate endpoints: the global import creates students and
+    queues their credential e-mails, while the per-subject import enrols only
+    and would reject an address that does not exist yet.
+    """
     sp = SubjectPage(page, app_url)
-    result = sp.import_students_via_api(subject_id, FIXTURES_DIR / "students.csv")
-    assert result["status"] in (200, 303, 302), f"Import failed: {result}"
+
+    created = sp.create_students_via_api(FIXTURES_DIR / "students.csv")
+    assert created["status"] in (200, 303, 302), f"Account creation failed: {created}"
+
+    enrolled = sp.enrol_students_via_api(subject_id, _fixture_emails())
+    assert enrolled["status"] in (200, 303, 302), f"Enrolment failed: {enrolled}"
 
 
 @given("the student is enrolled in the E2E test subject")

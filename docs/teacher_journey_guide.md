@@ -43,8 +43,8 @@ The system has three account roles. Your capabilities depend on your role.
 | 3 | Create / update a subject | `POST /teacher/subjects/apply-config` | a config ZIP | TEACHER/ADMIN | subject + assignments upserted; you become owner |
 | 3 | Delete a subject | `POST /teacher/subjects/{id}/delete` | — | subject owner only | subject marked DELETED |
 | 3 | Subject detail | `GET /teacher/subjects/{id}` | — | owner / ADMIN | students, assignments, test-student panel, feedback panel |
-| 4 | Download enrollment template | `GET /teacher/subjects/{id}/students/template.csv` | — | owner / ADMIN | CSV with variant columns pre-filled |
-| 4 | Import students (per subject) | `POST /teacher/subjects/{id}/students/import` | filled CSV (≤1 MB) | owner / ADMIN | accounts created, enrolled, variants set, credentials emailed |
+| 4 | Download enrollment example | `GET /teacher/subjects/{id}/students/template.csv` | — | owner / ADMIN | `email,variant` CSV, one row per variant in the config |
+| 4 | Enrol students (per subject) | `POST /teacher/subjects/{id}/students/import` | `email,variant` CSV (≤1 MB) | owner / ADMIN | existing students enrolled, variants set; no accounts created, no e-mail |
 | 4 | Import students (global) | `POST /teacher/students/import` | CSV (≤1 MB) | TEACHER/ADMIN | accounts created (no enrollment) |
 | 4 | Add one student | `GET/POST /teacher/students/add` | name, email, group, optional GitHub | TEACHER/ADMIN | one account created, credentials emailed |
 | 4 | Browse all students | `GET /teacher/students` | — | TEACHER/ADMIN | roster with account/email/login status |
@@ -54,8 +54,8 @@ The system has three account roles. Your capabilities depend on your role.
 | 6 | Assignment review board | `GET /teacher/subjects/{id}/assignments/{sa_id}` | — | owner / ADMIN | per-student submission, grade, and integrity flags |
 | 6 | Review a submission | `GET /teacher/submissions/{id}/review` | — | owner / ADMIN | test results, AI review, submitted code |
 | 6 | Act on a submission | `POST /teacher/submissions/{id}/review` | approve / reject (+ reason) | owner / ADMIN | submission advanced; student emailed |
-| 7 | Export grades | `GET /teacher/subjects/{id}/export.csv` | — | owner / ADMIN | CSV of grades for the subject |
-| 8 | Analytics overview | `GET /teacher/analytics` | — | **ADMIN only** | platform-wide stats and charts |
+| 7 | Export grades | `GET /teacher/subjects/{id}/export.csv` | — | owner / ADMIN | CSV of grades; **no UI button** — endpoint only |
+| 8 | Analytics overview | `GET /teacher/analytics` | — | **ADMIN only** | platform-wide stats and charts; **no dashboard link** — enter the URL |
 | 8 | Fraud detection | `GET /teacher/analytics/fraud` | — | **ADMIN only** | risk-scored integrity flags |
 | 8 | Student profile | `GET /teacher/analytics/students/{id}` | — | TEACHER (own students) / ADMIN | one student's grades + login history |
 | 9 | Request course feedback | `POST /teacher/subjects/{id}/feedback/request` | — | owner / ADMIN | tokenized links emailed to enrolled students |
@@ -158,41 +158,70 @@ you own it (enforced inside the apply service).
 `POST /teacher/subjects/{id}/delete` marks the subject **DELETED** (a soft delete — data
 is preserved). **Only the owner** can do this; even another teacher gets a 403.
 
+There is **no button for this in the UI**. Deleting a subject is as consequential as
+creating one, so it belongs with the same deliberate, reviewed process — see
+[§3.5](#35-subject-content-changes-only-through-config-re-apply).
+
+### 3.5 Subject content changes only through config re-apply
+
+The subject page and the assignment page deliberately offer **no** way to edit a subject,
+create or edit an assignment, edit a quiz, or export grades. The config ZIP is the single
+source of truth: it lives in the subject repository, it is reviewed in a diff, and every
+apply stores a new numbered `SubjectPluginConfig` version. A change made through a form
+would exist only in the database and would be silently overwritten by the next apply.
+
+To change anything about a subject or its assignments — a deadline, grading weights, a
+quiz bank — edit `config.yml`, re-zip, and upload it again through Apply config. Re-apply
+is idempotent and deduplicated by content hash, and quiz attempts already in flight finish
+on the version they started with.
+
+The routes behind the removed buttons still exist and still enforce their own
+authorization, so API clients and admin tooling are unaffected.
+
 ---
 
 ## 4. Enrolling and managing students
 
-You create student accounts; students never self-register. There are four ways in.
+You create student accounts; students never self-register. Account creation (§4.2, §4.3)
+and enrolment into a subject (§4.1, §4.4) are separate steps.
 
-### 4.1 Bulk import scoped to a subject (recommended)
+### 4.1 Enrolling students into a subject (recommended)
 
-This is the main path because it both creates accounts *and* enrolls them in one go, and
-it handles assignment **variants**.
+This is the path that puts students into a subject and sets their **variant**. It enrols
+only: the students must already exist, which means you run the global import (§4.2) first.
 
-1. **Download the template:** `GET /teacher/subjects/{id}/students/template.csv`. It has
-   the columns `student_group, student_name, student_surname, email`, **plus one
-   `variant_<code>` column for every assignment that requires variants**. It is
-   pre-filled with the students already enrolled, as examples.
-2. **Fill it in** with your roster (and variant numbers where required).
-3. **Upload it:** `POST /teacher/subjects/{id}/students/import` (max 1 MB, UTF-8).
+1. **Download the example:** `GET /teacher/subjects/{id}/students/template.csv`, linked
+   from the enrolment panel on the subject page. It has two columns, `email,variant`, and
+   one row per variant the subject's own config declares — so the identifiers you copy are
+   the ones the checker will accept. A subject with no variants gets two example rows with
+   the variant cell empty. The placeholder addresses are on `example.invalid`, which can
+   never belong to a real person, so uploading the file unedited enrols nobody.
+2. **Fill it in** with one row per student.
+3. **Upload it** from the same panel (max 1 MB, UTF-8).
 
 **What happens per row:**
-- If the email is new, a `Student` profile and a linked `User` account are created
-  (username derived from `firstname.lastname`, de-duplicated to `name_2`, `name_3`, …; a
-  random password is generated). A **credentials email** is queued to the student.
-- Existing students are skipped (counted as "skipped"), not duplicated.
+- The `email` is trimmed, lower-cased and matched against existing students. An address
+  that matches nobody is **rejected** — no student, account or invitation is created for
+  it — and the remaining rows are still processed.
 - The student is enrolled in the subject if not already, and a per-assignment record is
-  created for each assignment.
-- Variant columns set each student's variant for that assignment.
+  created for **every** assignment of the subject.
+- A non-empty `variant` is written to all of those records. An **empty** variant cell
+  leaves any stored value untouched, so re-enrolling never flattens variants set elsewhere.
+- Re-uploading the same file is safe: nothing is duplicated.
 
-**Outcome.** Redirect back to the subject with counts: imported / skipped /
-variants-updated.
+**Outcome.** Redirect back to the subject page with counts — newly enrolled, already
+enrolled, rejected — and each rejected row listed by its line number (the header is line 1)
+with the reason. The list is capped at 20 rows plus an overflow count.
+
+**No e-mail is sent by this step.** Credentials come from the global import (§4.2), so
+enrolment can be re-run as often as you like without re-inviting anyone.
 
 ### 4.2 Global bulk import
 
 `POST /teacher/students/import` (sample at `GET /teacher/students/sample.csv`) creates
 accounts from `student_group, student_name, student_surname, email` but **does not enroll**
-them in any subject. Use §4.4 to enroll afterwards. Same 1 MB / UTF-8 limits.
+them in any subject, and it is the step that **sends the credentials e-mail**. Run it
+first, then enrol with §4.1. Same 1 MB / UTF-8 limits.
 
 ### 4.3 Add a single student
 

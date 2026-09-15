@@ -2,10 +2,12 @@
 
 Targets handlers that ``test_teacher_portal.py`` only lightly touches:
 
-* CSV student import — both global (``POST /teacher/students/import``) and
-  subject-scoped (``POST /teacher/subjects/{id}/students/import`` with variant
-  columns). Input-validation / security surface: malformed CSV, missing required
-  columns, duplicate emails, empty rows/file, non-UTF-8, cross-teacher 403.
+* CSV student import — the global one (``POST /teacher/students/import``), which
+  creates accounts and queues invitations, and the subject-scoped one
+  (``POST /teacher/subjects/{id}/students/import``), which enrols already-existing
+  students from ``email,variant`` and creates nothing. Input-validation / security
+  surface: malformed CSV, missing required columns, duplicate emails, unknown
+  addresses, empty rows/file, non-UTF-8, cross-teacher 403.
 * Test-student provisioning + impersonation
   (``POST /teacher/subjects/{id}/test-student`` and ``…/test-student/enter``).
 * Course feedback request / list / CSV export.
@@ -319,27 +321,23 @@ async def test_global_import_duplicate_username_disambiguates(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def test_subject_import_creates_enrollment_and_student_assignments(
-    client: AsyncClient, db, teacher
+async def test_subject_import_enrols_and_fans_out_student_assignments(
+    client: AsyncClient, db, teacher, make_student
 ) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(db, subject.id, code="a1")
+    student = await make_student(email="ada@example.com")
     authenticate(client, teacher)
 
-    body = "student_group,student_name,student_surname,email\nIT-21,Ada,Lovelace,ada@example.com\n"
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
-        files=_csv_file(body),
+        files=_csv_file("email,variant\nada@example.com,\n"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
     loc = resp.headers["location"]
-    assert loc == f"/teacher/subjects/{subject.id}?imported=1&skipped=0&variants_updated=0"
+    assert "enrolled=1" in loc and "already=0" in loc and "rejected=0" in loc
 
-    student = (
-        await db.execute(select(Student).where(Student.email == "ada@example.com"))
-    ).scalar_one()
-    # Enrolled in the subject.
     enrolled = await db.scalar(
         select(func.count())
         .select_from(SubjectsStudents)
@@ -349,7 +347,6 @@ async def test_subject_import_creates_enrollment_and_student_assignments(
         )
     )
     assert enrolled == 1
-    # StudentAssignment fan-out created for the subject's assignment.
     sa_count = await db.scalar(
         select(func.count())
         .select_from(StudentAssignment)
@@ -359,36 +356,35 @@ async def test_subject_import_creates_enrollment_and_student_assignments(
         )
     )
     assert sa_count == 1
-    # Credentials outbox queued (new account).
+    # Enrolment never invites: credentials stay with the global import.
     creds = await db.scalar(
         select(func.count())
         .select_from(OutboxMessage)
         .where(OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS)
     )
-    assert creds == 1
+    assert creds == 0
 
 
-async def test_subject_import_existing_student_skipped_but_enrolled(
+async def test_subject_import_already_enrolled_counted_separately(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
-    # An existing global student is "skipped" (no new account/outbox) yet still
-    # gets enrolled into the subject.
     existing = await make_student(email="known@example.com")
     subject = await _make_subject(db, owner_id=teacher.id)
     await _make_assignment(db, subject.id, code="a1")
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=existing.id))
+    await db.commit()
     authenticate(client, teacher)
 
-    body = (
-        "student_group,student_name,student_surname,email\nIT-21,Known,Person,known@example.com\n"
-    )
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
-        files=_csv_file(body),
+        files=_csv_file("email,variant\nknown@example.com,\n"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"].endswith("imported=0&skipped=1&variants_updated=0")
+    loc = resp.headers["location"]
+    assert "enrolled=0" in loc and "already=1" in loc
 
+    # Still exactly one enrolment row — re-running must not duplicate.
     enrolled = await db.scalar(
         select(func.count())
         .select_from(SubjectsStudents)
@@ -398,68 +394,75 @@ async def test_subject_import_existing_student_skipped_but_enrolled(
         )
     )
     assert enrolled == 1
-    # No SEND_CREDENTIALS for the skipped (pre-existing) student.
-    creds = await db.scalar(
-        select(func.count())
-        .select_from(OutboxMessage)
-        .where(OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS)
-    )
-    assert creds == 0
 
 
-async def test_subject_import_sets_variants_from_variant_columns(
+async def test_subject_import_unknown_email_is_rejected_not_created(
     client: AsyncClient, db, teacher
 ) -> None:
+    """The endpoint enrols only — an unknown address must never create a student."""
     subject = await _make_subject(db, owner_id=teacher.id)
-    sa = await _make_assignment(db, subject.id, code="lab1", config={"variants_required": True})
+    await _make_assignment(db, subject.id, code="a1")
     authenticate(client, teacher)
 
-    body = (
-        "student_group,student_name,student_surname,email,variant_lab1\n"
-        "IT-21,Var,Student,var@example.com,B\n"
-    )
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
-        files=_csv_file(body),
+        files=_csv_file("email,variant\nnobody@example.com,B\n"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"].endswith("imported=1&skipped=0&variants_updated=1")
+    loc = resp.headers["location"]
+    assert "enrolled=0" in loc and "rejected=1" in loc
+    assert "unknown" in loc
 
-    student = (
-        await db.execute(select(Student).where(Student.email == "var@example.com"))
-    ).scalar_one()
-    student_assignment = (
-        await db.execute(
-            select(StudentAssignment).where(
-                StudentAssignment.student_id == student.id,
-                StudentAssignment.subjects_assignment_id == sa.id,
+    assert (await db.scalar(select(func.count()).select_from(Student))) == 0
+    assert (await db.scalar(select(func.count()).select_from(SubjectsStudents))) == 0
+
+
+async def test_subject_import_sets_variant_on_every_assignment(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """One variant column, written to all of the subject's assignments."""
+    subject = await _make_subject(db, owner_id=teacher.id)
+    lab1 = await _make_assignment(db, subject.id, code="lab1", config={"variants_required": True})
+    lab2 = await _make_assignment(db, subject.id, code="lab2", config={"variants_required": True})
+    student = await make_student(email="var@example.com")
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/students/import",
+        files=_csv_file("email,variant\nvar@example.com,B\n"),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    rows = (
+        (
+            await db.execute(
+                select(StudentAssignment).where(StudentAssignment.student_id == student.id)
             )
         )
-    ).scalar_one()
-    assert student_assignment.variant == "B"
+        .scalars()
+        .all()
+    )
+    assert {r.subjects_assignment_id for r in rows} == {lab1.id, lab2.id}
+    assert {r.variant for r in rows} == {"B"}
 
 
 async def test_subject_import_blank_variant_leaves_variant_unset(
-    client: AsyncClient, db, teacher
+    client: AsyncClient, db, teacher, make_student
 ) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(db, subject.id, code="lab1", config={"variants_required": True})
+    student = await make_student(email="novar@example.com")
     authenticate(client, teacher)
-    body = (
-        "student_group,student_name,student_surname,email,variant_lab1\n"
-        "IT-21,Novar,Student,novar@example.com,\n"  # blank variant cell
-    )
+
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
-        files=_csv_file(body),
+        files=_csv_file("email,variant\nnovar@example.com,\n"),  # blank variant cell
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"].endswith("variants_updated=0")
-    student = (
-        await db.execute(select(Student).where(Student.email == "novar@example.com"))
-    ).scalar_one()
+
     student_assignment = (
         await db.execute(
             select(StudentAssignment).where(
@@ -471,24 +474,22 @@ async def test_subject_import_blank_variant_leaves_variant_unset(
     assert student_assignment.variant is None
 
 
-async def test_subject_import_unknown_variant_column_ignored(
-    client: AsyncClient, db, teacher
+async def test_subject_import_variant_column_may_be_absent(
+    client: AsyncClient, db, teacher, make_student
 ) -> None:
-    # variant_ column whose code matches no assignment is silently ignored.
+    """A subject with no variants can be enrolled from an email-only file."""
     subject = await _make_subject(db, owner_id=teacher.id)
     await _make_assignment(db, subject.id, code="a1")
+    await make_student(email="ghost@example.com")
     authenticate(client, teacher)
-    body = (
-        "student_group,student_name,student_surname,email,variant_doesnotexist\n"
-        "IT-21,Ghost,Var,ghost@example.com,Z\n"
-    )
+
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
-        files=_csv_file(body),
+        files=_csv_file("email\nghost@example.com\n"),
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"].endswith("imported=1&skipped=0&variants_updated=0")
+    assert "enrolled=1" in resp.headers["location"]
 
 
 async def test_subject_import_missing_columns_is_422(client: AsyncClient, db, teacher) -> None:
@@ -496,12 +497,12 @@ async def test_subject_import_missing_columns_is_422(client: AsyncClient, db, te
     authenticate(client, teacher)
     resp = await client.post(
         f"/teacher/subjects/{subject.id}/students/import",
-        files=_csv_file("student_group,email\nIT-21,x@example.com\n"),
+        files=_csv_file("student_group,name\nIT-21,Ada\n"),  # no email column
         follow_redirects=False,
     )
     assert resp.status_code == 422
     assert "Missing CSV columns" in resp.json()["detail"]
-    assert (await db.scalar(select(func.count()).select_from(Student))) == 0
+    assert (await db.scalar(select(func.count()).select_from(SubjectsStudents))) == 0
 
 
 async def test_subject_import_non_utf8_is_422(client: AsyncClient, db, teacher) -> None:

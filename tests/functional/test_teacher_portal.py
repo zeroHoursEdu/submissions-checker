@@ -597,7 +597,9 @@ async def test_template_csv_for_owned_subject(client: AsyncClient, db, teacher) 
     resp = await client.get(f"/teacher/subjects/{subject.id}/students/template.csv")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
-    assert "student_group,student_name,student_surname,email" in resp.text
+    # The per-subject template enrols existing students; creating them stays with
+    # the global /teacher/students/sample.csv, which keeps the wider format.
+    assert "email,variant" in resp.text
 
 
 async def test_sample_csv_available_to_any_teacher(teacher_client: AsyncClient) -> None:
@@ -658,3 +660,226 @@ async def test_global_student_import_missing_columns_is_422(client: AsyncClient,
         follow_redirects=False,
     )
     assert resp.status_code == 422
+
+
+# ── Config-only UI: no content-mutating affordances ──────────────────────────
+
+
+async def test_subject_page_has_no_content_mutating_links(client: AsyncClient, db, teacher) -> None:
+    """Subject content changes only via config re-apply, so the page offers no CRUD."""
+    subject = await _make_subject(db, teacher.id)
+    authenticate(client, teacher)
+    body = (await client.get(f"/teacher/subjects/{subject.id}")).text
+
+    assert f"/teacher/subjects/{subject.id}/edit" not in body
+    assert f"/teacher/subjects/{subject.id}/export.csv" not in body
+    assert f"/teacher/subjects/{subject.id}/delete" not in body
+    assert f"/teacher/subjects/{subject.id}/assignments/create" not in body
+    # ...but the retained affordances are still there.
+    assert f"/teacher/subjects/{subject.id}/feedback" in body
+    assert f"/teacher/subjects/{subject.id}/test-student" in body
+
+
+async def test_assignment_page_has_no_content_mutating_links(
+    client: AsyncClient, db, teacher
+) -> None:
+    subject = await _make_subject(db, teacher.id)
+    assignment = await _make_assignment(db, subject.id)
+    authenticate(client, teacher)
+    body = (await client.get(f"/teacher/subjects/{subject.id}/assignments/{assignment.id}")).text
+
+    base = f"/teacher/subjects/{subject.id}/assignments/{assignment.id}"
+    assert f"{base}/quiz" not in body
+    assert f"{base}/edit" not in body
+    assert f"/teacher/subjects/{subject.id}/export.csv" not in body
+
+
+async def test_dashboard_has_no_analytics_link(teacher_client: AsyncClient) -> None:
+    """Analytics is AdminUser-only, so the button was dead for teachers."""
+    body = (await teacher_client.get("/teacher")).text
+    assert "/teacher/analytics" not in body
+
+
+# ── Enrolment by CSV ─────────────────────────────────────────────────────────
+
+
+def _csv_upload(content: str) -> dict:
+    return {"file": ("enroll.csv", content.encode("utf-8"), "text/csv")}
+
+
+async def test_enrol_existing_student_sets_variant_on_every_assignment(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, teacher.id)
+    a1 = await _make_assignment(db, subject.id, code="lab1")
+    a2 = await _make_assignment(db, subject.id, code="lab2")
+    student = await make_student(email="ivan@kpi.ua")
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/students/import",
+        files=_csv_upload("email,variant\nivan@kpi.ua,3\n"),
+    )
+    assert resp.status_code == 303
+    assert "enrolled=1" in resp.headers["location"]
+
+    enrolled = await db.scalar(
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(
+            SubjectsStudents.subject_id == subject.id,
+            SubjectsStudents.student_id == student.id,
+        )
+    )
+    assert enrolled == 1
+
+    rows = (
+        (
+            await db.execute(
+                select(StudentAssignment).where(StudentAssignment.student_id == student.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {r.subjects_assignment_id for r in rows} == {a1.id, a2.id}
+    assert [r.variant for r in rows] == ["3", "3"]
+
+
+async def test_enrol_rejects_unknown_email_but_keeps_going(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, teacher.id)
+    await _make_assignment(db, subject.id)
+    await make_student(email="known@kpi.ua")
+    students_before = await db.scalar(select(func.count()).select_from(Student))
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/students/import",
+        files=_csv_upload("email,variant\nknown@kpi.ua,1\nnobody@kpi.ua,2\n"),
+    )
+    location = resp.headers["location"]
+    assert "enrolled=1" in location
+    assert "rejected=1" in location
+    # header is line 1, so the bad row is line 3
+    assert "3%3Aunknown" in location or "3:unknown" in location
+
+    # No student was invented for the unknown address, and nobody was invited.
+    assert await db.scalar(select(func.count()).select_from(Student)) == students_before
+    credentials = await db.scalar(
+        select(func.count())
+        .select_from(OutboxMessage)
+        .where(OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS)
+    )
+    assert credentials == 0
+
+
+async def test_enrol_is_idempotent_and_empty_variant_preserves_value(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, teacher.id)
+    await _make_assignment(db, subject.id)
+    student = await make_student(email="ivan@kpi.ua")
+    authenticate(client, teacher)
+    url = f"/teacher/subjects/{subject.id}/students/import"
+
+    await client.post(url, files=_csv_upload("email,variant\nivan@kpi.ua,5\n"))
+    resp = await client.post(url, files=_csv_upload("email,variant\nivan@kpi.ua,\n"))
+
+    assert "enrolled=0" in resp.headers["location"]
+    assert "already=1" in resp.headers["location"]
+
+    links = await db.scalar(
+        select(func.count())
+        .select_from(SubjectsStudents)
+        .where(SubjectsStudents.subject_id == subject.id)
+    )
+    assert links == 1
+
+    rows = (
+        (
+            await db.execute(
+                select(StudentAssignment).where(StudentAssignment.student_id == student.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    # An empty cell must not wipe the stored variant.
+    assert rows[0].variant == "5"
+
+
+async def test_enrol_without_email_column_is_422(client: AsyncClient, db, teacher) -> None:
+    subject = await _make_subject(db, teacher.id)
+    await _make_assignment(db, subject.id)
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/students/import",
+        files=_csv_upload("mail,variant\nivan@kpi.ua,3\n"),
+    )
+    assert resp.status_code == 422
+    assert "email" in resp.json()["detail"]
+    assert await db.scalar(select(func.count()).select_from(SubjectsStudents)) == 0
+
+
+# ── Example CSV ──────────────────────────────────────────────────────────────
+
+
+async def test_template_merges_variants_from_all_assignments(
+    client: AsyncClient, db, teacher
+) -> None:
+    subject = await _make_subject(db, teacher.id)
+    a1 = await _make_assignment(db, subject.id, code="lab1")
+    a1.config = {"variants": {"1": {}, "2": {}}}
+    a2 = await _make_assignment(db, subject.id, code="lab2")
+    a2.config = {"variants": {"2": {}, "10": {}}}
+    await db.commit()
+    authenticate(client, teacher)
+
+    body = (await client.get(f"/teacher/subjects/{subject.id}/students/template.csv")).text
+    lines = [line for line in body.splitlines() if line]
+
+    assert lines[0] == "email,variant"
+    # merged, deduplicated, and sorted numerically rather than lexically
+    assert [line.split(",")[1] for line in lines[1:]] == ["1", "2", "10"]
+    assert all("example.invalid" in line for line in lines[1:])
+
+
+async def test_template_without_variants_still_shows_shape(
+    client: AsyncClient, db, teacher
+) -> None:
+    subject = await _make_subject(db, teacher.id)
+    await _make_assignment(db, subject.id, code="lab1")
+    authenticate(client, teacher)
+
+    body = (await client.get(f"/teacher/subjects/{subject.id}/students/template.csv")).text
+    lines = [line for line in body.splitlines() if line]
+
+    assert lines[0] == "email,variant"
+    assert len(lines) == 3
+    assert all(line.endswith(",") for line in lines[1:])
+
+
+async def test_enrol_accepts_header_with_odd_capitalisation(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """A spreadsheet that writes `Email` must not silently reject every row."""
+    subject = await _make_subject(db, teacher.id)
+    await _make_assignment(db, subject.id)
+    student = await make_student(email="ivan@kpi.ua")
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/students/import",
+        files=_csv_upload(" Email , Variant \nivan@kpi.ua,7\n"),
+    )
+    assert "enrolled=1" in resp.headers["location"]
+    assert "rejected=0" in resp.headers["location"]
+
+    row = await db.scalar(
+        select(StudentAssignment).where(StudentAssignment.student_id == student.id)
+    )
+    assert row.variant == "7"

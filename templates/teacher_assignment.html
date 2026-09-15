@@ -65,24 +65,6 @@
   </div>
 </div>
 
-<div class="mb-5 flex gap-2 flex-wrap">
-  <a href="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/quiz"
-     class="inline-flex items-center gap-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-4 py-2 rounded-lg transition-colors">
-    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
-    </svg>
-    {{ vocab.teacher.manage_quiz }}
-  </a>
-  <a href="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/edit"
-     class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 px-4 py-2 rounded-lg transition-colors">
-    {{ vocab.teacher.edit_assignment }}
-  </a>
-  <a href="/teacher/subjects/{{ subject_id }}/export.csv"
-     class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 px-4 py-2 rounded-lg transition-colors">
-    {{ vocab.teacher.export_grades }}
-  </a>
-</div>
-
 {% set total = rows | length %}
 {% set submitted = rows | selectattr('submission_status', 'ne', none) | list | length %}
 {% set graded = rows | selectattr('grade', 'ne', none) | list | length %}
