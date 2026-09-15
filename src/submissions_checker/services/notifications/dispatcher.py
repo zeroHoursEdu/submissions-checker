@@ -1,5 +1,6 @@
 """Notification dispatcher: fans out to all configured channels."""
 
+from submissions_checker.core import metrics
 from submissions_checker.services.notifications.base import NotificationChannel
 from submissions_checker.services.notifications.brevo_channel import BrevoChannel
 from submissions_checker.services.notifications.email import EmailChannel
@@ -15,7 +16,12 @@ class NotificationDispatcher:
     async def notify(self, recipient: str, subject: str, body: str) -> None:
         """Send notification to recipient via every configured channel."""
         for channel in self._channels:
-            await channel.send(recipient, subject, body)
+            try:
+                await channel.send(recipient, subject, body)
+            except Exception:
+                metrics.notifications_sent_total.labels(outcome="failed").inc()
+                raise
+            metrics.notifications_sent_total.labels(outcome="sent").inc()
 
 
 def build_dispatcher(settings: object) -> NotificationDispatcher:

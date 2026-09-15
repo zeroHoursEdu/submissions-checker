@@ -3,6 +3,7 @@
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from submissions_checker.core import metrics
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
@@ -103,6 +104,9 @@ async def process_outbox_messages() -> None:
                         # Mark as finished
                         message.mark_finished()
                         finished_count += 1
+                        metrics.outbox_processed_total.labels(
+                            event_type=message.event_type.value, outcome="finished"
+                        ).inc()
 
                     except Exception as e:
                         logger.error(
@@ -117,6 +121,9 @@ async def process_outbox_messages() -> None:
                         # Mark as error and increment retry count
                         message.mark_error(str(e))
                         error_count += 1
+                        metrics.outbox_processed_total.labels(
+                            event_type=message.event_type.value, outcome="error"
+                        ).inc()
 
                 # Commit all changes (finished and error messages)
                 await db.commit()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
+from submissions_checker.core import metrics
 from submissions_checker.db.models import (
     StudentAssignment,
     Subject,
@@ -106,9 +107,11 @@ async def test_clean_verdict_advances_to_quiz(
         config={"ai_review": {}},
         status=SubmissionStatus.AWAITING_AI_REVIEW,
     )
+    ok_before = metrics.ai_reviews_total.labels(outcome="ok")._value.get()
     await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id, "next_step": "quiz"})
     await db.commit()
     assert sub.status == SubmissionStatus.QUIZ_SENT
+    assert metrics.ai_reviews_total.labels(outcome="ok")._value.get() == ok_before + 1
     assert sub.ai_review["code_mark"] == 82
     assert sub.ai_review["provider"] == "openai"
 
@@ -140,11 +143,13 @@ async def test_malformed_verdict_fails_review(
         config={"ai_review": {}},
         status=SubmissionStatus.AWAITING_AI_REVIEW,
     )
+    err_before = metrics.ai_reviews_total.labels(outcome="error")._value.get()
     with pytest.raises(AIProviderError):
         await review_tasks.execute_ai_review_task(
             db, {"submission_id": sub.id, "next_step": "quiz"}
         )
     assert sub.status == SubmissionStatus.AI_REVIEW_FAILED
+    assert metrics.ai_reviews_total.labels(outcome="error")._value.get() == err_before + 1
 
 
 async def test_completed_path_finalizes_grade(

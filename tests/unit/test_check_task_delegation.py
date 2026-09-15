@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+from submissions_checker.core import metrics
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.services import check_core
 from submissions_checker.workers.tasks import check_tasks
@@ -120,8 +121,13 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         return check_core.CheckOutcome("passed", 100, 100, canned_tests)
 
     monkeypatch.setattr(check_tasks.check_core, "run_check", fake_run_check)
+    passed_before = metrics.checks_total.labels(outcome="passed")._value.get()
+    observed_before = metrics.check_duration_seconds._sum.get()
 
     await check_tasks.execute_check_task(db, {"submission_id": 1})
+
+    assert metrics.checks_total.labels(outcome="passed")._value.get() == passed_before + 1
+    assert metrics.check_duration_seconds._sum.get() >= observed_before
 
     # Core received the resolved plan (variant check_command from variant 3).
     assert isinstance(recorded["plan"], check_core.CheckPlan)
@@ -218,6 +224,7 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
         raise check_core.CheckExecutionError("check script exited 1: NameError: boom")
 
     monkeypatch.setattr(check_tasks.check_core, "run_check", crashing_run_check)
+    error_before = metrics.checks_total.labels(outcome="error")._value.get()
 
     # Must not raise — this is exactly what previously propagated out of
     # execute_check_task, got caught by the outbox processor's generic handler,
@@ -226,3 +233,4 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
 
     assert submission.status == SubmissionStatus.VALIDATION_FAILED
     assert "boom" in submission.test_results["check_reason"]
+    assert metrics.checks_total.labels(outcome="error")._value.get() == error_before + 1

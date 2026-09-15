@@ -7,6 +7,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from submissions_checker.core import metrics
 from submissions_checker.db.models.enums import OutboxEventType, OutboxMessageState
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.workers.scheduled import outbox_processor
@@ -56,11 +57,20 @@ async def test_outbox_processor_marks_message_finished(
 
     _patch_processor_session(monkeypatch, db_session)
     monkeypatch.setattr(outbox_processor, "dispatch_outbox_message", fake_dispatch)
+    finished_before = metrics.outbox_processed_total.labels(
+        event_type="NEW_SUBMISSION", outcome="finished"
+    )._value.get()
 
     await outbox_processor.process_outbox_messages()
 
     await db_session.refresh(message)
     assert dispatched == [message.id]
+    assert (
+        metrics.outbox_processed_total.labels(
+            event_type="NEW_SUBMISSION", outcome="finished"
+        )._value.get()
+        == finished_before + 1
+    )
     assert message.state == OutboxMessageState.FINISHED
     assert message.finished_at is not None
 
@@ -96,11 +106,20 @@ async def test_outbox_processor_marks_message_error_on_failure(
 
     _patch_processor_session(monkeypatch, db_session)
     monkeypatch.setattr(outbox_processor, "dispatch_outbox_message", failing_dispatch)
+    error_before = metrics.outbox_processed_total.labels(
+        event_type="NEW_SUBMISSION", outcome="error"
+    )._value.get()
 
     await outbox_processor.process_outbox_messages()
 
     await db_session.refresh(message)
     assert message.state == OutboxMessageState.ERROR
+    assert (
+        metrics.outbox_processed_total.labels(
+            event_type="NEW_SUBMISSION", outcome="error"
+        )._value.get()
+        == error_before + 1
+    )
     assert message.retry_count == 1
     assert message.error_message == "boom"
 

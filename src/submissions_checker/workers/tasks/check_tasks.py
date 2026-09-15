@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from submissions_checker.core import metrics
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
@@ -160,21 +162,27 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
 
         # ── Validation + testing run in the shared core ────────────────────────
         transition(submission, "start_validation")
+        started = time.perf_counter()
         try:
             outcome = await check_core.run_check(
                 plan=plan, submission_dir=extract_path, plugin_dir=plugin_dir, sandbox=_SANDBOX
             )
         except check_core.CheckExecutionError as exc:
+            metrics.check_duration_seconds.observe(time.perf_counter() - started)
+            metrics.checks_total.labels(outcome="error").inc()
             logger.error("check_task_execution_error", submission_id=submission_id, error=str(exc))
             _fail_validation(submission, str(exc))
             return
+        metrics.check_duration_seconds.observe(time.perf_counter() - started)
 
         if outcome.status == "validation_failed":
+            metrics.checks_total.labels(outcome="validation_failed").inc()
             submission.test_results = {"check_reason": outcome.reason}
             transition(submission, "validation_failed")
             return
 
         transition(submission, "validation_passed")
+        metrics.checks_total.labels(outcome="passed" if outcome.passed else "failed").inc()
         submission.test_results = {
             "passed": outcome.passed,
             "score": outcome.score,

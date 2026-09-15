@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from submissions_checker.core import metrics
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import StudentAssignment, SubjectsAssignment, Submission
@@ -184,10 +185,12 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> N
         verdict = await provider.review(_SYSTEM_PROMPT, user_prompt, _VERDICT_SCHEMA)
         _validate_verdict(verdict)
     except AIProviderError:
+        metrics.ai_reviews_total.labels(outcome="error").inc()
         # Record the failed state; the outbox processor commits it alongside the
         # message's ERROR state and retries per the configured policy.
         transition(submission, "ai_review_failed")
         raise
+    metrics.ai_reviews_total.labels(outcome="ok").inc()
 
     verdict["provider"] = provider.name
     verdict["model"] = provider.model
