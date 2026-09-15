@@ -79,3 +79,40 @@ def test_series_budget_estimate_is_under_500(build: ModuleType) -> None:
     # Two replicas, ~75 (route, method) pairs. The estimate lives next to the dashboards so it
     # is revisited whenever a metric is added.
     assert build.estimate_series(replicas=2, route_templates=75) < 500
+
+
+# ── Alerting ─────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def alerting() -> ModuleType:
+    return _load("build_alerting")
+
+
+def test_committed_alert_rules_match_generator(alerting: ModuleType) -> None:
+    import yaml
+
+    committed = yaml.safe_load((GRAFANA / "alerting" / "alert-rules.yaml").read_text())
+    assert committed == alerting.file_provisioning(), (
+        "run: python3 observability/grafana/build_alerting.py"
+    )
+
+
+def test_alert_rules_are_the_four_from_the_spec(alerting: ModuleType, build: ModuleType) -> None:
+    rules = alerting.rules()
+    assert [r["title"] for r in rules] == [
+        "ServiceDown",
+        "HighErrorRate",
+        "DbUnhealthy",
+        "OutboxStuck",
+    ]
+    for rule in rules:
+        assert rule["folderUID"] == "subchk" and rule["ruleGroup"] == "subchk"
+        assert rule["labels"] == {"app": "submissions-checker"}
+        exprs = [d["model"]["expr"] for d in rule["data"] if "expr" in d["model"]]
+        assert exprs and all('job="submissions-checker"' in e for e in exprs)
+        fake_dash = {"panels": [{"type": "x", "targets": [{"expr": e}]} for e in exprs]}
+        referenced = build.metric_names_in(fake_dash)
+        assert referenced <= metrics.registered_sample_names() | {"up"}, referenced
+    assert rules[0]["noDataState"] == "Alerting"  # no scrape at all IS the outage
+    assert all(r["noDataState"] == "OK" for r in rules[1:])

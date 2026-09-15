@@ -1,0 +1,146 @@
+apiVersion: 1
+groups:
+- orgId: 1
+  name: subchk
+  folder: Submissions Checker
+  interval: 1m
+  rules:
+  - uid: subchk-service-down
+    title: ServiceDown
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: grafanacloud-prom
+      model:
+        refId: A
+        expr: max(up{job="submissions-checker"}) < 1
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    for: 3m
+    noDataState: Alerting
+    execErrState: Error
+    labels:
+      app: submissions-checker
+    annotations:
+      summary: No replica of Submissions Checker is answering scrapes, or nothing
+        is pushing metrics.
+  - uid: subchk-high-error-rate
+    title: HighErrorRate
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: grafanacloud-prom
+      model:
+        refId: A
+        expr: (sum(rate(http_requests_total{job="submissions-checker",status_class="5xx"}[10m]))
+          / sum(rate(http_requests_total{job="submissions-checker"}[10m])) > 0.05)
+          and (sum(increase(http_requests_total{job="submissions-checker"}[10m]))
+          > 20)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    for: 5m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      app: submissions-checker
+    annotations:
+      summary: More than 5% of requests failed with 5xx over the last 10 minutes.
+  - uid: subchk-db-unhealthy
+    title: DbUnhealthy
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: grafanacloud-prom
+      model:
+        refId: A
+        expr: max(app_db_healthy{job="submissions-checker"}) == 0
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    for: 2m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      app: submissions-checker
+    annotations:
+      summary: 'The app cannot query Postgres: the metrics refresh is failing on every
+        replica.'
+  - uid: subchk-outbox-stuck
+    title: OutboxStuck
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: grafanacloud-prom
+      model:
+        refId: A
+        expr: max(outbox_oldest_pending_age_seconds{job="submissions-checker"}) >
+          900
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    for: 5m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      app: submissions-checker
+    annotations:
+      summary: A background job has waited more than 15 minutes; checks and emails
+        are not going out.

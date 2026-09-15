@@ -149,3 +149,13 @@ observability-down: ## Stop the local observability harness
 
 alloy-logs: ## Follow Alloy's log — where a rejected push shows up
 	docker compose --profile observability logs -f alloy
+
+dashboards-json: ## Regenerate observability/grafana/*.json and alerting/*.yaml (never hand-edit them)
+	python3 observability/grafana/build_dashboards.py
+	python3 observability/grafana/build_alerting.py
+
+dashboards: ## Push the two dashboards to Grafana Cloud (GRAFANA_URL + GRAFANA_API_TOKEN in .env)
+	@set -a; . ./.env; set +a; python3 observability/grafana/push.py dashboards
+
+alerting: ## Push Telegram contact point + 4 alert rules to Grafana Cloud (also TELEGRAM_* in .env)
+	@set -a; . ./.env; set +a; python3 observability/grafana/push.py alerting
