@@ -10,6 +10,7 @@ from jose import JWTError
 from sqlalchemy import select
 
 from submissions_checker.api.dependencies import DBSession
+from submissions_checker.core import metrics
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.security import (
     COOKIE_NAME,
@@ -85,6 +86,7 @@ async def login(
 
     db.add(UserLogin(user_id=user.id))
     await db.commit()
+    metrics.logins_total.labels(role=user.role.value).inc()
 
     token = create_access_token(user.id, user.username, user.role.value)
     redirect_url = _redirect_by_role(user.role)

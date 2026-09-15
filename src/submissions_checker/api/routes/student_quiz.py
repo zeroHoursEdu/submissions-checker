@@ -20,6 +20,7 @@ from submissions_checker.api.dependencies import (
     StudentId,
     StudentUser,
 )
+from submissions_checker.core import metrics
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.core.templates import render
@@ -456,6 +457,9 @@ async def _grade_and_finalize(
     attempt.is_passed = is_passed
     attempt.submitted_at = _utcnow()
     attempt.status = status
+    metrics.quiz_attempts_finished_total.labels(status=status.value).inc()
+    if is_passed:
+        metrics.quiz_attempts_passed_total.inc()
     # A terminal attempt is never "paused". Fold any open pause into the total and clear the
     # flag, or the frozen clock would outlive the attempt that needed it.
     _close_open_pause(attempt)
@@ -614,6 +618,7 @@ async def start_or_resume_quiz(
     )
     db.add(attempt)
     await db.commit()
+    metrics.quiz_attempts_started_total.inc()
     await db.refresh(attempt)
 
     return RedirectResponse(url=f"/portal/quiz/{attempt.id}", status_code=303)
@@ -932,6 +937,7 @@ async def report_question(
         note=note,
     )
     await db.commit()
+    metrics.disputes_opened_total.inc()
 
     return JSONResponse({"ok": True, "dispute_id": dispute.id})
 
@@ -1041,6 +1047,7 @@ async def request_air_raid_pause(
         longitude=round(lng, 6),
     )
     await db.commit()
+    metrics.air_raid_pauses_total.inc()
 
     logger.info("air_raid_pause_started", attempt_id=attempt.id, region=region.uid)
     return JSONResponse(
@@ -1247,6 +1254,7 @@ async def answer_question(
                 timed_out=False,
             )
             db.add(answer)
+            metrics.quiz_answers_total.inc()
             attempt.answers.append(answer)
             attempt.current_index += 1
             attempt.question_started_at = _utcnow()

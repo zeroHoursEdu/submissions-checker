@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import CurrentUserData, DBSession, TeacherUser
+from submissions_checker.core import metrics
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.templates import render
 from submissions_checker.db.models.enums import QuizDisputeStatus, UserRole
@@ -306,5 +307,6 @@ async def resolve(
         also_resolved=len(outcome.resolved_dispute_ids) - 1,
     )
     await db.commit()
+    metrics.disputes_resolved_total.labels(status=dispute.status.value).inc()
 
     return RedirectResponse(url="/teacher/disputes", status_code=303)

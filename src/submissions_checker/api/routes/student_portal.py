@@ -19,6 +19,7 @@ from submissions_checker.api.schemas.student_portal import (
     ContentFile,
     SubjectCard,
 )
+from submissions_checker.core import metrics
 from submissions_checker.core.i18n import get_vocab
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
@@ -468,6 +469,7 @@ async def submit_assignment(
     )
 
     await db.commit()
+    metrics.submissions_uploaded_total.inc()
 
     return RedirectResponse(
         url=f"/portal/subjects/{subject_id}/assignments/{sa_id}",
