@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     outbox_max_retries: int = 5
     outbox_retry_backoff_seconds: int = 60
 
+    # Metrics: how often the DB-derived gauges (students, backlogs, outbox age) are recomputed.
+    metrics_refresh_interval: int = 60
+
     # Subject plugins directory (gitignored; each subdirectory is a plugin with config.yml)
     plugins_dir: str = "plugins"
 

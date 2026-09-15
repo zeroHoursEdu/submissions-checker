@@ -33,6 +33,7 @@ from submissions_checker.core.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
+from submissions_checker.workers.scheduled.metrics_refresh import refresh_metrics
 
 # Configure logging before anything else
 configure_logging()
@@ -65,6 +66,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 2. Initialize database connection pool
     await init_db()
     logger.info("database_initialized")
+
+    # 2b. Prime the DB-derived gauges so a fresh replica does not report zero for a minute.
+    await refresh_metrics()
 
     # 3. Start scheduler (if enabled)
     if settings.scheduler_enabled:

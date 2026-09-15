@@ -34,6 +34,8 @@ def _patch_lifespan(monkeypatch, *, scheduler_enabled: bool):
     monkeypatch.setattr(main_module, "run_migrations", run_migrations)
     monkeypatch.setattr(main_module, "init_db", init_db)
     monkeypatch.setattr(main_module, "close_db", close_db)
+    refresh_metrics = AsyncMock(side_effect=lambda *a, **k: recorder("refresh_metrics"))
+    monkeypatch.setattr(main_module, "refresh_metrics", refresh_metrics)
 
     init_scheduler = MagicMock(side_effect=lambda *a, **k: recorder("init_scheduler"))
     start_scheduler = AsyncMock(side_effect=lambda *a, **k: recorder("start_scheduler"))
@@ -47,6 +49,7 @@ def _patch_lifespan(monkeypatch, *, scheduler_enabled: bool):
         "run_migrations": run_migrations,
         "init_db": init_db,
         "close_db": close_db,
+        "refresh_metrics": refresh_metrics,
         "init_scheduler": init_scheduler,
         "start_scheduler": start_scheduler,
         "shutdown_scheduler": shutdown_scheduler,
@@ -64,6 +67,7 @@ async def test_lifespan_startup_shutdown_sequence_scheduler_enabled(monkeypatch)
             "load_vocabularies",
             "run_migrations",
             "init_db",
+            "refresh_metrics",
             "init_scheduler",
             "start_scheduler",
         ]
@@ -74,6 +78,7 @@ async def test_lifespan_startup_shutdown_sequence_scheduler_enabled(monkeypatch)
 
     m["run_migrations"].assert_awaited_once()
     m["init_db"].assert_awaited_once()
+    m["refresh_metrics"].assert_awaited_once()
     m["close_db"].assert_awaited_once()
     m["start_scheduler"].assert_awaited_once()
     m["shutdown_scheduler"].assert_awaited_once()

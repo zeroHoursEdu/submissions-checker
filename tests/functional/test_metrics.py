@@ -160,3 +160,44 @@ async def test_air_raid_pause_is_counted(
     )
     assert resp.json()["paused"] is True
     assert _counter(metrics.air_raid_pauses_total) == before + 1
+
+
+# ── Gauge refresh queries ────────────────────────────────────────────────────
+
+
+async def test_compute_gauges_counts_real_students_only(db, make_student) -> None:
+    from submissions_checker.db.models.enums import EntityType
+    from submissions_checker.workers.scheduled.metrics_refresh import compute_gauges
+
+    await make_student(email="r1@x.y")
+    await make_student(email="r2@x.y")
+    test_student = await make_student(email="t@x.y")
+    test_student.type = EntityType.TEST
+    await db.commit()
+
+    values = await compute_gauges(db)
+    assert values["students_total"] == 2
+    assert values["students_active_7d"] == 0
+    assert values["outbox_pending"] == 0
+    assert values["outbox_oldest_pending_age_seconds"] == 0
+
+
+async def test_compute_gauges_sees_logins_and_pending_outbox(
+    client: AsyncClient, db, make_user
+) -> None:
+    from submissions_checker.db.models import OutboxMessage
+    from submissions_checker.db.models.enums import OutboxEventType
+    from submissions_checker.workers.scheduled.metrics_refresh import compute_gauges
+
+    await make_user(role=UserRole.STUDENT, username="bob", password=PASSWORD)
+    await client.post(
+        "/auth/login", data={"username": "bob", "password": PASSWORD}, follow_redirects=False
+    )
+    db.add(OutboxMessage(event_type=OutboxEventType.NEW_SUBMISSION, payload={"submission_id": 1}))
+    await db.commit()
+
+    values = await compute_gauges(db)
+    assert values["students_active_1d"] == 1
+    assert values["students_active_30d"] == 1
+    assert values["outbox_pending"] == 1
+    assert values["outbox_oldest_pending_age_seconds"] >= 0

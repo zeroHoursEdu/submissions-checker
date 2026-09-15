@@ -39,6 +39,7 @@ def init_scheduler() -> AsyncIOScheduler:
 def _register_jobs() -> None:
     """Register all scheduled jobs with the scheduler."""
     from submissions_checker.core.config import get_settings
+    from submissions_checker.workers.scheduled.metrics_refresh import refresh_metrics
     from submissions_checker.workers.scheduled.outbox_processor import process_outbox_messages
     from submissions_checker.workers.scheduled.teacher_digest_processor import (
         flush_teacher_digests,
@@ -71,6 +72,18 @@ def _register_jobs() -> None:
     )
 
     logger.info("Registered teacher digest job (interval: %ss)", flush_interval)
+
+    # Metrics refresh - DB-derived gauges for the Grafana dashboards
+    scheduler.add_job(
+        refresh_metrics,
+        trigger=IntervalTrigger(seconds=settings.metrics_refresh_interval),
+        id="metrics_refresh",
+        name="Refresh Prometheus gauges",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    logger.info("Registered metrics refresh job (interval: %ss)", settings.metrics_refresh_interval)
 
 
 async def start_scheduler() -> None:
