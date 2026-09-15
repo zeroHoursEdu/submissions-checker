@@ -1,4 +1,5 @@
-.PHONY: help install dev up down logs test test-integration test-unit lint format clean
+.PHONY: help install dev up down logs test test-integration test-unit lint format clean \
+	observability-up observability-down alloy-logs dashboards-json dashboards alerting
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -135,3 +136,16 @@ health: ## Check health of all services
 api-docs: ## Open API documentation in browser
 	@echo "Opening API docs at http://localhost:8000/docs"
 	@open http://localhost:8000/docs 2>/dev/null || xdg-open http://localhost:8000/docs 2>/dev/null || echo "Please open http://localhost:8000/docs in your browser"
+
+# --- Observability (docs/observability.md) -----------------------------------------------
+
+observability-up: ## Prometheus + Grafana + Alloy next to the app; dashboards at http://localhost:3000
+	docker compose --profile observability up -d prometheus grafana alloy
+	@echo "Grafana:    http://localhost:3000/d/subchk-technical  and  /d/subchk-goals"
+	@echo "Prometheus: http://localhost:9090   Alloy: http://localhost:12345"
+
+observability-down: ## Stop the local observability harness
+	docker compose --profile observability rm -sf prometheus grafana alloy
+
+alloy-logs: ## Follow Alloy's log — where a rejected push shows up
+	docker compose --profile observability logs -f alloy

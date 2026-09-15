@@ -1,0 +1,9 @@
+# Same uid as the hosted Prometheus in Grafana Cloud, so one dashboard JSON renders in both.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: grafanacloud-prom
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true

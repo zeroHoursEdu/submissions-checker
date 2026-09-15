@@ -1,0 +1,45 @@
+// Submissions Checker → Prometheus remote_write.
+//
+// Push, not pull: the production host publishes nothing but Caddy, and Grafana Cloud has no
+// route to a compose network. Alloy scrapes the app replicas over that network and writes
+// outbound. Locally the same file writes into a throwaway Prometheus, so the config that
+// reaches production is the one that was exercised on the laptop.
+//
+// Every value comes from the environment; nothing secret is in this file.
+
+discovery.dns "app" {
+	// Docker's embedded DNS answers a compose service name with every replica's address,
+	// so one name finds both production replicas and the single local container alike.
+	names            = [coalesce(sys.env("APP_METRICS_HOST"), "app")]
+	type             = "A"
+	port             = 8000
+	refresh_interval = "15s"
+}
+
+prometheus.scrape "app" {
+	targets         = discovery.dns.app.targets
+	job_name        = "submissions-checker"
+	metrics_path    = "/metrics"
+	scrape_interval = "30s"
+	scrape_timeout  = "10s"
+	forward_to      = [prometheus.remote_write.out.receiver]
+}
+
+prometheus.remote_write "out" {
+	// Labels every series with where it came from, so a laptop run and production never
+	// average into each other on the same dashboard.
+	external_labels = {
+		env = coalesce(sys.env("SUBCHK_ENV"), "local"),
+	}
+
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+		basic_auth {
+			// Grafana Cloud: username is the numeric Prometheus instance id, password an
+			// access-policy token with metrics:write. Locally both are dummy values.
+			username = sys.env("GRAFANA_CLOUD_PROM_USER")
+			password = sys.env("GRAFANA_CLOUD_PROM_TOKEN")
+		}
+	}
+}
