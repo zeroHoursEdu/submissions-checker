@@ -16,7 +16,7 @@ groups:
       datasourceUid: grafanacloud-prom
       model:
         refId: A
-        expr: max(up{job="submissions-checker"}) < 1
+        expr: max(up{job="submissions-checker"}) < bool 1
         instant: true
         intervalMs: 1000
         maxDataPoints: 43200
@@ -86,7 +86,7 @@ groups:
       datasourceUid: grafanacloud-prom
       model:
         refId: A
-        expr: max(app_db_healthy{job="submissions-checker"}) == 0
+        expr: max(app_db_healthy{job="submissions-checker"}) == bool 0
         instant: true
         intervalMs: 1000
         maxDataPoints: 43200

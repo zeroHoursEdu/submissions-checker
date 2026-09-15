@@ -116,3 +116,12 @@ def test_alert_rules_are_the_four_from_the_spec(alerting: ModuleType, build: Mod
         assert referenced <= metrics.registered_sample_names() | {"up"}, referenced
     assert rules[0]["noDataState"] == "Alerting"  # no scrape at all IS the outage
     assert all(r["noDataState"] == "OK" for r in rules[1:])
+
+
+def test_comparisons_that_can_be_true_at_zero_use_bool(alerting: ModuleType) -> None:
+    """`max(x) == 0` returns 0 when true, which never crosses a `> 0` threshold; `bool`
+    makes it return 1. Found by stopping Postgres locally and watching DbUnhealthy stay
+    Normal while ServiceDown fired on NoData."""
+    by_title = {r["title"]: r["data"][0]["model"]["expr"] for r in alerting.rules()}
+    assert "< bool 1" in by_title["ServiceDown"]
+    assert "== bool 0" in by_title["DbUnhealthy"]

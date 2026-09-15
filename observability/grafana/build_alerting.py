@@ -28,13 +28,16 @@ JOB = 'job="submissions-checker"'
 LABELS = {"app": "submissions-checker"}
 
 # (uid, title, promql, for, noDataState, summary)
-# Every expression yields a series only while the condition holds, so the threshold on the
-# reduce step is simply "any value > 0".
+# The threshold step fires on "value > 0". A plain comparison returns the LEFT-HAND VALUE
+# when true — `max(app_db_healthy) == 0` yields 0, which never crosses the threshold — and
+# an empty vector when false, which Grafana treats as NoData. Comparisons whose true value
+# can be 0 therefore use the `bool` modifier so they always yield exactly 0 or 1, and
+# NoData then means what it should: no series at all.
 _RULES: list[tuple[str, str, str, str, str, str]] = [
     (
         "subchk-service-down",
         "ServiceDown",
-        f"max(up{{{JOB}}}) < 1",
+        f"max(up{{{JOB}}}) < bool 1",
         "3m",
         "Alerting",  # no scrape at all (Alloy or the host died) IS the outage
         "No replica of Submissions Checker is answering scrapes, or nothing is pushing metrics.",
@@ -52,7 +55,7 @@ _RULES: list[tuple[str, str, str, str, str, str]] = [
     (
         "subchk-db-unhealthy",
         "DbUnhealthy",
-        f"max(app_db_healthy{{{JOB}}}) == 0",
+        f"max(app_db_healthy{{{JOB}}}) == bool 0",
         "2m",
         "OK",
         "The app cannot query Postgres: the metrics refresh is failing on every replica.",
