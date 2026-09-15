@@ -103,6 +103,11 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-noreply@example.com}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      # Air-raid quiz pause (token from https://alerts.in.ua/api-request). Unset means
+      # the button reports the check is unavailable and no attempt is ever paused.
+      ALERTS_IN_UA_TOKEN: ${ALERTS_IN_UA_TOKEN:-}
+      AIR_RAID_PAUSE_ENABLED: ${AIR_RAID_PAUSE_ENABLED:-true}
+      AIR_RAID_CACHE_SECONDS: ${AIR_RAID_CACHE_SECONDS:-30}
     volumes:
       # Checks run as sibling containers on the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
