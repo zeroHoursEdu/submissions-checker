@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from playwright.sync_api import expect
 from pytest_bdd import given, parsers, then, when
 
 from tests.e2e.helpers import db_conn as _db_conn
-from tests.e2e.pages.analytics_page import AnalyticsPage
 from tests.e2e.pages.teacher_dashboard import TeacherDashboard
 
 FIXTURES_DIR = __import__("pathlib").Path(__file__).parent.parent / "fixtures"
@@ -27,7 +25,7 @@ def _get_subject_id_by_code(code: str) -> int | None:
 def ensure_subject_exists(page, app_url: str, e2e_context: dict, teacher_account: dict) -> None:
     """Upload the subject config ZIP if the subject is not yet in the DB.
 
-    Some Backgrounds (e.g. analytics.feature) log in as a different role before this
+    Some Backgrounds (e.g. security.feature) log in as a different role before this
     step runs. Log out first so the login form is always reachable here, regardless
     of whatever session — if any — is already active on this page.
     """
@@ -96,40 +94,3 @@ def assert_subject_on_dashboard(page, app_url: str, subject_name: str) -> None:
 def assert_dashboard_error(page, app_url: str) -> None:
     td = TeacherDashboard(page, app_url)
     td.assert_apply_error_visible()
-
-
-@when("I navigate to the analytics page")
-def navigate_to_analytics(page, app_url: str) -> None:
-    ap = AnalyticsPage(page, app_url)
-    ap.navigate()
-
-
-@when("I navigate to the fraud analytics page")
-def navigate_to_fraud_analytics(page, app_url: str) -> None:
-    page.goto(f"{app_url}/teacher/analytics/fraud")
-
-
-@then("the analytics page should load without errors")
-def assert_analytics_loaded(page, app_url: str) -> None:
-    ap = AnalyticsPage(page, app_url)
-    ap.assert_on_analytics()
-    ap.assert_no_error()
-
-
-@then("statistical content should be visible on the page")
-def assert_analytics_content(page, app_url: str) -> None:
-    ap = AnalyticsPage(page, app_url)
-    ap.assert_stats_visible()
-
-
-@then("the fraud analytics page should load without errors")
-def assert_fraud_analytics_loaded(page, app_url: str) -> None:
-    page.wait_for_load_state("networkidle")
-    assert page.url.rstrip("/").endswith("/teacher/analytics/fraud"), (
-        f"Expected to stay on the fraud analytics page, got: {page.url}"
-    )
-    content = page.content()
-    assert "Internal Server Error" not in content
-    assert "Admin access required" not in content, "Got 403 — admin login failed"
-    # The rendered fraud dashboard has a real <h1> heading; a 403/JSON body would not.
-    expect(page.locator("h1").first).to_be_visible()

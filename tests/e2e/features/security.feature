@@ -42,12 +42,6 @@ Feature: Permissions and Security
     Then access should be forbidden
 
   @security @sad-path
-  Scenario: Teacher is denied the admin-only analytics dashboard
-    Given I am logged in as the teacher
-    When I navigate to the protected page "/teacher/analytics"
-    Then access should be forbidden
-
-  @security @sad-path
   Scenario: Teacher cannot open another teacher's subject
     Given another teacher owns a subject in the database
     And I am logged in as the teacher

@@ -44,9 +44,6 @@ class TeacherDashboard:
     def open_subject(self, subject_name: str) -> None:
         self.page.get_by_text(subject_name).first.click()
 
-    def click_analytics(self) -> None:
-        self.page.get_by_role("link", name="Analytics").click()
-
     def get_subject_ids(self) -> list[int]:
         """Return list of subject IDs from subject card links."""
         links = self.page.locator('a[href^="/teacher/subjects/"]').all()

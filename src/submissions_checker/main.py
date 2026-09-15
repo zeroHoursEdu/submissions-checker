@@ -11,7 +11,6 @@ from fastapi.staticfiles import StaticFiles
 
 from submissions_checker.api.routes import (
     admin,
-    analytics,
     auth,
     feedback,
     health,
@@ -120,7 +119,6 @@ def create_app() -> FastAPI:
     app.include_router(student_quiz.router)
     app.include_router(teacher_portal.router)
     app.include_router(teacher_disputes.router)
-    app.include_router(analytics.router)
     app.include_router(admin.router)
     app.include_router(notifications.router)
     app.include_router(i18n.router)

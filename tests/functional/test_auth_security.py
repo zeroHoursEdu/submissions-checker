@@ -24,15 +24,12 @@ pytestmark = pytest.mark.asyncio
 TEACHER_ONLY = "/teacher"  # TeacherUser → TEACHER or ADMIN
 STUDENT_ONLY = "/portal"  # StudentUser → STUDENT only
 ADMIN_ONLY = "/admin"  # AdminUser → ADMIN only
-ADMIN_ANALYTICS = "/teacher/analytics"  # AdminUser only (cross-teacher aggregation)
-TEACHER_ANALYTICS_STUDENT = "/teacher/analytics/students/1"  # TeacherUser
 ANY_AUTHENTICATED = "/notifications"  # CurrentUser
 
 PROTECTED_ENDPOINTS = [
     TEACHER_ONLY,
     STUDENT_ONLY,
     ADMIN_ONLY,
-    ADMIN_ANALYTICS,
     ANY_AUTHENTICATED,
 ]
 
@@ -187,20 +184,12 @@ async def test_student_cannot_access_admin_area(student_client: AsyncClient) -> 
     assert (await student_client.get(ADMIN_ONLY)).status_code == 403
 
 
-async def test_student_cannot_access_admin_analytics(student_client: AsyncClient) -> None:
-    assert (await student_client.get(ADMIN_ANALYTICS)).status_code == 403
-
-
 async def test_teacher_cannot_access_student_area(teacher_client: AsyncClient) -> None:
     assert (await teacher_client.get(STUDENT_ONLY)).status_code == 403
 
 
 async def test_teacher_cannot_access_admin_area(teacher_client: AsyncClient) -> None:
     assert (await teacher_client.get(ADMIN_ONLY)).status_code == 403
-
-
-async def test_teacher_cannot_access_admin_analytics(teacher_client: AsyncClient) -> None:
-    assert (await teacher_client.get(ADMIN_ANALYTICS)).status_code == 403
 
 
 # ── Positive role access ─────────────────────────────────────────────────────
@@ -222,13 +211,15 @@ async def test_admin_can_access_admin_dashboard(admin_client: AsyncClient) -> No
     assert resp.status_code == 200
 
 
-async def test_admin_can_access_admin_analytics(admin_client: AsyncClient) -> None:
-    resp = await admin_client.get(ADMIN_ANALYTICS)
-    assert resp.status_code == 200
-
-
 async def test_any_authenticated_user_sees_notifications(
     student_client: AsyncClient,
 ) -> None:
     resp = await student_client.get(ANY_AUTHENTICATED)
     assert resp.status_code == 200
+
+
+async def test_analytics_routes_are_gone(admin_client: AsyncClient) -> None:
+    """The DB-report analytics pages were replaced by Prometheus metrics (see
+    docs/superpowers/specs/2026-09-15-prometheus-grafana-observability-design.md)."""
+    for path in ("/teacher/analytics", "/teacher/analytics/fraud", "/teacher/analytics/students/1"):
+        assert (await admin_client.get(path)).status_code == 404, path

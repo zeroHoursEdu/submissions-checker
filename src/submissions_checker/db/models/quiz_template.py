@@ -121,7 +121,7 @@ class QuizAnswer(Base, TimestampMixin):
     is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     points_earned: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # True when the question's own time window closed before a valid answer arrived. Scores
-    # zero either way; the flag is what lets the result page (and later analytics) tell a
+    # zero either way; the flag is what lets the result page (and dashboards) tell a
     # wrong answer apart from one lost to the clock.
     timed_out: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"

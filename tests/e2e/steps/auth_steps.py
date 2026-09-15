@@ -44,7 +44,7 @@ def log_in_as_admin(page, app_url: str, admin_account: dict) -> None:
     lp.login(admin_account["username"], admin_account["password"])
     # ADMIN role redirects to /portal on login (which needs a student record), so we
     # don't assert a landing page here — the auth cookie is set regardless and the
-    # analytics routes are reachable directly.
+    # admin routes are reachable directly.
     page.wait_for_load_state("networkidle")
 
 
