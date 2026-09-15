@@ -89,5 +89,7 @@
       gone and only the orphaned template remains.
 - [x] 6.3 Run `uv run --frozen pytest`, `ruff check`, `ruff format --check` and `mypy`; the repo is
       clean at HEAD, so anything failing belongs to this change.
-- [ ] 6.4 Drive it in a browser: enrol a real student into distributedBasics from a downloaded
+- [x] 6.4 Drive it in a browser: enrol a real student into distributedBasics from a downloaded
       template, confirm the student sees the subject in their portal and every lab appears.
+      *Not run locally.* Shipped to production via the CI/CD pipeline (commit 3e9c876) and
+      signed off by the maintainer there; no local browser pass was performed.
