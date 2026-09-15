@@ -54,6 +54,28 @@ _SANDBOX = DockerSandbox()
 _QUIZ_FIRST_MODES = frozenset({"quiz_only", "quiz_then_teacher"})
 
 
+async def is_quiz_first_assignment(
+    db: AsyncSession, subject_id: int, assignment_code: str | None
+) -> bool:
+    """True when this assignment is examined by quiz and runs no checker at all.
+
+    Asked at upload time so the submit handler can accept the submission inline instead of
+    handing it to the outbox: there is no sandbox to start for these modes, and the 10-second
+    poll was the only thing standing between the student and their quiz. Unknown subjects,
+    unmapped assignments and missing configs all answer False — those need the worker's
+    error handling, not a shortcut through it.
+    """
+    if not assignment_code:
+        return False
+    config_record = await _fetch_latest_config(db, subject_id)
+    if config_record is None:
+        return False
+    plugin_assignment: dict[str, Any] = config_record.config.get("assignments", {}).get(
+        assignment_code, {}
+    )
+    return plugin_assignment.get("review_mode", "tests_only") in _QUIZ_FIRST_MODES
+
+
 async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     submission_id: int = payload["submission_id"]
 

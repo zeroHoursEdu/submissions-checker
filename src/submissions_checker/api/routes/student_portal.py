@@ -8,7 +8,7 @@ from pathlib import Path
 
 import aiofiles
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import and_, func, nullslast, select
 from sqlalchemy.orm import selectinload
 
@@ -45,11 +45,32 @@ from submissions_checker.db.models.notification_preference import NotificationPr
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.services.audit import audit
 from submissions_checker.services.similarity import compare_zip_files
+from submissions_checker.workers.tasks.check_tasks import (
+    execute_check_task,
+    is_quiz_first_assignment,
+)
 
 router = APIRouter(prefix="/portal", tags=["student-portal"])
 
 UPLOADS_DIR = Path("uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
+
+# Statuses that a background worker is going to move on its own, without anyone touching the
+# page. A submission sitting in one of these is why the assignment page has to watch itself:
+# the upload redirects here while the status is still PENDING, and the quiz link only appears
+# once the check task has advanced it. Human-gated waits (teacher review) are deliberately not
+# in here — nothing is going to change in the next few seconds, so polling them is noise.
+TRANSIENT_STATUSES = frozenset(
+    {
+        SubmissionStatus.PENDING,
+        SubmissionStatus.PROCESSING,
+        SubmissionStatus.VALIDATING,
+        SubmissionStatus.TESTING,
+        SubmissionStatus.CHECKING,
+        SubmissionStatus.AWAITING_AI_REVIEW,
+        SubmissionStatus.AI_REVIEWING,
+    }
+)
 
 
 async def student_needs_consent(db: DBSession, student_id: int) -> bool:
@@ -338,7 +359,45 @@ async def assignment_detail(
             "student": student,
             "subject_id": subject_id,
             "assignment": detail,
+            # A page rendered mid-check is already out of date: the quiz link, the grade and
+            # the result link all appear only after a worker moves the status.
+            "poll_status": latest_sub is not None and latest_sub.status in TRANSIENT_STATUSES,
         },
+    )
+
+
+@router.get("/subjects/{subject_id}/assignments/{sa_id}/status")
+async def assignment_status(
+    subject_id: int,
+    sa_id: int,
+    db: DBSession,
+    current_user: StudentUser,
+    student_id: StudentId,
+) -> JSONResponse:
+    """Latest submission status for one assignment, for the page to poll itself with.
+
+    ``transient`` tells the caller whether it is still worth asking again.
+    """
+    sa_exists = await db.scalar(
+        select(StudentAssignment.id).where(
+            StudentAssignment.id == sa_id,
+            StudentAssignment.student_id == student_id,
+        )
+    )
+    if sa_exists is None:
+        raise HTTPException(status_code=404)
+
+    status = await db.scalar(
+        select(Submission.status)
+        .where(Submission.students_assignment_id == sa_id)
+        .order_by(Submission.created_at.desc(), Submission.id.desc())
+        .limit(1)
+    )
+    return JSONResponse(
+        {
+            "status": status.value if status else None,
+            "transient": status in TRANSIENT_STATUSES,
+        }
     )
 
 
@@ -448,14 +507,19 @@ async def submit_assignment(
     db.add(submission)
     await db.flush()
 
-    # Enqueue background check — submission stays PENDING until worker picks it up
-    db.add(
-        OutboxMessage(
-            event_type=OutboxEventType.RUN_CHECKS,
-            state=OutboxMessageState.PENDING,
-            payload={"submission_id": submission.id},
+    # Quiz-examined assignments have nothing to run — no sandbox, no container — so they are
+    # accepted here, in the request, and the page this redirects to already carries the quiz
+    # link. Everything else stays PENDING until the outbox processor picks it up.
+    if await is_quiz_first_assignment(db, subjects_assignment.subject_id, subjects_assignment.code):
+        await execute_check_task(db, {"submission_id": submission.id})
+    else:
+        db.add(
+            OutboxMessage(
+                event_type=OutboxEventType.RUN_CHECKS,
+                state=OutboxMessageState.PENDING,
+                payload={"submission_id": submission.id},
+            )
         )
-    )
 
     await audit(
         db,

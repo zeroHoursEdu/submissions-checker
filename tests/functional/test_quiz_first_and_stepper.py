@@ -8,6 +8,8 @@ browser, deciding when a question has expired.
 
 from __future__ import annotations
 
+import io
+import zipfile
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,6 +17,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from submissions_checker.db.models import (
+    OutboxMessage,
     QuizAttempt,
     Student,
     StudentAssignment,
@@ -25,11 +28,18 @@ from submissions_checker.db.models import (
     SubmissionSourceType,
     SubmissionStatus,
 )
-from submissions_checker.db.models.enums import QuizAttemptStatus
+from submissions_checker.db.models.enums import OutboxEventType, QuizAttemptStatus
 from submissions_checker.db.models.quiz_template import QuizAnswer
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 
 pytestmark = pytest.mark.asyncio
+
+
+def _zip_bytes() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("report.md", "# report\n")
+    return buf.getvalue()
 
 
 def _question(text: str, correct: int, *, seconds: int | None = None) -> dict:
@@ -67,7 +77,7 @@ FLAT_QUIZ = {
 }
 
 
-async def _arrange(
+async def _arrange_assignment(
     db,
     student_id: int,
     owner_id: int,
@@ -75,8 +85,8 @@ async def _arrange(
     quiz_cfg: dict,
     review_mode: str = "quiz_then_teacher",
     max_grade: int = 8,
-) -> tuple[Subject, StudentAssignment, Submission]:
-    """A QUIZ_SENT submission on an assignment that declares no checker at all."""
+) -> tuple[Subject, StudentAssignment, SubjectPluginConfig]:
+    """A consented student on an assignment that declares no checker at all — no submission yet."""
     subject = Subject(name="WinAPI", owner_id=owner_id)
     db.add(subject)
     await db.commit()
@@ -116,6 +126,32 @@ async def _arrange(
     await db.commit()
     await db.refresh(sa)
 
+    student = await db.get(Student, student_id)
+    student.recording_consent_at = datetime.now(UTC)
+    await db.commit()
+
+    return subject, sa, cfg
+
+
+async def _arrange(
+    db,
+    student_id: int,
+    owner_id: int,
+    *,
+    quiz_cfg: dict,
+    review_mode: str = "quiz_then_teacher",
+    max_grade: int = 8,
+) -> tuple[Subject, StudentAssignment, Submission]:
+    """A QUIZ_SENT submission on an assignment that declares no checker at all."""
+    subject, sa, cfg = await _arrange_assignment(
+        db,
+        student_id,
+        owner_id,
+        quiz_cfg=quiz_cfg,
+        review_mode=review_mode,
+        max_grade=max_grade,
+    )
+
     submission = Submission(
         students_assignment_id=sa.id,
         source_type=SubmissionSourceType.ZIP_UPLOAD,
@@ -127,10 +163,6 @@ async def _arrange(
     db.add(submission)
     await db.commit()
     await db.refresh(submission)
-
-    student = await db.get(Student, student_id)
-    student.recording_consent_at = datetime.now(UTC)
-    await db.commit()
 
     return subject, sa, submission
 
@@ -491,3 +523,96 @@ async def test_download_404s_when_the_file_is_gone(
     login(student_client, teacher)
     resp = await student_client.get(f"/teacher/submissions/{submission.id}/download")
     assert resp.status_code == 404
+
+
+# ── True/False rendering ─────────────────────────────────────────────────────
+
+TRUE_FALSE_QUIZ = {
+    "questions": [
+        {"type": "true_false", "text": "tf1", "points": 1, "correct": False},
+    ],
+    "shuffle_questions": False,
+    "pass_threshold_pct": 0.6,
+}
+
+
+async def test_true_false_question_renders_labelled_options(
+    student_client: AsyncClient, db, student_user, teacher
+) -> None:
+    """Both radios must carry their word, not an empty label.
+
+    The template reads ``vocab.common.true``/``vocab.common.false``; unquoted ``true:`` keys
+    in a vocabulary file parse as YAML booleans, which Jinja cannot reach by that name.
+    """
+    subject, sa, submission = await _arrange(
+        db, student_user.student_id, teacher.id, quiz_cfg=TRUE_FALSE_QUIZ
+    )
+    await _start(student_client, subject, sa)
+    attempt = await _attempt_of(db, submission.id)
+
+    page = await student_client.get(f"/portal/quiz/{attempt.id}")
+    assert page.status_code == 200
+    assert 'value="true"' in page.text
+    assert 'value="false"' in page.text
+    assert "Правда" in page.text
+    assert "Хибність" in page.text
+
+
+# ── Quiz-first submissions skip the outbox round trip ────────────────────────
+
+
+async def test_quiz_first_submission_is_accepted_inline(
+    student_client: AsyncClient, db, student_user, teacher
+) -> None:
+    """A quiz-examined upload must come back already QUIZ_SENT.
+
+    Nothing runs for these modes — no sandbox, no container — so making the student wait for
+    the 10s outbox poll only means the assignment page renders with no quiz link on it.
+    """
+    subject, sa, _cfg = await _arrange_assignment(
+        db, student_user.student_id, teacher.id, quiz_cfg=FLAT_QUIZ
+    )
+
+    resp = await student_client.post(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/submit",
+        files={"file": ("report.zip", _zip_bytes(), "application/zip")},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+
+    submission = (
+        (await db.execute(select(Submission).where(Submission.students_assignment_id == sa.id)))
+        .scalars()
+        .one()
+    )
+    assert submission.status == SubmissionStatus.QUIZ_SENT
+    assert submission.plugin_config_id is not None
+
+    # No RUN_CHECKS message was enqueued — there is nothing for the worker to do.
+    outbox = (
+        (
+            await db.execute(
+                select(OutboxMessage).where(OutboxMessage.event_type == OutboxEventType.RUN_CHECKS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert outbox == []
+
+
+async def test_quiz_link_is_live_on_the_page_the_upload_redirects_to(
+    student_client: AsyncClient, db, student_user, teacher
+) -> None:
+    """The redirect target of the upload already offers the quiz — no manual reload."""
+    subject, sa, _cfg = await _arrange_assignment(
+        db, student_user.student_id, teacher.id, quiz_cfg=FLAT_QUIZ
+    )
+
+    resp = await student_client.post(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/submit",
+        files={"file": ("report.zip", _zip_bytes(), "application/zip")},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz" in resp.text

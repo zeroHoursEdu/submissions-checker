@@ -318,4 +318,40 @@
     submitLabel.textContent = 'Uploading…';
   });
 </script>
+
+{% if poll_status %}
+<script>
+  // This page was rendered while a check was still queued, so whatever the status unlocks —
+  // the Start Quiz button, the grade, the failure reason — is not on it yet. Watch the status
+  // and reload once a worker has moved it. Nothing here re-renders the page by hand: the
+  // server stays the single author of what the student sees.
+  (function () {
+    const statusUrl = '/portal/subjects/{{ subject_id }}/assignments/{{ assignment.student_assignment_id }}/status';
+    const renderedAs = '{{ assignment.submission_status }}';
+    const POLL_MS = 3000;
+
+    function poll() {
+      // Never yank the page out from under a student who has just picked their next upload.
+      const picked = document.getElementById('file-input');
+      if (picked && picked.files && picked.files.length > 0) {
+        setTimeout(poll, POLL_MS);
+        return;
+      }
+      fetch(statusUrl, { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          if (!data) return;
+          if (data.status !== renderedAs) {
+            window.location.reload();
+          } else if (data.transient) {
+            setTimeout(poll, POLL_MS);
+          }
+        })
+        .catch(function () { setTimeout(poll, POLL_MS * 3); });
+    }
+
+    setTimeout(poll, POLL_MS);
+  })();
+</script>
+{% endif %}
 {% endblock %}

@@ -42,8 +42,10 @@ common:
   dashboard: Панель управління
   summary: Зведення
   progress: Прогрес
-  true: Правда
-  false: Хибність
+  # Quoted on purpose: bare true/false are YAML booleans, and the key would stop
+  # being reachable as vocab.common.true from a template.
+  "true": Правда
+  "false": Хибність
   view: Переглянути
   export_csv: Експорт CSV
   danger_zone: Небезпечна зона

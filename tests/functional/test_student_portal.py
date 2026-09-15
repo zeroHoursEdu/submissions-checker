@@ -524,3 +524,110 @@ async def test_notification_pref_is_per_student(
         .all()
     )
     assert other_rows == []
+
+
+# ── Live status while a check is in flight ───────────────────────────────────
+
+
+async def _make_submission(db, sa_id: int, status: SubmissionStatus) -> Submission:
+    submission = Submission(
+        students_assignment_id=sa_id,
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+        source_metadata={"saved_as": "x.zip"},
+        status=status,
+    )
+    db.add(submission)
+    await db.commit()
+    await db.refresh(submission)
+    return submission
+
+
+async def test_status_endpoint_reports_the_latest_submission_status(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
+    await _make_submission(db, sa.id, SubmissionStatus.PENDING)
+
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}/status")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "PENDING", "transient": True}
+
+
+async def test_status_endpoint_marks_a_settled_status_as_not_transient(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
+    await _make_submission(db, sa.id, SubmissionStatus.QUIZ_SENT)
+
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}/status")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "QUIZ_SENT", "transient": False}
+
+
+async def test_status_endpoint_without_a_submission_is_null(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
+
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}/status")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": None, "transient": False}
+
+
+async def test_status_endpoint_of_another_students_assignment_is_404(
+    student_client: AsyncClient, db, student_user, make_student
+) -> None:
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    other = await make_student()
+    other_sa = await _make_student_assignment(db, other.id, sub_a.id)
+
+    resp = await student_client.get(
+        f"/portal/subjects/{subject.id}/assignments/{other_sa.id}/status"
+    )
+    assert resp.status_code == 404
+
+
+async def test_assignment_page_polls_while_the_check_is_in_flight(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    """A PENDING page must watch its own status — the worker flips it seconds later."""
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
+    await _make_submission(db, sa.id, SubmissionStatus.PENDING)
+
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert resp.status_code == 200
+    assert f"/portal/subjects/{subject.id}/assignments/{sa.id}/status" in resp.text
+
+
+async def test_assignment_page_does_not_poll_once_the_status_has_settled(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
+    await _make_submission(db, sa.id, SubmissionStatus.COMPLETED)
+
+    resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert resp.status_code == 200
+    assert f"/portal/subjects/{subject.id}/assignments/{sa.id}/status" not in resp.text

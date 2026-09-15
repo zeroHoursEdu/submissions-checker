@@ -85,3 +85,37 @@ def test_get_vocab_unknown_or_none_falls_back_to_default(tmp_path: Path) -> None
     i18n.load_vocabularies(tmp_path)  # default == en (sorted first)
     assert i18n.get_vocab(None)["hello"] == "Hi"
     assert i18n.get_vocab("zz")["hello"] == "Hi"
+
+
+def test_shipped_vocabularies_have_only_string_keys() -> None:
+    """Guard against YAML's bare-keyword keys silently blanking a template lookup.
+
+    ``true:``/``false:``/``yes:``/``no:``/``on:``/``off:``/``null:`` written unquoted parse
+    as booleans or None, not strings. Jinja then resolves ``vocab.common.true`` to Undefined
+    and renders an empty string — which is how every True/False quiz question shipped with
+    two unlabelled radio buttons.
+    """
+    i18n.load_vocabularies(Path("i18n"))
+    assert i18n._VOCABULARIES, "no vocabularies loaded from i18n/"
+
+    offenders: list[str] = []
+
+    def walk(node: object, path: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if not isinstance(key, str):
+                    offenders.append(f"{path}.{key!r} ({type(key).__name__})")
+                walk(value, f"{path}.{key}")
+
+    for lang, vocab in i18n._VOCABULARIES.items():
+        walk(vocab, lang)
+
+    assert offenders == []
+
+
+def test_shipped_vocabularies_define_the_true_false_labels() -> None:
+    """The True/False quiz renderer reads these two keys directly."""
+    i18n.load_vocabularies(Path("i18n"))
+    for lang, vocab in i18n._VOCABULARIES.items():
+        assert vocab["common"]["true"], f"{lang} is missing common.true"
+        assert vocab["common"]["false"], f"{lang} is missing common.false"
