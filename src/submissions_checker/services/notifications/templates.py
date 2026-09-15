@@ -184,15 +184,16 @@ def credentials_template(
     full_name: str, username: str, password: str, login_url: str
 ) -> tuple[str, str]:
     """Return (subject, body) for a new student account welcome email."""
-    subject = "Your account credentials for SubmissionChecker"
+    subject = "Реєстрація в сервісі перевірки лабораторних робіт"
     body = (
-        f"Hi {full_name},\n\n"
-        f"Your account has been created. Here are your login details:\n\n"
-        f"  Username: {username}\n"
-        f"  Password: {password}\n\n"
-        f"Log in here: {login_url}\n\n"
-        f"We recommend changing your password after your first login.\n\n"
-        f"Best regards,\nThe Teaching Team"
+        f"Вітаю, {full_name} !\n\n"
+        f"Ваш обліковий запис у сервісі перевірки та оцінювання "
+        f"лабораторних робіт створено.\n\n"
+        f"Дані для входу:\n"
+        f"Логін: {username}\n"
+        f"Пароль: {password}\n\n"
+        f"Увійти: {login_url}\n\n"
+        f"Рекомендуємо змінити пароль одразу після першого входу."
     )
     return subject, body
 

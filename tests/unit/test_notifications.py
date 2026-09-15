@@ -117,10 +117,21 @@ def test_quiz_pass_fail_github_templates(passed_fn) -> None:
 
 
 def test_credentials_template_contains_credentials() -> None:
-    _, body = templates.credentials_template("Fay", "fay99", "pw123", "http://login")
-    assert "fay99" in body
-    assert "pw123" in body
-    assert "http://login" in body
+    subject, body = templates.credentials_template("Fay", "fay99", "pw123", "http://login")
+    assert subject == "Реєстрація в сервісі перевірки лабораторних робіт"
+    assert body == (
+        "Вітаю, Fay !\n"
+        "\n"
+        "Ваш обліковий запис у сервісі перевірки та оцінювання лабораторних робіт створено.\n"
+        "\n"
+        "Дані для входу:\n"
+        "Логін: fay99\n"
+        "Пароль: pw123\n"
+        "\n"
+        "Увійти: http://login\n"
+        "\n"
+        "Рекомендуємо змінити пароль одразу після першого входу."
+    )
 
 
 def test_feedback_request_template() -> None:
