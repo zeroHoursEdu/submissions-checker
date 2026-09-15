@@ -26,6 +26,7 @@ from submissions_checker.core.config import get_settings
 from submissions_checker.core.database import close_db, init_db
 from submissions_checker.core.i18n import load_vocabularies
 from submissions_checker.core.logging import configure_logging, get_logger
+from submissions_checker.core.metrics_middleware import PrometheusMiddleware
 from submissions_checker.core.migrations import run_migrations
 from submissions_checker.core.scheduler import (
     init_scheduler,
@@ -109,6 +110,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Outermost of the app middlewares: counts every request by route template.
+    app.add_middleware(PrometheusMiddleware)
 
     # Register routers
     app.include_router(health.router)
