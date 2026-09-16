@@ -498,6 +498,18 @@ teacher:
   gb_grid_title: Відомість оцінок
   gb_col_total: Разом
   gb_no_data: Немає даних для відображення.
+  integrity_title: Доброчесність тестів
+  integrity_col_student: Студент
+  integrity_col_assignment: Завдання
+  integrity_col_tab_switch: Перемикання вкладок
+  integrity_col_window_blur: Втрата фокусу вікна
+  integrity_col_duration: Тривалість
+  integrity_col_severity: Рівень
+  integrity_severity_high: Високий
+  integrity_severity_medium: Середній
+  integrity_flagged_only: Показати лише позначені
+  integrity_no_data: Немає спроб тестів для цього предмета.
+  integrity_median_suffix: медіана
 
 admin:
   dashboard_title: Панель адміністратора

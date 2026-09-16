@@ -346,3 +346,29 @@ async def test_grades_tab_renders_stats_and_grid(
     assert "ЛР1" in resp.text
     assert "Grid Student" in resp.text
     assert ">90<" in resp.text  # the grade appears as a cell value
+
+
+async def test_integrity_table_shows_severity_and_flag_filter(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
+    student = await make_student(full_name="Flagged Student")
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id)
+    sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    await _make_quiz_attempt(
+        db, sub.id, started_at=start, submitted_at=start + timedelta(seconds=100),
+        violations={"tab_switch": 3},
+    )
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+
+    assert resp.status_code == 200
+    assert "Flagged Student" in resp.text
+    assert f'id="integrity-row-{student.id}-{a1.id}"' in resp.text
+    assert f'id="cell-{student.id}-{a1.id}"' in resp.text
+    assert "violation-dot" in resp.text
+    assert 'data-flagged-only-toggle' in resp.text

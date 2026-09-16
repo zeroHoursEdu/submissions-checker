@@ -342,6 +342,61 @@
     {{ vocab.teacher.gb_no_data }}
   </div>
   {% endif %}
+
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm mt-6">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
+      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.integrity_title }}</h2>
+      <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+        <input type="checkbox" data-flagged-only-toggle class="rounded border-slate-300">
+        {{ vocab.teacher.integrity_flagged_only }}
+      </label>
+    </div>
+    {% if integrity_rows %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-slate-50 border-b border-slate-200">
+            <th class="px-4 py-2 text-left font-medium text-slate-600">{{ vocab.teacher.integrity_col_student }}</th>
+            <th class="px-4 py-2 text-left font-medium text-slate-600">{{ vocab.teacher.integrity_col_assignment }}</th>
+            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_tab_switch }}</th>
+            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_window_blur }}</th>
+            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_duration }}</th>
+            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_severity }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in integrity_rows %}
+          <tr id="integrity-row-{{ row.student_id }}-{{ row.assignment_id }}"
+              data-flagged="{{ 'true' if row.flagged else 'false' }}"
+              class="border-b border-slate-100">
+            <td class="px-4 py-2 text-slate-900">{{ row.student_name }}</td>
+            <td class="px-4 py-2 text-slate-600">{{ row.assignment_title }}</td>
+            <td class="px-4 py-2 text-center">{{ row.tab_switch }}</td>
+            <td class="px-4 py-2 text-center">{{ row.window_blur }}</td>
+            <td class="px-4 py-2 text-center {% if row.duration_anomalous %}text-red-600 font-medium{% else %}text-slate-600{% endif %}">
+              {% if row.duration_seconds is not none %}
+                {{ row.duration_seconds }}s
+                {% if row.median_seconds is not none %}/ {{ row.median_seconds }}s {{ vocab.teacher.integrity_median_suffix }}{% endif %}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-2 text-center">
+              {% if row.severity == "high" %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{{ vocab.teacher.integrity_severity_high }}</span>
+              {% elif row.severity == "medium" %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{{ vocab.teacher.integrity_severity_medium }}</span>
+              {% else %}
+              <span class="text-slate-300">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="px-5 py-8 text-center text-slate-400 text-sm">{{ vocab.teacher.integrity_no_data }}</div>
+    {% endif %}
+  </div>
 </div>
 
 </div>
@@ -372,6 +427,28 @@
   });
 
   activate(root.dataset.defaultTab || "students");
+
+  var flaggedToggle = root.querySelector("[data-flagged-only-toggle]");
+  if (flaggedToggle) {
+    flaggedToggle.addEventListener("change", function () {
+      root.querySelectorAll("tr[data-flagged]").forEach(function (tr) {
+        tr.hidden = flaggedToggle.checked && tr.dataset.flagged !== "true";
+      });
+    });
+  }
+
+  root.querySelectorAll(".violation-dot").forEach(function (dot) {
+    dot.addEventListener("click", function (event) {
+      event.stopPropagation();
+      activate("grades");
+      var target = document.getElementById(dot.dataset.scrollTo);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.add("bg-yellow-50");
+        setTimeout(function () { target.classList.remove("bg-yellow-50"); }, 1500);
+      }
+    });
+  });
 })();
 </script>
 {% endblock %}
