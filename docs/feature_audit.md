@@ -117,7 +117,10 @@ Move `pendingPosts/` out of the repo; delete the rest.
 
 ## B. Finalize
 
-### B1. AI review — verdict is computed and then hidden — P1
+### ✅ B1. AI review — verdict is computed and then hidden — P1
+
+> Done 2026-09-17: verdict panel on the review page, `AI ·` badge on the board, language-agnostic
+> code collection (`ai_review.source_extensions`), block documented.
 
 `workers/tasks/review_tasks.py` + `services/ai/provider.py` are **fully implemented**
 (OpenAI JSON-mode or Anthropic structured output; `missing_features.md` is wrong on this).
@@ -143,7 +146,11 @@ The verdict `{cheating, ai_generated, code_mark, comment, provider, model}` land
 (`ai_review.source_extensions`, default by language) instead of hard-coding Python;
 (4) document the block; (5) add AI flags to the integrity tab.
 
-### B2. Camera proctoring ("AI detection using camera") — P1
+### ✅ B2. Camera proctoring ("AI detection using camera") — P1
+
+> Done 2026-09-17: assets vendored (`scripts/fetch_vendor_assets.py`, `/static/vendor/`), phone
+> detector removed by decision, `camera_model_unavailable` event, per-attempt evidence on the
+> review page, rule-engine tests, `docs/anti-cheat.md` › Camera proctoring.
 
 Client side in `templates/_quiz_anticheat.html` (lines 170–372) is **complete**: MediaPipe
 FaceLandmarker gives face-count and head-pose (`camera_face_absent`,
@@ -286,7 +293,7 @@ Ordered by how often a teacher or student would hit the gap.
 11. **Rate limiting and CSRF** on `POST /auth/login`, `/auth/forgot-password`, and every
     form (deferred in the 2026-06-18 security pass; still absent). P1 for login
     throttling, P2 for CSRF given the strict-same-site cookie.
-12. **Config validation for the two recurring authoring mistakes**: identical
+12. ✅ **Config validation for the two recurring authoring mistakes** (done 2026-09-17): identical
     common/variant check script (B8 #13), and a `quiz:` block under a review mode that
     never sends it (item 4). Fail the upload with a clear message. P2.
 13. **Abandoned-attempt reaper** — see B9. P3.
