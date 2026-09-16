@@ -1,496 +1,92 @@
 # Submissions Checker
 
-Automated student code submission checker with GitHub integration, test execution, and AI-powered code review.
+Automated checker for university programming coursework. Students upload a ZIP, the
+platform runs the subject's check scripts in a locked-down Docker sandbox, and the
+result flows through whatever the assignment asks for next: nothing, an AI code review,
+a teacher review, or a proctored quiz. Grades, notifications, disputes and course
+feedback are all in one place. The UI is Ukrainian.
 
-## Overview
+## What it does
 
-The Submissions Checker is a Python-based monolithic application that automates the process of checking student code submissions. It integrates with GitHub to receive pull request webhooks, executes automated tests, performs AI-powered code reviews, and provides feedback directly on GitHub PRs.
+- **Subjects come from a config ZIP.** A teacher uploads `config.yml` + check scripts
+  (see `docs/PLUGIN_AUTHORING.md`); there is no point-and-click editor by design.
+- **Checks run in a sandbox** — no network, memory/CPU caps, one container per run,
+  identical locally (`runner` CLI) and in production.
+- **Review modes** per assignment: `tests_only`, `tests_then_ai`, `tests_then_teacher`,
+  `tests_then_ai_then_teacher`, `tests_then_quiz`, plus check-free `quiz_only` /
+  `quiz_then_teacher`.
+- **Quizzes with proctoring**: tab/focus/copy/shortcut rules, optional webcam
+  face-presence detection, evidence snapshots, per-question timers, question disputes,
+  air-raid pause verified against alerts.in.ua.
+- **Roles**: admin (creates teachers), teacher (owns subjects, enrols students, reviews),
+  student (submits, takes quizzes). No self-registration.
+- **Reliability**: transactional outbox + APScheduler; every side effect is a retried job.
+- **Observability**: Prometheus metrics, Grafana dashboards, alerting (`docs/observability.md`).
 
-### Key Features
+Full route-by-route catalogue: `docs/feature_catalog.md`.
 
-- **GitHub Integration**: Receive and process pull request webhooks
-- **Automated Testing**: Execute CLI-based tests on student submissions
-- **AI Code Review**: Leverage AI providers (OpenAI, Azure OpenAI) for intelligent code analysis
-- **Reliable Processing**: Transactional outbox pattern ensures no events are lost
-- **Async Architecture**: Built with FastAPI and async/await for high performance
-- **Background Jobs**: In-process scheduled tasks with APScheduler
-- **Type Safety**: Comprehensive type hints and Pydantic validation
+## Stack
 
-## Architecture
+FastAPI · SQLAlchemy 2 (async, asyncpg) · PostgreSQL 16 · Alembic · APScheduler ·
+Jinja2 + Tailwind · S3-compatible storage (MinIO / LocalStack) · OpenAI or Anthropic
+for AI review · Resend / Brevo / SMTP for email · structlog · Prometheus · uv · ruff · mypy.
 
-### Technology Stack
+## Run locally
 
-- **Web Framework**: FastAPI (async, modern, OpenAPI documentation)
-- **Database**: PostgreSQL 16+ with asyncpg driver
-- **ORM**: SQLAlchemy 2.0+ with async support
-- **Migrations**: SQL-based migrations (runs automatically on app startup)
-- **Background Jobs**: APScheduler (in-process async scheduler)
-- **HTTP Client**: httpx (async)
-- **Dependency Management**: uv (fastest Python package manager)
-- **Configuration**: Pydantic Settings
-- **Testing**: pytest + testcontainers
-- **Code Quality**: Ruff (linting + formatting)
-
-### Architecture Patterns
-
-**Transactional Outbox Pattern**
-- Events are written to the `outbox_messages` table in the same transaction as business logic
-- Scheduled job polls for unprocessed messages every 10 seconds
-- Messages are dispatched to appropriate async task handlers in-process
-- Ensures reliable event processing without message loss
-
-**Async-First Design**
-- FastAPI handles requests asynchronously
-- SQLAlchemy async sessions for non-blocking database operations
-- httpx for async HTTP requests
-- APScheduler with AsyncIOScheduler for background task processing
-
-**Separation of Concerns**
-- **API Layer**: Request/response handling, validation (FastAPI routes)
-- **Core Layer**: Configuration, database, logging, security
-- **Service Layer**: Business logic for GitHub, AI, testing
-- **Data Layer**: Database models and queries
-- **Worker Layer**: Background task processing
-
-## Project Structure
-
-```
-submissions-checker/
-├── src/submissions_checker/       # Application source code
-│   ├── api/                       # API routes and schemas
-│   │   ├── routes/               # FastAPI route handlers
-│   │   └── schemas/              # Pydantic request/response schemas
-│   ├── core/                     # Core infrastructure
-│   │   ├── config.py            # Pydantic Settings configuration
-│   │   ├── database.py          # SQLAlchemy async setup
-│   │   ├── logging.py           # Structured logging (structlog)
-│   │   └── security.py          # Security utilities
-│   ├── db/                       # Database layer
-│   │   ├── models/              # SQLAlchemy models
-│   │   ├── base.py              # Base model class
-│   │   └── session.py           # Session management
-│   ├── services/                 # Business logic services
-│   │   ├── github/              # GitHub API integration
-│   │   ├── ai/                  # AI provider integration
-│   │   ├── testing/             # Test execution
-│   │   └── user_service.py      # User operations
-│   ├── workers/                  # Background job processing
-│   │   ├── tasks/               # Background task definitions
-│   │   └── scheduled/           # Scheduled jobs (outbox processor)
-│   ├── utils/                    # Utility functions
-│   └── main.py                   # FastAPI application entry point
-├── tests/                        # Test suite
-│   ├── integration/             # Integration tests
-│   └── unit/                    # Unit tests
-├── migrations/                   # Database migrations
-│   └── sql/                     # SQL migration files
-├── docker/                       # Dockerfiles
-├── scripts/                      # Utility scripts
-├── docker-compose.yml           # Development environment
-└── pyproject.toml               # Project dependencies
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.12+
-- Docker and Docker Compose
-- [uv](https://github.com/astral-sh/uv) package manager
-- PostgreSQL 16+ (via Docker)
-
-### Quick Setup
-
-1. **Install uv** (if not already installed):
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
-
-2. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd submissions-checker
-   ```
-
-3. **Run the setup script**:
-   ```bash
-   ./scripts/dev_setup.sh
-   ```
-
-   This will:
-   - Install dependencies
-   - Create `.env` file from template
-   - Start Docker services (PostgreSQL only)
-   - Migrations will run automatically on app startup
-
-4. **Configure environment variables**:
-   Edit `.env` and update:
-   - `SECRET_KEY`: Generate a secure secret key
-   - `GITHUB_WEBHOOK_SECRET`: Your GitHub webhook secret
-   - `OPENAI_API_KEY`: Your OpenAI API key (if using AI features)
-
-5. **Start the development server** (migrations run automatically on startup):
-   ```bash
-   make dev
-   ```
-
-   Access the application at:
-   - API: http://localhost:8000
-   - API Documentation: http://localhost:8000/docs
-   - Health Check: http://localhost:8000/health
-
-### Manual Setup
-
-If you prefer manual setup:
+Requires Docker and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-# Install dependencies
-make install
-
-# Start Docker services (PostgreSQL)
-make up
-
-# Start development server (migrations run automatically)
-make dev
+cp .env.example .env            # set SECRET_KEY (openssl rand -hex 32)
+make up                         # postgres + app + localstack + prometheus + grafana + alloy
+make logs-app
 ```
 
-### Local accounts
+Open http://localhost:8000. With `ENVIRONMENT=development` the seed migrations
+(`0002`, `0003`) create demo accounts; the login page lists them.
 
-The migrations seed a set of accounts **only when `ENVIRONMENT=development`**, which
-is the default for local work:
+Subjects for local testing live in `plugins/` (gitignored). Symlink a subject repo there
+and upload its config ZIP from the teacher dashboard, or use `plugins/e2e_test`.
 
-| Username | Password | Role |
-|---|---|---|
-| `teacher` | `teacher123` | Teacher |
-| `ivan` | `student123` | Student |
-| `olena` | `student123` | Student |
-| `mykola` | `student123` | Student |
-
-The sign-in page repeats this list, also only in development.
-
-**None of these exist in a production deployment.** `ENVIRONMENT` defaults to
-`production` in the migrations and is set explicitly in `docker-compose.prod.yml`, so
-the seeding is skipped and the hint is not rendered. A freshly deployed production
-system has no accounts at all — see
-[creating the first account](docs/deployment.md#creating-the-first-account) for how to
-get into one.
-
-## Development
-
-### Available Commands
+## Tests and quality
 
 ```bash
-make help              # Show all available commands
-make install           # Install dependencies
-make dev               # Start development server with hot reload
-make up                # Start all Docker services
-make down              # Stop all Docker services
-make test              # Run tests with coverage
-make migrate           # Run database migrations
-make migrate-create    # Create new migration
-make lint              # Run linting
-make format            # Format code
-make clean             # Clean up generated files
+uv run --frozen --extra dev pytest -q        # unit + integration + functional (Docker needed)
+make e2e                                     # Playwright / pytest-bdd against the compose stack
+uv run --frozen ruff check src/ tests/
+uv run --frozen ruff format --check src/ tests/
+uv run --frozen mypy src/
 ```
 
-### Running Tests
+Always pass `--frozen`; a bare `uv run` rewrites `uv.lock`. Layers and fixtures are
+described in `tests/README.md`.
 
-```bash
-# Run all tests with coverage
-make test
+## Layout
 
-# Run integration tests only
-make test-integration
-
-# Run unit tests only
-make test-unit
-
-# Run tests in watch mode
-make test-watch
+```
+src/submissions_checker/
+  api/routes/      auth, student_portal, student_quiz, teacher_portal, teacher_disputes, admin, feedback, notifications, health
+  core/            config, state_machine, scheduler, security, i18n, metrics, migrations
+  services/        check_core, docker_sandbox, config_apply, grading, gradebook, quiz_scoring, quiz_regrade,
+                   similarity, storage, ai/provider, air_raid/, notifications/
+  workers/         scheduled/ (outbox, digest, metrics, stats)  tasks/ (checks, AI review, notifications)
+  db/models/       one file per table; enums.py
+  cli/runner.py    standalone check runner (shipped as the runner image)
+templates/  i18n/uk.yml  alembic/  docker/  observability/  tests/  docs/
 ```
 
-### Code Quality
-
-```bash
-# Run linting
-make lint
-
-# Auto-fix linting issues
-make lint-fix
-
-# Format code
-make format
-
-# Check formatting (CI)
-make format-check
-
-# Type checking
-make type-check
-
-# Run all quality checks
-make quality
-```
-
-## Database Migrations
-
-Simple SQL-based migration system.
-
-### How It Works
-
-- Migrations stored in `migrations/sql/`
-- Naming: `{sequence}_{description}.sql` (e.g., `003_create_users.sql`)
-- Run automatically on application startup
-- Tracked in `schema_migrations` table
-- Idempotent: safe to run multiple times
-- Checksums prevent modification of executed migrations
-
-### Creating New Migrations
-
-1. Create SQL file with next sequence number:
-   ```bash
-   touch migrations/sql/003_create_users.sql
-   ```
-
-2. Write SQL DDL:
-   ```sql
-   -- Migration: 003_create_users
-   -- Description: Create users table
-   -- Date: 2026-02-15
-
-   CREATE TABLE IF NOT EXISTS users (
-       id SERIAL PRIMARY KEY,
-       email VARCHAR(255) NOT NULL UNIQUE,
-       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-   );
-
-   CREATE INDEX IF NOT EXISTS idx_users_email
-       ON users(email);
-   ```
-
-3. Restart application - migration runs automatically
-
-### Best Practices
-
-- **Migrations must be backward-compatible within a release.** Production runs a rolling
-  deploy, so the previous version is still serving while the new schema is live. Add
-  columns freely; split any drop or rename across two releases. See
-  [docs/deployment.md](docs/deployment.md#the-migration-rule-read-this-before-writing-one).
-- Use `CREATE TABLE IF NOT EXISTS` for idempotency
-- Use `CREATE INDEX IF NOT EXISTS` for indexes
-- Never modify executed migrations (checksum validation fails)
-- Add comments with migration number, description, and date
-- Test in development first
-- Keep migrations sequential (001, 002, 003...)
-
-### Database Operations
-
-```bash
-# Migrations run automatically on app startup
-make dev
-
-# View migration status (query schema_migrations table)
-make db-shell
-# Then: SELECT * FROM schema_migrations ORDER BY executed_at;
-
-# Open PostgreSQL shell
-make db-shell
-```
-
-## Configuration
-
-Configuration is managed via environment variables using Pydantic Settings. See `.env.example` for all available options.
-
-### Key Configuration Options
-
-- `ENVIRONMENT`: `development`, `test`, or `production`
-- `DATABASE_URL`: PostgreSQL connection string
-- `SCHEDULER_ENABLED`: Enable/disable background scheduler (default: `true`)
-- `GITHUB_WEBHOOK_SECRET`: Secret for validating GitHub webhooks
-- `OPENAI_API_KEY`: OpenAI API key for AI code review
-- `LOG_LEVEL`: Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`)
-
-## API Endpoints
-
-### Health Checks
-
-- `GET /health` - Basic health check
-- `GET /health/ready` - Readiness check with database connectivity
-
-### Webhooks (Skeleton)
-
-- `POST /webhooks/github` - GitHub webhook handler
-
-### Users (Skeleton)
-
-- `POST /api/v1/users` - Create user
-- `GET /api/v1/users/{user_id}` - Get user
-
-Full API documentation is available at `/docs` when the server is running.
-
-## Background Jobs
-
-The application uses APScheduler for in-process background job processing:
-
-- **PR Processing**: Handle GitHub PR webhooks (triggered via outbox)
-- **Test Execution**: Run CLI tests on submissions (triggered via outbox)
-- **AI Review**: Perform AI-powered code review (triggered via outbox)
-- **Outbox Processor**: Process transactional outbox messages (scheduled, runs every 10 seconds)
-
-## Deployment
-
-### Docker
-
-Build and run with Docker Compose:
-
-```bash
-docker-compose up -d
-```
-
-Services:
-- `app`: FastAPI application with in-process scheduler (port 8000)
-- `postgres`: PostgreSQL database (port 5432)
-
-Migrations run automatically when the app starts.
-
-### Production Considerations
-
-1. **Environment Variables**: Set production values in `.env` or environment
-2. **Database**: Use managed PostgreSQL service or dedicated instance
-3. **Secrets**: Store sensitive data in secrets management system
-4. **Monitoring**: Add Prometheus metrics and health check monitoring
-5. **Logging**: Configure structured logging output to log aggregation service
-6. **Scaling**: Run multiple app instances behind load balancer (outbox pattern handles concurrent processing)
-
-## Development Status
-
-**Current Phase**: Backbone Implementation
-
-This is the foundational infrastructure phase. The following are implemented:
-
-✅ **Complete**
-- Project structure and configuration
-- Monolithic architecture with in-process background jobs
-- Docker development environment (2 services: app + postgres)
-- Core application modules (config, logging, database, scheduler, migrations)
-- Database models (base classes, outbox pattern)
-- SQL-based migrations (run automatically on startup)
-- FastAPI application with health endpoints
-- Service layer skeletons (GitHub, AI, testing)
-- Background job infrastructure (APScheduler, task skeletons)
-- Testing infrastructure (pytest, testcontainers)
-- Development tools (Makefile, scripts)
-
-🚧 **To Be Implemented**
-- User and Submission database models
-- GitHub integration (PR cloning, webhooks, comments)
-- Test execution (CLI runner, result parsing)
-- AI integration (code review, test analysis)
-- User authentication and authorization
-- Complete API endpoints
-- Background job implementations
-- CI/CD pipelines
-- Monitoring and metrics
-
-## Contributing
-
-### Code Style
-
-- Follow PEP 8 conventions
-- Use type hints for all functions
-- Write docstrings for public APIs
-- Keep functions focused and small
-- Use Ruff for linting and formatting
-
-### Testing
-
-- Write tests for new features
-- Maintain test coverage above 80%
-- Use testcontainers for integration tests
-- Mock external services in unit tests
-
-### Pull Requests
-
-- Create feature branches from `main`
-- Write descriptive commit messages
-- Update tests and documentation
-- Ensure all quality checks pass
-
-## Running E2E Tests
-
-End-to-end tests use Playwright + pytest-bdd (Gherkin/BDD). They spin up an isolated Docker stack (separate DB, app, S3) so they never touch your dev environment.
-
-### Prerequisites
-
-```bash
-# Install e2e dependencies
-uv pip install -e ".[e2e]"
-
-# Install Playwright browsers
-playwright install chromium
-```
-
-### Quick start
-
-```bash
-make e2e                   # headless (CI-friendly)
-make e2e-headed            # browser visible (debug mode)
-```
-
-### Options
-
-| Option | Example | Effect |
-|--------|---------|--------|
-| `TAGS` | `make e2e TAGS=@smoke` | Run only scenarios with that tag |
-| `SCENARIO` | `make e2e SCENARIO="teacher login"` | Run scenarios matching name substring |
-| `FILE` | `make e2e FILE=tests/e2e/features/teacher_auth.feature` | Run a single feature file |
-
-**Example: run only the auth feature in headed mode**
-```bash
-make e2e-headed FILE=tests/e2e/features/teacher_auth.feature
-```
-
-### Stack management
-
-```bash
-make e2e-up      # start stack without running tests
-make e2e-down    # tear down the stack
-make e2e-logs    # tail app logs
-```
-
-### Architecture
-
-- App runs on `http://localhost:8001`
-- Isolated Postgres on port `5435` (DB: `submissions_checker_e2e`)
-- LocalStack S3 on port `4567`
-- All state is ephemeral — `make e2e-down` destroys it
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `E2E_APP_URL` | `http://localhost:8001` | App base URL |
-| `E2E_DB_URL` | `postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e` | Direct DB connection for fixtures |
-
-## Deployment
-
-Production runs as a self-hosted Docker Compose stack on a single VM: Caddy terminating
-TLS in front of two application replicas, PostgreSQL, MinIO, and Watchtower rolling out
-new images one replica at a time so an in-flight quiz submission is never dropped.
-
-Pushing to `main` runs the quality gates, publishes a multi-architecture image to GHCR,
-and the host picks it up on its own — CI holds no credentials for the host.
-
-See **[docs/deployment.md](docs/deployment.md)** for host setup, the migration rule,
-rollback, and backups.
+## Docs
+
+| Doc | For |
+|---|---|
+| `docs/feature_catalog.md` | every feature, who can use it, routes, state machine |
+| `docs/PLUGIN_AUTHORING.md` | writing a subject: config.yml, check/validate scripts, quiz block |
+| `docs/anti-cheat.md` | quiz proctoring rules and presets |
+| `docs/runner-contract.md` | stability contract for the `runner` CLI used by subject repos |
+| `docs/deployment.md` | production stack (Caddy, two replicas, Watchtower, backups) |
+| `docs/observability.md` | metrics, dashboards, alerts |
+| `docs/student_journey_guide.md`, `docs/teacher_journey_guide.md`, `docs/admin_journey_guide.md` | narrative walkthroughs |
+| `docs/known_bugs.md`, `docs/feature_audit.md` | what is broken, what is unfinished |
 
 ## License
 
-See [LICENSE](LICENSE) file for details.
-
-## Support
-
-For issues, questions, or contributions, please open an issue on GitHub.
-
----
-
-Built with ❤️ using FastAPI, SQLAlchemy, and modern Python practices.
+See `LICENSE`.
