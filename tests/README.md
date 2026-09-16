@@ -6,7 +6,7 @@ must be running** for everything except `tests/unit`.
 
 | Layer | Path | What it covers | Needs |
 |-------|------|----------------|-------|
-| **Unit** | `tests/unit/` | Pure logic in isolation: security (bcrypt/JWT), state machine, safe-zip extraction, config validation, similarity, parsers, notification templates, service modules (external SDKs mocked). | nothing (fast) |
+| **Unit** | `tests/unit/` | Pure logic in isolation: security (bcrypt/JWT), state machine, safe-zip extraction, config validation, similarity, notification templates, the AI provider client (SDK mocked). | nothing (fast) |
 | **Integration** | `tests/integration/` | DB models, the outbox processor, scheduled workers, the config-apply / plugin-loader pipeline, and worker task dispatch against a real Postgres (+ Redis) container. | Docker |
 | **Functional** | `tests/functional/` | The real FastAPI app driven over ASGI against a Postgres container with the **full authentication/authorization stack active**. Primary coverage for permissions and security. | Docker |
 | **E2E / BDD** | `tests/e2e/` | `pytest-bdd` scenarios driving a real browser (Playwright) against the Dockerised app stack. | Docker + Playwright, run via its own config |

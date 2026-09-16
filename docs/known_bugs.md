@@ -209,7 +209,7 @@ not currently exploitable, left open.
 
 ---
 
-## 12b. 🔴 "Create Test Student" never assigns variants, so it can't submit to any `variants_required` assignment
+## 12b. ✅ "Create Test Student" never assigns variants, so it can't submit to any `variants_required` assignment
 
 **Where:** `teacher_portal.py:159-214` (`provision_test_student`) creates a `StudentAssignment`
 row per assignment (line 209) with no `variant` set — it's left `NULL`. For any assignment
@@ -227,6 +227,40 @@ teacher can log in as the test student and submit, but every submission immediat
 validation with "variant not assigned," with no in-UI way to fix it short of a direct DB
 write. Reproduced live while testing the `pythonBasics` subject (all 9 labs have
 `variants_required: true`).
+
+**Fixed (2026-07-05):** the "Create Test Student" form now shows a per-assignment variant
+selector sourced from that assignment's real config, defaulting to the first variant when
+`variants_required` and the teacher doesn't pick one (`let-teacher-pick-test-student-variant`).
+Re-verified live on 2026-07-06 while running the full pythonBasics variant sweep — no longer
+reproduces.
+
+---
+
+## 13. 🔴 `lab6`'s merged config accidentally ran its own check script twice (config bug, now fixed, noted for awareness)
+
+Not a `submissions-checker` platform bug — a subject-authoring mistake caught during the
+2026-07-06 pythonBasics variant sweep, recorded here since it's the kind of mistake the
+platform could plausibly guard against: `pythonBasicSubject/config.yml`'s `lab6.common.sandbox`
+briefly had `check_command: assignments/lab6/check.py` set explicitly, duplicating every
+variant's own `check_command` (also `assignments/lab6/check.py`). Since `run_check` runs
+`common_check` and `variant_check` as two separate scripts and merges their `tests` lists,
+this ran the identical script twice per submission and doubled the score denominator
+(200/200 instead of 100/100) — still numerically 100%, so silently harmless here, but
+wasteful (double sandbox executions) and would silently corrupt scoring for any subject where
+the common and variant scripts are *not* identical duplicates of each other. Fixed by removing
+the stray `check_command` from `lab6.common.sandbox` (lab6 has no real shared/common check
+logic across its variants, unlike e.g. lab1). **Possible platform-level improvement:**
+`resolve_check_plan` (`services/check_core.py`) could warn or reject when
+`common_check == variant_check` (identical resolved script paths), since that's never
+intentional.
+
+**Recurred a second time (2026-07-07):** the exact same mistake showed up independently in
+the new `javaProgramming2` subject's `lab2` config fragment while building that subject from
+scratch (a different lab, a different subject, authored by a different agent — see
+`docs/javaprogramming2_task_proposals.md`). Two independent occurrences across two subjects
+is a real signal that this is an easy, natural mistake to make when writing a `common:` block
+whose variants all point at the same script — worth prioritizing the platform-level guard
+suggested above rather than relying on manual review to keep catching it.
 
 ---
 
@@ -290,3 +324,23 @@ control useless.
 question on screen. Set `question_time_default_seconds` (or a per-question
 `time_limit_seconds`) in the subject's quiz config for exams where this matters —
 `_advance_expired` then governs delivery and only one question is ever loaded.
+
+---
+
+## 16. 🟡 Re-applying a config ZIP that was applied before is silently refused
+
+**Where:** `src/submissions_checker/services/config_apply.py` (`_check_duplicate`) plus the
+`uq_subject_plugin_configs_subject_hash` constraint on `subject_plugin_configs`.
+
+**What happens:** dedup matches the uploaded ZIP's SHA-256 against *every* stored version of
+that subject, not just the newest one. Rolling back to a known-good archive after a bad
+upload therefore reports «Конфіг не змінився — оновлень не потрібно» and changes nothing,
+even though the live config is the later, broken one.
+
+**Why it is not fixed yet:** the honest fix — dedup against the latest version only — needs
+the `(subject_id, content_hash)` unique constraint dropped first, because the rollback insert
+would otherwise collide with the historical row carrying the same hash. That is a migration,
+so it was left out of the fix that made a changed ZIP report as applied.
+
+**Workaround:** make any trivial edit to the archive (a comment in `config.yml` is enough);
+the new bytes hash differently and the apply goes through.

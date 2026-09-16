@@ -216,3 +216,6 @@ uploads/
 
 # Subject plugin configs (add plugins to this directory; they are loaded at startup)
 plugins/
+
+# Local host-access helpers (contain server addresses; never shared)
+ssh/
