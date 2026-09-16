@@ -106,7 +106,7 @@ reachable today, just teacher-gated rather than automatic, for every lab8 submis
 of variant.
 
 **Suggested follow-up for `submissions-checker` itself** (added to
-`docs/missing_features.md` too): a `tests_then_teacher_then_quiz` review mode (or a
+`docs/feature_audit.md` too): a `tests_then_teacher_then_quiz` review mode (or a
 `send_quiz_after_teacher_approval: true` flag alongside `tests_then_teacher`) would let a lab
 keep mandatory human review for some variants while still auto-prompting the quiz on approval,
 instead of relying on the teacher to remember it's there.

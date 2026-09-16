@@ -62,7 +62,7 @@ detail.
 >
 > The teacher UI carries **no affordance that mutates subject or assignment content**: no
 > subject edit, no subject delete, no create/edit assignment, no quiz editor, no grade
-> export button, and no analytics link. Those routes still exist and still enforce their
+> export button. Those routes still exist and still enforce their
 > own authorization, but the only path a teacher is offered is config re-apply.
 
 ## 3. Enrollment & students
@@ -242,20 +242,7 @@ questions they have seen. Per-question (stepper) mode bounds that to one questio
 | Email preferences (per-case EMAIL on/off: `SUBMISSION_CHECKED`, `FEEDBACK_REQUEST`) | STUDENT | `GET /portal/notification-preferences`, `POST /portal/notification-preferences/{case}/{method}/toggle` |
 | Coalesced teacher review digest (background job batches a teacher's pending review notices into one email) | TEACHER/ADMIN (automatic) | — (no route; `teacher_notification_queue` + background job) |
 
-## 8. Analytics
-
-| Feature | Who | Route(s) |
-|---|---|---|
-| Platform overview (headline scalars, grade histogram, per-subject + difficulty tables, exhausted-quiz failures) — aggregates across **all** teachers; **no dashboard link**, enter the URL | **ADMIN only** | `GET /teacher/analytics` |
-| Fraud / anti-cheat dashboard (risk-scored integrity signals + login-activity overview) | **ADMIN only** | `GET /teacher/analytics/fraud` |
-| Single-student profile (cross-subject grades, timeline, login stats) | TEACHER (own students) / ADMIN (any) | `GET /teacher/analytics/students/{id}` |
-
-> The two aggregate dashboards are ADMIN-only because their queries are not yet scoped per
-> teacher (tracked `TODO security`). The single-student profile is open to the owning
-> teacher, with an object-level check (a non-admin teacher may only open a student enrolled
-> in a subject they own); ADMIN bypasses that check.
-
-## 9. Admin
+## 8. Admin
 
 | Feature | Who | Route(s) |
 |---|---|---|

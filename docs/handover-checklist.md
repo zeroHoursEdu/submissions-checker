@@ -72,7 +72,7 @@ Topics to walk through when handing this project over. Work through them roughly
 - [ ] The processor picks up `pending` messages and runs their handlers
 - [ ] On success: message state → `finished`; on failure: state → `error`, increments `retry_count`
 - [ ] Max retries controlled by `OUTBOX_MAX_RETRIES`; after that it stays `error` and needs manual intervention
-- [ ] Read `docs/statuses.md` for the full state reference
+- [ ] Read the state machine in `src/submissions_checker/core/state_machine.py` and the diagram in `docs/feature_catalog.md` §4
 
 ---
 
@@ -98,7 +98,7 @@ Topics to walk through when handing this project over. Work through them roughly
 ---
 
 ## 11. Job pipeline
-- [ ] Read `docs/jobs.md` for the definitive reference
+- [ ] Read `src/submissions_checker/core/scheduler.py` for the four scheduled jobs and `workers/scheduled/outbox_processor.py` for dispatch
 - [ ] **PULL** (`workers/tasks/pull_tasks.py`) — fully implemented
 - [ ] **REVIEW** (`workers/tasks/review_tasks.py`) — fully implemented; calls OpenAI, uses lecture knowledge from DB
 - [ ] **GENERATE_QUIZ** (`workers/tasks/generate_quiz_tasks.py`) — fully implemented; calls Google Apps Script
@@ -244,7 +244,7 @@ The app is a single Docker container defined in `docker/app/Dockerfile`. It need
 ---
 
 ## 19. Suggested reading order for the code
-1. `docs/statuses.md` + `docs/jobs.md`
+1. `docs/feature_catalog.md` + `core/state_machine.py`
 2. `core/config.py`
 3. `main.py`
 4. `db/models/outbox.py` + `db/models/submission.py`

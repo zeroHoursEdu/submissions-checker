@@ -6,8 +6,8 @@ for educators, not engineers: each feature explains *what it does*, *where to fi
 
 For the more compact route-by-route reference, see [teacher-journey.md](teacher-journey.md).
 Related deep-dives: [PLUGIN_AUTHORING.md](PLUGIN_AUTHORING.md) (how subjects are built),
-[anti-cheat.md](anti-cheat.md) (quiz proctoring), [analytics.md](analytics.md)
-(reports), and [student-journey.md](student-journey.md) (the student side of the same flow).
+[anti-cheat.md](anti-cheat.md) (quiz proctoring), and
+[student-journey.md](student-journey.md) (the student side of the same flow).
 
 ---
 
@@ -328,7 +328,7 @@ Three reports exist. **Two of them are currently restricted to ADMIN accounts.**
 Platform-wide headline numbers (total students, subjects, average grade, pass rate), a
 **grade-distribution histogram** (10-point buckets), a **per-subject performance** table,
 an **assignment-difficulty** ranking (hardest first), and a list of students who **failed a
-quiz after exhausting all attempts**. Full breakdown in [analytics.md](analytics.md).
+quiz after exhausting all attempts**.
 
 ### 8.2 Fraud detection — `GET /teacher/analytics/fraud` (ADMIN only)
 
@@ -429,8 +429,7 @@ So you don't go looking for features that aren't there:
 - **No in-portal subject/assignment editor.** All subject structure comes from the config
   ZIP (§3). The legacy on-screen Subject/Assignment CRUD forms were removed.
 - **No GitHub/GitLab ingestion.** Submissions are **ZIP uploads only**; the old
-  GitHub-PR / Google-Forms pipeline (described in the historical [jobs.md](jobs.md) and
-  [statuses.md](statuses.md)) has been retired.
+  GitHub-PR / Google-Forms pipeline has been retired (see git history before 2026-06-19).
 - **No per-teacher aggregate analytics yet.** The overview and fraud dashboards are ADMIN
   only (§8).
 - **No manual numeric grade entry on the review screen.** Review actions are

@@ -92,13 +92,15 @@ else in this file.
 
 ---
 
-## 5. 🔴 `/api/v1/users` endpoints are live but fake
+## 5. ✅ `/api/v1/users` endpoints are live but fake
 
 **Where:** `src/submissions_checker/api/routes/users.py:12-38` (`POST /api/v1/users`) and
 `:41-66` (`GET /api/v1/users/{user_id}`) return a hardcoded `{"status": "not_implemented"}`
 with zero DB interaction, yet the router is mounted in production (`main.py:115`). A publicly
 reachable API surface that silently does nothing — looks like a real endpoint from the outside
 (200 OK, JSON body) but performs no action.
+
+**Removed (2026-09-17):** router deleted; the paths 404.
 
 ---
 
@@ -166,7 +168,7 @@ but worth flagging since it silently breaks a real notification path.
 
 ---
 
-## 10. 🟡 Entire teacher-side "manage subject / assignment / quiz" UI is dead
+## 10. ✅ Entire teacher-side "manage subject / assignment / quiz" UI is dead
 
 **Where:** verified by cross-referencing every form `action=` against actual routes:
 - `templates/teacher_subject_form.html` posts to `/teacher/subjects/create` and
@@ -194,6 +196,8 @@ config-only editing a *stated requirement* rather than an accident, in
 `openspec/specs/subject-management/spec.md`. What remains open is cosmetic: the orphaned
 templates (`teacher_subject_form.html`, `teacher_assignment_form.html`,
 `teacher_quiz_editor.html`) are still in the tree and can be deleted whenever convenient.
+
+**Closed (2026-09-17):** the three orphan templates were deleted.
 
 ---
 
@@ -279,7 +283,7 @@ Not a runtime bug, but likely to confuse anyone who goes looking for it in this 
 
 ---
 
-*See `docs/missing_features.md` for planned-but-unshipped work and half-built scaffolding.*
+*See `docs/feature_audit.md` for unfinished features and gaps.*
 
 ---
 
