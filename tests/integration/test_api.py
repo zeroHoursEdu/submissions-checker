@@ -63,18 +63,3 @@ async def test_root_endpoint() -> None:
 
     assert response.status_code == 302
     assert response.headers["location"] == "/auth/login"
-
-
-@pytest.mark.asyncio
-async def test_user_endpoint_skeleton() -> None:
-    """Test user creation endpoint (skeleton)."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post("/api/v1/users")
-
-    # Should return 200 (skeleton returns not implemented)
-    assert response.status_code == 200
-    data = response.json()
-    assert "status" in data

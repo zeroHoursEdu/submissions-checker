@@ -10,7 +10,6 @@ additive — none of those files are modified. The focus areas are:
   invalid token) and the reset-password 404 edge case.
 * ``health.py`` — the readiness FAILURE path (503) by overriding ``get_db`` with
   a session whose ``execute`` raises.
-* ``users.py`` — the skeleton ``GET /{user_id}`` and ``POST`` handlers.
 * ``student_portal.py`` — cheap reachable error / redirect / empty-state
   branches.
 """
@@ -331,35 +330,6 @@ async def test_readiness_check_ok_when_db_healthy(client: AsyncClient) -> None:
     assert resp.json() == {"status": "ready", "database": "connected"}
 
 
-# ── users.py: skeleton handlers ───────────────────────────────────────────────
-
-
-async def test_get_user_skeleton_returns_not_implemented(client: AsyncClient) -> None:
-    """GET /api/v1/users/{id} is an unauthenticated skeleton returning a stub payload."""
-    resp = await client.get("/api/v1/users/42")
-    assert resp.status_code == 200
-    assert resp.json() == {
-        "status": "not_implemented",
-        "message": "User retrieval not yet implemented",
-    }
-
-
-async def test_get_user_rejects_non_integer_id(client: AsyncClient) -> None:
-    """The {user_id} path param is typed int → a non-int 422s (FastAPI validation)."""
-    resp = await client.get("/api/v1/users/not-a-number")
-    assert resp.status_code == 422
-
-
-async def test_create_user_skeleton_returns_not_implemented(client: AsyncClient) -> None:
-    """POST /api/v1/users is an unauthenticated skeleton returning a stub payload."""
-    resp = await client.post("/api/v1/users")
-    assert resp.status_code == 200
-    assert resp.json() == {
-        "status": "not_implemented",
-        "message": "User creation not yet implemented",
-    }
-
-
 # ── student_portal.py: cheap reachable branches ───────────────────────────────
 
 
@@ -503,3 +473,9 @@ async def test_portal_toggle_notification_preference_creates_disabled_row(
 # (student_portal.py ~248-267) require a Submission + QuizAttempt / plugin config
 # and ultimately the async check worker to be meaningful; they are intentionally
 # left to integration coverage rather than exercised here.
+
+
+async def test_api_v1_users_is_gone(client: AsyncClient) -> None:
+    """The skeleton users API returned 200 + not_implemented; it must now 404."""
+    assert (await client.get("/api/v1/users/1")).status_code == 404
+    assert (await client.post("/api/v1/users")).status_code == 404

@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # API
-    api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
     # Database
@@ -35,9 +34,6 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 10
 
-    # Backend base URL (used to build callback URLs for external services)
-    base_url: str = "http://localhost:8000"
-
     # AI Provider — exactly one is active at a time, selected by `ai_provider`.
     ai_provider: Literal["openai", "anthropic"] = "openai"
     openai_api_key: str | None = None
@@ -46,7 +42,6 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-opus-4-8"
     ai_max_tokens: int = 4000
-    ai_temperature: float = 0.7
 
     # Application base URL (used in emails and links sent to users)
     app_base_url: str = "http://localhost:8000"

@@ -20,7 +20,6 @@ from submissions_checker.api.routes import (
     student_quiz,
     teacher_disputes,
     teacher_portal,
-    users,
 )
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.database import close_db, init_db
@@ -120,7 +119,6 @@ def create_app() -> FastAPI:
     # Register routers
     app.include_router(health.router)
     app.include_router(feedback.router)
-    app.include_router(users.router)
     app.include_router(auth.router)
     app.include_router(student_portal.router)
     app.include_router(student_quiz.router)
