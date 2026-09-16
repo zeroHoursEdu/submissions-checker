@@ -9,9 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jose import JWTError
 from sqlalchemy import select
 
-from submissions_checker.api.dependencies import DBSession
+from submissions_checker.api.dependencies import CurrentUser, DBSession
 from submissions_checker.core import metrics
 from submissions_checker.core.config import get_settings
+from submissions_checker.core.i18n import get_vocab
 from submissions_checker.core.security import (
     COOKIE_NAME,
     JWT_EXPIRY_HOURS,
@@ -26,10 +27,13 @@ from submissions_checker.db.models.password_reset import PasswordResetToken
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.user import User
 from submissions_checker.db.models.user_login import UserLogin
+from submissions_checker.services.audit import audit
 from submissions_checker.services.notifications.dispatcher import build_dispatcher
 from submissions_checker.services.notifications.templates import password_reset_template
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_MIN_PASSWORD_LEN = 8
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -223,4 +227,75 @@ async def reset_password(
         request,
         "reset_password.html",
         {"current_user": None, "token": token, "valid": True, "error": None, "success": True},
+    )
+
+
+# ── Change password (logged-in user) ─────────────────────────────────────────
+
+
+def _render_change_password(
+    request: Request,
+    current_user: CurrentUser,
+    *,
+    error: str | None,
+    changed: bool,
+    status_code: int = 200,
+) -> HTMLResponse:
+    return render(
+        request,
+        "change_password.html",
+        {"current_user": current_user, "error": error, "changed": changed},
+        status_code=status_code,
+    )
+
+
+@router.get("/change-password", response_class=HTMLResponse)
+async def change_password_page(
+    request: Request, current_user: CurrentUser, changed: int = 0
+) -> HTMLResponse:
+    return _render_change_password(request, current_user, error=None, changed=bool(changed))
+
+
+@router.post("/change-password", response_model=None)
+async def change_password(
+    request: Request,
+    db: DBSession,
+    current_user: CurrentUser,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+) -> HTMLResponse | RedirectResponse:
+    """Let any signed-in account set its own password.
+
+    Students receive generated credentials by email; without this the only way to
+    pick a password was the forgot-password email round trip.
+    """
+    user = await db.get(User, current_user.user_id)
+    if user is None:
+        raise HTTPException(status_code=404)
+    vocab = get_vocab(request.cookies.get("lang")).get("auth", {})
+    error: str | None = None
+    if not verify_password(current_password, user.password_hash):
+        error = vocab.get("error_current_wrong", "Current password is wrong.")
+    elif new_password != confirm_password:
+        error = vocab.get("error_mismatch", "Passwords do not match.")
+    elif len(new_password) < _MIN_PASSWORD_LEN:
+        error = vocab.get("error_too_short", "Password must be at least 8 characters.")
+    elif new_password == current_password:
+        error = vocab.get("error_same_as_current", "Choose a different password.")
+    if error is not None:
+        return _render_change_password(
+            request, current_user, error=error, changed=False, status_code=422
+        )
+
+    user.password_hash = hash_password(new_password)
+    await audit(
+        db,
+        action="change_password",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+    )
+    await db.commit()
+    return RedirectResponse(
+        url="/auth/change-password?changed=1", status_code=status.HTTP_303_SEE_OTHER
     )

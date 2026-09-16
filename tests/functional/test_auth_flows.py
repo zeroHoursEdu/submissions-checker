@@ -363,3 +363,58 @@ async def test_reset_password_too_short_rejected_with_422(
         data={"token": token_str, "new_password": "short", "confirm_password": "short"},
     )
     assert resp.status_code == 422
+
+
+# ── Change password (logged-in) ───────────────────────────────────────────────
+
+
+async def test_change_password_requires_login(client: AsyncClient) -> None:
+    assert (await client.get("/auth/change-password")).status_code == 401
+    resp = await client.post(
+        "/auth/change-password",
+        data={"current_password": "x", "new_password": "y" * 8, "confirm_password": "y" * 8},
+    )
+    assert resp.status_code == 401
+
+
+async def test_change_password_updates_hash_and_old_password_stops_working(
+    client: AsyncClient, make_user, login, db
+) -> None:
+    user = await make_user(role=UserRole.STUDENT, username="carol", password=PASSWORD)
+    login(client, user)
+    resp = await client.post(
+        "/auth/change-password",
+        data={
+            "current_password": PASSWORD,
+            "new_password": "N3wPassw0rd!",
+            "confirm_password": "N3wPassw0rd!",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    await db.refresh(user)
+    assert bcrypt.checkpw(b"N3wPassw0rd!", user.password_hash.encode())
+    assert not bcrypt.checkpw(PASSWORD.encode(), user.password_hash.encode())
+
+
+@pytest.mark.parametrize(
+    "current,new,confirm",
+    [
+        ("wrong-current", "N3wPassw0rd!", "N3wPassw0rd!"),
+        (PASSWORD, "short", "short"),
+        (PASSWORD, "N3wPassw0rd!", "different!!"),
+        (PASSWORD, PASSWORD, PASSWORD),
+    ],
+)
+async def test_change_password_rejects_bad_input_with_422(
+    client: AsyncClient, make_user, login, db, current: str, new: str, confirm: str
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="dave", password=PASSWORD)
+    login(client, user)
+    resp = await client.post(
+        "/auth/change-password",
+        data={"current_password": current, "new_password": new, "confirm_password": confirm},
+    )
+    assert resp.status_code == 422
+    await db.refresh(user)
+    assert bcrypt.checkpw(PASSWORD.encode(), user.password_hash.encode())

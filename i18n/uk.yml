@@ -10,6 +10,7 @@ nav:
   notifications: Сповіщення
   admin_link: Адмін
   settings_link: Налаштування
+  change_password_link: Пароль
   sign_out: Вийти
   sign_in: Увійти
 
@@ -58,6 +59,14 @@ auth:
   confirm_password: Підтвердіть пароль
   set_new_password: Встановити новий пароль
   password_changed: Пароль змінено. Тепер ви можете увійти з новим паролем.
+  change_page_heading: Змінити пароль
+  change_page_subtitle: Введіть поточний пароль і оберіть новий (щонайменше 8 символів).
+  current_password: Поточний пароль
+  password_changed_logged_in: Пароль змінено.
+  error_current_wrong: Поточний пароль неправильний.
+  error_mismatch: Паролі не збігаються.
+  error_too_short: Пароль має містити щонайменше 8 символів.
+  error_same_as_current: Новий пароль має відрізнятися від поточного.
 
 student:
   summary_title: Моє зведення
