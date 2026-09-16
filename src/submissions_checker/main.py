@@ -100,7 +100,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Submissions Checker",
-        description="Automated student code submission checker with GitHub integration",
+        description="Automated student code submission checker: ZIP upload, sandboxed checks, AI/teacher/quiz review",
         version="0.1.0",
         lifespan=lifespan,
         debug=settings.debug,

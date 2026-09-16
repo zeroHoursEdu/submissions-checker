@@ -7,8 +7,6 @@ no HTTP, no real provider clients are instantiated for the fan-out tests.
 
 from __future__ import annotations
 
-import pytest
-
 from submissions_checker.services.notifications import templates
 from submissions_checker.services.notifications.dispatcher import (
     NotificationDispatcher,
@@ -95,25 +93,10 @@ def test_deadline_reminder_mentions_subject_and_deadline() -> None:
     assert "2026-07-01" in body
 
 
-def test_new_submission_template_addresses_teacher() -> None:
-    subject, body = templates.new_submission_template("Prof", "Dee", "Lab 4", "http://review")
-    assert "Dee" in subject and "Lab 4" in subject
-    assert "Prof" in body
-    assert "http://review" in body
-
-
 def test_password_reset_template() -> None:
     subject, body = templates.password_reset_template("Eve", "http://reset")
     assert "password" in subject.lower()
     assert "http://reset" in body
-
-
-@pytest.mark.parametrize("passed_fn", [templates.passed_template, templates.failed_template])
-def test_quiz_pass_fail_github_templates(passed_fn) -> None:
-    subject, body = passed_fn("octocat", 8, 10, 5)
-    assert "Lab 5" in subject
-    assert "@octocat" in body
-    assert "8/10" in body
 
 
 def test_credentials_template_contains_credentials() -> None:

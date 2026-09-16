@@ -13,7 +13,6 @@ dependencies = [
     "httpx>=0.27.2",
     "openai>=1.54.0",
     "anthropic>=0.40",
-    "pygithub>=2.5.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
     "structlog>=24.4.0",

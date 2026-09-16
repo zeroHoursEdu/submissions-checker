@@ -71,24 +71,6 @@ def deadline_reminder_template(
     return subject, body
 
 
-def new_submission_template(
-    teacher_name: str,
-    student_name: str,
-    assignment_title: str,
-    review_url: str,
-) -> tuple[str, str]:
-    """Return (subject, body) to notify a teacher of a new submission awaiting review."""
-    subject = f"New submission: '{assignment_title}' from {student_name}"
-    body = (
-        f"Hi {teacher_name},\n\n"
-        f"{student_name} has submitted their work for '{assignment_title}' "
-        f"and it is awaiting your review.\n\n"
-        f"Review it here: {review_url}\n\n"
-        f"Best regards,\nSubmissionChecker"
-    )
-    return subject, body
-
-
 def teacher_digest_template(
     teacher_name: str,
     items: list[tuple[str, str, str]],
@@ -126,38 +108,6 @@ def password_reset_template(full_name: str, reset_url: str) -> tuple[str, str]:
         f"(valid for 2 hours):\n\n"
         f"{reset_url}\n\n"
         f"If you did not request this, ignore this email.\n\n"
-        f"Best regards,\nThe Teaching Team"
-    )
-    return subject, body
-
-
-def passed_template(
-    github_username: str, score: int, max_score: int, lab_id: int
-) -> tuple[str, str]:
-    """Return (subject, body) for a passing quiz result."""
-    subject = f"Congratulations! You passed Lab {lab_id} Quiz"
-    body = (
-        f"Hi @{github_username},\n\n"
-        f"Great news — you passed the Lab {lab_id} quiz!\n\n"
-        f"Your score: {score}/{max_score}\n\n"
-        f"Your submission is now complete. Well done!\n\n"
-        f"Best regards,\nThe Teaching Team"
-    )
-    return subject, body
-
-
-def failed_template(
-    github_username: str, score: int, max_score: int, lab_id: int
-) -> tuple[str, str]:
-    """Return (subject, body) for a failing quiz result."""
-    subject = f"Lab {lab_id} Quiz Result — Please Resubmit"
-    body = (
-        f"Hi @{github_username},\n\n"
-        f"Unfortunately, you did not pass the Lab {lab_id} quiz.\n\n"
-        f"Your score: {score}/{max_score}\n\n"
-        f"To try again, push a new commit to your PR branch — this will trigger a fresh\n"
-        f"AI review and generate a new quiz for you.\n\n"
-        f"Good luck!\n\n"
         f"Best regards,\nThe Teaching Team"
     )
     return subject, body
