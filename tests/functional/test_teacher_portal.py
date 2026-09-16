@@ -908,3 +908,27 @@ async def test_review_page_without_ai_verdict_has_no_section(
     resp = await client.get(f"/teacher/submissions/{submission.id}/review")
     assert resp.status_code == 200
     assert 'id="ai-verdict"' not in resp.text
+
+
+async def test_assignment_board_shows_ai_flag_badge(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    submission = await _make_submission(
+        db, sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    submission.ai_review = {
+        "cheating": {"is_cheating": False, "confidence": 0.0, "reason": ""},
+        "ai_generated": {"is_ai_generated": True, "confidence": 0.8, "reason": "boilerplate"},
+        "code_mark": 70,
+        "comment": "",
+    }
+    await db.commit()
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}/assignments/{sa.id}")
+    assert resp.status_code == 200
+    assert "data-ai-flag-badge" in resp.text
+    assert "boilerplate" in resp.text

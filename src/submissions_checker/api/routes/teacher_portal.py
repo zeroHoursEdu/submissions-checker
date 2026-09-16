@@ -54,7 +54,7 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.group import Group
-from submissions_checker.services.ai_verdict import summarize
+from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
 from submissions_checker.services.gradebook import (
@@ -434,6 +434,7 @@ async def teacher_assignment(
             Submission.status.label("submission_status"),
             Submission.created_at.label("submitted_at"),
             Submission.source_metadata.label("source_metadata"),
+            Submission.ai_review.label("ai_review"),
         )
         .select_from(SubjectsStudents)
         .join(Student, Student.id == SubjectsStudents.student_id)
@@ -459,6 +460,14 @@ async def teacher_assignment(
         .order_by(nullsfirst(StudentAssignment.grade.asc()), Student.full_name)
     )
     rows = [row._asdict() for row in rows_result]
+
+    # AI verdicts over the assignment's thresholds get a badge in the Flags column.
+    ai_cfg = (assignment.config or {}).get("ai_review") or {}
+    ai_flags: dict[int, VerdictSummary] = {}
+    for r in rows:
+        summary = summarize(r.get("ai_review"), ai_cfg)
+        if summary is not None and summary.flagged and r["student_assignment_id"]:
+            ai_flags[r["student_assignment_id"]] = summary
 
     # Load violation flags: for each student_assignment, find if any attempt has violations
     sa_id_list = [r["student_assignment_id"] for r in rows if r["student_assignment_id"]]
@@ -516,6 +525,7 @@ async def teacher_assignment(
             "rows": rows,
             "violation_flags": violation_flags,
             "snapshot_flags": snapshot_flags,
+            "ai_flags": ai_flags,
         },
     )
 

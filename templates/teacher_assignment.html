@@ -160,6 +160,13 @@
           {% else %}
             <span class="text-slate-300 text-xs">—</span>
           {% endif %}
+          {% set ai = ai_flags.get(row.student_assignment_id) if ai_flags is defined else none %}
+          {% if ai %}
+          <span data-ai-flag-badge class="mt-1 inline-flex items-center gap-1 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium"
+                title="{% if ai.cheating %}{{ ai.cheating_reason }}{% else %}{{ ai.ai_generated_reason }}{% endif %}">
+            AI · {% if ai.cheating %}{{ vocab.teacher.ai_cheating }}{% else %}{{ vocab.teacher.ai_generated }}{% endif %}
+          </span>
+          {% endif %}
           {% set snaps = snapshot_flags.get(row.student_assignment_id, []) if snapshot_flags is defined else [] %}
           {% if snaps %}
           <div class="mt-1.5 flex flex-wrap gap-1">
