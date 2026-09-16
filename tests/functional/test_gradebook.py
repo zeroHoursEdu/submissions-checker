@@ -328,3 +328,21 @@ async def test_teacher_subject_has_four_tabs(client: AsyncClient, db: AsyncSessi
     for target in ["overview", "students", "assignments", "grades"]:
         assert f'data-tab-target="{target}"' in resp.text
         assert f'id="tab-panel-{target}"' in resp.text
+
+
+async def test_grades_tab_renders_stats_and_grid(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="ЛР1", code="lab1", min_grade=50)
+    student = await make_student(full_name="Grid Student")
+    await _enroll(db, subject.id, student.id)
+    await _make_student_assignment(db, student.id, a1.id, grade=90)
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+
+    assert resp.status_code == 200
+    assert "ЛР1" in resp.text
+    assert "Grid Student" in resp.text
+    assert ">90<" in resp.text  # the grade appears as a cell value

@@ -491,6 +491,13 @@ teacher:
   tab_students: Студенти
   tab_assignments: Завдання
   tab_grades: Оцінки
+  gb_stat_avg_score: Середній бал
+  gb_stat_pass_rate: "% зданих"
+  gb_stat_overdue: Прострочені
+  gb_stat_pending: На перевірці
+  gb_grid_title: Відомість оцінок
+  gb_col_total: Разом
+  gb_no_data: Немає даних для відображення.
 
 admin:
   dashboard_title: Панель адміністратора

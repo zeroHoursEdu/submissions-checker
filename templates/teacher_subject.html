@@ -265,7 +265,83 @@
 </div>
 
 <div id="tab-panel-grades" class="tab-panel" hidden>
-  <!-- Task 9 and Task 10 fill this in -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-slate-900">
+        {{ gradebook_stats.average_score if gradebook_stats.average_score is not none else "—" }}
+      </div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_avg_score }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-green-600">{{ gradebook_stats.pass_rate_pct }}%</div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_pass_rate }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-red-600">{{ gradebook_stats.overdue_count }}</div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_overdue }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-amber-600">{{ gradebook_stats.pending_review_count }}</div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_pending }}</div>
+    </div>
+  </div>
+
+  {% if gradebook_grid.rows %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-100">
+      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.gb_grid_title }}</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="text-sm border-collapse">
+        <thead>
+          <tr class="bg-slate-50">
+            <th class="sticky left-0 z-10 bg-slate-50 px-4 py-2 text-left font-medium text-slate-600 border-b border-slate-200 min-w-[180px]">
+              {{ vocab.teacher.enrolled_students }}
+            </th>
+            {% for col in gradebook_grid.columns %}
+            <th class="px-4 py-2 text-center font-medium text-slate-600 border-b border-slate-200 whitespace-nowrap">
+              {{ col.title }}
+            </th>
+            {% endfor %}
+            <th class="sticky right-0 z-10 bg-slate-50 px-4 py-2 text-center font-medium text-slate-600 border-b border-slate-200">
+              {{ vocab.teacher.gb_col_total }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in gradebook_grid.rows %}
+          <tr class="border-b border-slate-100">
+            <td class="sticky left-0 z-10 bg-white px-4 py-2 font-medium text-slate-900 whitespace-nowrap">
+              {{ row.student_name }}
+            </td>
+            {% for col in gradebook_grid.columns %}
+            {% set cell = row.cells.get(col.assignment_id) %}
+            {% set violation = integrity_by_cell.get((row.student_id, col.assignment_id)) %}
+            <td id="cell-{{ row.student_id }}-{{ col.assignment_id }}"
+                class="px-4 py-2 text-center relative
+                  {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700
+                  {% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700
+                  {% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700
+                  {% else %}text-slate-300{% endif %}">{% if cell and cell.grade is not none %}{{ cell.grade }}{% else %}—{% endif %}{% if violation %}
+              <span title="tab_switch: {{ violation.tab_switch }}, window_blur: {{ violation.window_blur }}{% if violation.force_fail %}, force_fail{% endif %}"
+                    class="violation-dot absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-red-500 cursor-pointer"
+                    data-scroll-to="integrity-row-{{ row.student_id }}-{{ col.assignment_id }}"></span>
+              {% endif %}</td>
+            {% endfor %}
+            <td class="sticky right-0 z-10 bg-white px-4 py-2 text-center font-semibold text-slate-900">
+              {{ row.total if row.total is not none else "—" }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-8 text-center text-slate-400 text-sm">
+    {{ vocab.teacher.gb_no_data }}
+  </div>
+  {% endif %}
 </div>
 
 </div>
