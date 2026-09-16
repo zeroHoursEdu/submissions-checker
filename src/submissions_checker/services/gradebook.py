@@ -153,9 +153,7 @@ def compute_stats(rows: list[RosterRow], *, now: datetime) -> GradebookStats:
         by_student.setdefault(r.student_id, []).append(r)
     total_students = len(by_student)
     passed_students = sum(
-        1
-        for student_rows in by_student.values()
-        if all(r.grade is not None for r in student_rows)
+        1 for student_rows in by_student.values() if all(r.grade is not None for r in student_rows)
     )
     pass_rate_pct = round(100 * passed_students / total_students, 1) if total_students else 0.0
 
@@ -341,7 +339,9 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
         force_fail = bool(violations.get("_force_fail", False))
         median = medians[row.assignment_id]
         anomalous = duration_anomalous(duration, median)
-        severity = severity_for(force_fail=force_fail, tab_switch=tab_switch, window_blur=window_blur)
+        severity = severity_for(
+            force_fail=force_fail, tab_switch=tab_switch, window_blur=window_blur
+        )
         integrity_rows.append(
             IntegrityRow(
                 student_id=row.student_id,

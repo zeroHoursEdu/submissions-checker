@@ -268,8 +268,12 @@ async def test_fetch_integrity_rows_median_is_per_assignment(
     sub2 = await _make_submission(db, sa2.id, status=SubmissionStatus.COMPLETED)
     start = datetime(2026, 9, 1, tzinfo=UTC)
     # S1 took 600s (normal), S2 took 60s -> 60 / median(600,60)=330 is ~18% -> anomalous
-    await _make_quiz_attempt(db, sub1.id, started_at=start, submitted_at=start + timedelta(seconds=600))
-    await _make_quiz_attempt(db, sub2.id, started_at=start, submitted_at=start + timedelta(seconds=60))
+    await _make_quiz_attempt(
+        db, sub1.id, started_at=start, submitted_at=start + timedelta(seconds=600)
+    )
+    await _make_quiz_attempt(
+        db, sub2.id, started_at=start, submitted_at=start + timedelta(seconds=60)
+    )
 
     rows = await fetch_integrity_rows(db, subject.id)
     by_student = {r.student_name: r for r in rows}
@@ -319,7 +323,9 @@ async def test_teacher_subject_default_tab_is_students_normally(
     assert 'data-default-tab="students"' in resp.text
 
 
-async def test_teacher_subject_has_four_tabs(client: AsyncClient, db: AsyncSession, teacher) -> None:
+async def test_teacher_subject_has_four_tabs(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
     authenticate(client, teacher)
 
@@ -359,7 +365,10 @@ async def test_integrity_table_shows_severity_and_flag_filter(
     sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
     start = datetime(2026, 9, 1, tzinfo=UTC)
     await _make_quiz_attempt(
-        db, sub.id, started_at=start, submitted_at=start + timedelta(seconds=100),
+        db,
+        sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=100),
         violations={"tab_switch": 3},
     )
 
@@ -371,4 +380,4 @@ async def test_integrity_table_shows_severity_and_flag_filter(
     assert f'id="integrity-row-{student.id}-{a1.id}"' in resp.text
     assert f'id="cell-{student.id}-{a1.id}"' in resp.text
     assert "violation-dot" in resp.text
-    assert 'data-flagged-only-toggle' in resp.text
+    assert "data-flagged-only-toggle" in resp.text

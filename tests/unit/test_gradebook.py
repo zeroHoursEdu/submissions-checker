@@ -173,7 +173,9 @@ def test_compute_stats_pending_review_counts_ungraded_non_terminal_submissions()
         _row(assignment_id=1, grade=None, submission_status=SubmissionStatus.TESTING),
         _row(assignment_id=2, grade=None, submission_status=SubmissionStatus.COMPLETED),
         _row(assignment_id=3, grade=None, submission_status=None),
-        _row(assignment_id=4, grade=None, submission_status=SubmissionStatus.AWAITING_TEACHER_REVIEW),
+        _row(
+            assignment_id=4, grade=None, submission_status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+        ),
     ]
     assert compute_stats(rows, now=_NOW).pending_review_count == 2
 
