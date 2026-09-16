@@ -4,9 +4,7 @@
 
 Defines when the student-facing in-app notification feed (bell icon, `/notifications`) receives
 an entry — distinct from email, which is governed separately by `notification-preferences`.
-
 ## Requirements
-
 ### Requirement: Student is notified in-app when checks resolve with no further review
 When a submission's automated checks resolve directly to a final outcome with no further review
 step (fails the checks, or passes under `tests_only` review mode), the system SHALL push an
@@ -49,3 +47,15 @@ student's `SUBMISSION_CHECKED / EMAIL` preference — that preference only suppr
 - **WHEN** a student has disabled the `SUBMISSION_CHECKED / EMAIL` preference and their teacher
   reviews a submission
 - **THEN** no email is sent, but an in-app notification is still created
+
+### Requirement: FEEDBACK_REQUEST notification case exists in the system
+The system SHALL define a `FEEDBACK_REQUEST` value in the `NotificationCase` enum. This case SHALL appear on the student's notification preferences page alongside the existing `SUBMISSION_CHECKED` case, labelled "Feedback Request". The opt-out model applies: a missing preference row means the notification is enabled.
+
+#### Scenario: Student sees FEEDBACK_REQUEST preference on preferences page
+- **WHEN** the student navigates to `/portal/notification-preferences`
+- **THEN** the page SHALL display a row for "Feedback Request" with an email toggle, defaulting to enabled if no preference row exists
+
+#### Scenario: Student disables FEEDBACK_REQUEST email notifications
+- **WHEN** the student toggles off the "Feedback Request" email preference
+- **THEN** a `NotificationPreference` record with `case=FEEDBACK_REQUEST`, `method=EMAIL`, `enabled=False` is persisted and subsequent feedback request emails are suppressed for that student
+

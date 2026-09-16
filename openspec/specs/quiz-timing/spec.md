@@ -1,7 +1,7 @@
 # quiz-timing Specification
 
 ## Purpose
-TBD - created by archiving change quiz-first-review-and-per-question-timers. Update Purpose after archive.
+Whole-attempt and per-question time limits for quizzes, including the stepper delivery mode that per-question timing implies.
 ## Requirements
 ### Requirement: Per-question time limits are configurable
 
