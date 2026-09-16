@@ -16,13 +16,14 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.db.models import (
     EntityType,
+    QuizAttempt,
     Student,
     StudentAssignment,
     SubjectsAssignment,
@@ -275,3 +276,87 @@ async def fetch_roster_rows(db: AsyncSession, subject_id: int) -> list[RosterRow
         )
         for row in result
     ]
+
+
+async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[IntegrityRow]:
+    """One row per finalized QuizAttempt, latest attempt per (student, assignment).
+
+    "Latest" matches the same simplification `teacher_assignment`'s violation_flags
+    already makes (teacher_portal.py, the `viol_result` block): when a student has
+    retried a quiz, the most recent attempt is the one shown. This is also the
+    exact attempt the gradebook cell's violation indicator (Task 9) points at, so
+    a click on the cell always finds a matching row here.
+    """
+    result = await db.execute(
+        select(
+            Student.id.label("student_id"),
+            Student.full_name.label("student_name"),
+            SubjectsAssignment.id.label("assignment_id"),
+            SubjectsAssignment.title.label("assignment_title"),
+            QuizAttempt.started_at,
+            QuizAttempt.submitted_at,
+            QuizAttempt.paused_seconds,
+            QuizAttempt.violations,
+        )
+        .select_from(QuizAttempt)
+        .join(Submission, Submission.id == QuizAttempt.submission_id)
+        .join(StudentAssignment, StudentAssignment.id == Submission.students_assignment_id)
+        .join(
+            SubjectsAssignment,
+            SubjectsAssignment.id == StudentAssignment.subjects_assignment_id,
+        )
+        .join(Student, Student.id == StudentAssignment.student_id)
+        .where(
+            SubjectsAssignment.subject_id == subject_id,
+            QuizAttempt.submitted_at.is_not(None),
+        )
+        .order_by(QuizAttempt.started_at.desc())
+    )
+    raw_rows = list(result)
+
+    latest_by_pair: dict[tuple[int, int], Any] = {}
+    for row in raw_rows:
+        key = (row.student_id, row.assignment_id)
+        if key not in latest_by_pair:  # rows are started_at DESC -> first hit is latest
+            latest_by_pair[key] = row
+
+    durations_by_assignment: dict[int, list[int]] = {}
+    with_duration = []
+    for row in latest_by_pair.values():
+        elapsed = (row.submitted_at - row.started_at).total_seconds()
+        duration = int(elapsed) - row.paused_seconds
+        durations_by_assignment.setdefault(row.assignment_id, []).append(duration)
+        with_duration.append((row, duration))
+
+    medians = {
+        assignment_id: median_duration(durations)
+        for assignment_id, durations in durations_by_assignment.items()
+    }
+
+    integrity_rows = []
+    for row, duration in with_duration:
+        violations = row.violations or {}
+        tab_switch = int(violations.get("tab_switch", 0))
+        window_blur = int(violations.get("window_blur", 0))
+        force_fail = bool(violations.get("_force_fail", False))
+        median = medians[row.assignment_id]
+        anomalous = duration_anomalous(duration, median)
+        severity = severity_for(force_fail=force_fail, tab_switch=tab_switch, window_blur=window_blur)
+        integrity_rows.append(
+            IntegrityRow(
+                student_id=row.student_id,
+                student_name=row.student_name,
+                assignment_id=row.assignment_id,
+                assignment_title=row.assignment_title,
+                tab_switch=tab_switch,
+                window_blur=window_blur,
+                force_fail=force_fail,
+                duration_seconds=duration,
+                median_seconds=median,
+                duration_anomalous=anomalous,
+                severity=severity,
+                flagged=(severity is not None) or anomalous,
+            )
+        )
+    integrity_rows.sort(key=lambda r: (r.student_name, r.assignment_title))
+    return integrity_rows

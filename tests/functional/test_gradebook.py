@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.db.models import (
+    QuizAttempt,
     Student,
     StudentAssignment,
     Subject,
@@ -25,7 +26,8 @@ from submissions_checker.db.models import (
     SubmissionSourceType,
     SubmissionStatus,
 )
-from submissions_checker.services.gradebook import fetch_roster_rows
+from submissions_checker.db.models.enums import QuizAttemptStatus
+from submissions_checker.services.gradebook import fetch_integrity_rows, fetch_roster_rows
 
 pytestmark = pytest.mark.asyncio
 
@@ -167,3 +169,108 @@ async def test_fetch_roster_rows_uses_latest_submission_status(
 
     rows = await fetch_roster_rows(db, subject.id)
     assert rows[0].submission_status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
+# ── fetch_integrity_rows ─────────────────────────────────────────────────────
+
+
+async def _make_quiz_attempt(
+    db: AsyncSession,
+    submission_id: int,
+    *,
+    started_at: datetime,
+    submitted_at: datetime | None,
+    paused_seconds: int = 0,
+    violations: dict | None = None,
+    status: QuizAttemptStatus = QuizAttemptStatus.COMPLETED,
+) -> QuizAttempt:
+    attempt = QuizAttempt(
+        submission_id=submission_id,
+        questions_snapshot=[],
+        config_snapshot={},
+        started_at=started_at,
+        submitted_at=submitted_at,
+        paused_seconds=paused_seconds,
+        violations=violations or {},
+        status=status,
+    )
+    db.add(attempt)
+    await db.commit()
+    await db.refresh(attempt)
+    return attempt
+
+
+async def test_fetch_integrity_rows_computes_severity_and_duration(
+    db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
+    student = await make_student(full_name="Quiz Taker")
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id)
+    sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
+    start = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
+    await _make_quiz_attempt(
+        db,
+        sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=600),
+        violations={"tab_switch": 2, "window_blur": 1},
+    )
+
+    rows = await fetch_integrity_rows(db, subject.id)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.student_name == "Quiz Taker"
+    assert row.tab_switch == 2
+    assert row.window_blur == 1
+    assert row.duration_seconds == 600
+    assert row.severity == "high"  # combined count 3
+    assert row.flagged is True
+
+
+async def test_fetch_integrity_rows_excludes_unfinished_attempts(
+    db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, code="quiz1")
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id)
+    sub = await _make_submission(db, sa.id, status=SubmissionStatus.QUIZ_SENT)
+    await _make_quiz_attempt(
+        db,
+        sub.id,
+        started_at=datetime.now(UTC),
+        submitted_at=None,
+        status=QuizAttemptStatus.IN_PROGRESS,
+    )
+
+    rows = await fetch_integrity_rows(db, subject.id)
+    assert rows == []
+
+
+async def test_fetch_integrity_rows_median_is_per_assignment(
+    db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, code="quiz1")
+    s1 = await make_student(full_name="S1", email="s1@example.com")
+    s2 = await make_student(full_name="S2", email="s2@example.com")
+    await _enroll(db, subject.id, s1.id)
+    await _enroll(db, subject.id, s2.id)
+    sa1 = await _make_student_assignment(db, s1.id, a1.id)
+    sa2 = await _make_student_assignment(db, s2.id, a1.id)
+    sub1 = await _make_submission(db, sa1.id, status=SubmissionStatus.COMPLETED)
+    sub2 = await _make_submission(db, sa2.id, status=SubmissionStatus.COMPLETED)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    # S1 took 600s (normal), S2 took 60s -> 60 / median(600,60)=330 is ~18% -> anomalous
+    await _make_quiz_attempt(db, sub1.id, started_at=start, submitted_at=start + timedelta(seconds=600))
+    await _make_quiz_attempt(db, sub2.id, started_at=start, submitted_at=start + timedelta(seconds=60))
+
+    rows = await fetch_integrity_rows(db, subject.id)
+    by_student = {r.student_name: r for r in rows}
+    assert by_student["S1"].median_seconds == 330
+    assert by_student["S2"].duration_anomalous is True
+    assert by_student["S1"].duration_anomalous is False
