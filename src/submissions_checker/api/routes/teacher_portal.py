@@ -6,7 +6,7 @@ import csv
 import io
 import secrets
 import urllib.parse
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,12 @@ from submissions_checker.db.models.enums import (
 from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
+from submissions_checker.services.gradebook import (
+    build_grid,
+    compute_stats,
+    fetch_integrity_rows,
+    fetch_roster_rows,
+)
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
 
@@ -353,6 +359,14 @@ async def teacher_subject(
             "rejected_overflow": max(rejected_total - len(rejected_rows), 0),
         }
 
+    roster_rows = await fetch_roster_rows(db, subject_id)
+    gradebook_stats = compute_stats(roster_rows, now=datetime.now(UTC))
+    gradebook_grid = build_grid(roster_rows)
+    integrity_rows = await fetch_integrity_rows(db, subject_id)
+    integrity_by_cell = {(r.student_id, r.assignment_id): r for r in integrity_rows}
+
+    default_tab = "overview" if (enroll_result or test_student_flash) else "students"
+
     return render(
         request,
         "teacher_subject.html",
@@ -368,6 +382,11 @@ async def teacher_subject(
             "test_student_info": test_student_info,
             "test_student_flash": test_student_flash,
             "enroll_result": enroll_result,
+            "gradebook_stats": gradebook_stats,
+            "gradebook_grid": gradebook_grid,
+            "integrity_rows": integrity_rows,
+            "integrity_by_cell": integrity_by_cell,
+            "default_tab": default_tab,
         },
     )
 

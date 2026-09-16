@@ -10,6 +10,7 @@
 {% endblock %}
 
 {% block content %}
+<div data-default-tab="{{ default_tab }}">
 <div class="flex items-start justify-between mb-6">
   <div>
     <h1 class="text-2xl font-bold text-slate-900">{{ subject.name }}</h1>
@@ -248,4 +249,5 @@
   </div>
 </div>
 {% endif %}
+</div>
 {% endblock %}

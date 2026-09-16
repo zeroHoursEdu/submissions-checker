@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.db.models import (
@@ -28,6 +29,7 @@ from submissions_checker.db.models import (
 )
 from submissions_checker.db.models.enums import QuizAttemptStatus
 from submissions_checker.services.gradebook import fetch_integrity_rows, fetch_roster_rows
+from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio
 
@@ -274,3 +276,44 @@ async def test_fetch_integrity_rows_median_is_per_assignment(
     assert by_student["S1"].median_seconds == 330
     assert by_student["S2"].duration_anomalous is True
     assert by_student["S1"].duration_anomalous is False
+
+
+# ── teacher_subject route wiring (Task 7) ────────────────────────────────────
+
+
+async def test_teacher_subject_page_includes_gradebook_context(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Lab 1", code="lab1")
+    student = await make_student(full_name="Context Student")
+    await _enroll(db, subject.id, student.id)
+    await _make_student_assignment(db, student.id, a1.id, grade=100)
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+
+    assert resp.status_code == 200
+    assert "Context Student" in resp.text
+
+
+async def test_teacher_subject_default_tab_is_overview_after_enroll_flash(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}?enrolled=1")
+    assert resp.status_code == 200
+    assert 'data-default-tab="overview"' in resp.text
+
+
+async def test_teacher_subject_default_tab_is_students_normally(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert resp.status_code == 200
+    assert 'data-default-tab="students"' in resp.text
