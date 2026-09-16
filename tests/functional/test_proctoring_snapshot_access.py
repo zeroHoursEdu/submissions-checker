@@ -289,3 +289,27 @@ async def test_unreadable_object_is_reported_not_crashed(
 
     assert response.status_code == 404
     assert "no longer available" in response.text.lower()
+
+
+async def test_review_page_lists_evidence_per_attempt(
+    teacher_client: AsyncClient, db, teacher: User, student_user: User
+) -> None:
+    """The submission review page shows every attempt's violations and frames, all
+    addressed through the authenticated endpoint — never the object-storage URL."""
+    snapshot = await _arrange_snapshot(db, owner_id=teacher.id, student_id=student_user.student_id)
+    attempt = await db.get(QuizAttempt, snapshot.attempt_id)
+    assert attempt is not None
+    submission = await db.get(Submission, attempt.submission_id)
+    assert submission is not None
+    submission.status = SubmissionStatus.AWAITING_TEACHER_REVIEW
+    attempt.violations = {"camera_face_absent": 2, "_flagged_events": ["camera_face_absent"]}
+    await db.commit()
+
+    response = await teacher_client.get(f"/teacher/submissions/{submission.id}/review")
+
+    assert response.status_code == 200
+    body = response.text
+    assert 'id="proctoring-evidence"' in body
+    assert f"/teacher/proctoring/snapshots/{snapshot.id}" in body
+    assert "camera_face_absent" in body
+    assert snapshot.s3_url not in body

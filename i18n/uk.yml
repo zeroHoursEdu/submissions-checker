@@ -357,6 +357,9 @@ teacher:
   ai_cheating: Ознаки списування
   ai_generated: Ознаки AI-генерації
   ai_comment: Коментар для студента
+  proctoring_title: Прокторинг
+  attempt_label: Спроба
+  no_violations: Порушень не зафіксовано
 admin:
   dashboard_title: Панель адміністратора
   system_overview: Огляд системи та управління

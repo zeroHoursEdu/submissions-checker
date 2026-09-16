@@ -963,6 +963,42 @@ async def teacher_review_submission(
         submission.ai_review, (subjects_assignment.config or {}).get("ai_review")
     )
 
+    # Every quiz attempt on this submission with its violation counts and evidence frames,
+    # newest attempt first, frames in capture order. URLs address the authenticated
+    # snapshot endpoint, never object storage.
+    attempts_result = await db.execute(
+        select(QuizAttempt)
+        .where(QuizAttempt.submission_id == submission.id)
+        .options(selectinload(QuizAttempt.snapshots))
+        .order_by(QuizAttempt.started_at.desc())
+    )
+    proctoring: list[dict[str, Any]] = []
+    for attempt in attempts_result.scalars():
+        violations = attempt.violations or {}
+        proctoring.append(
+            {
+                "attempt_id": attempt.id,
+                "started_at": attempt.started_at,
+                "status": attempt.status,
+                "is_passed": attempt.is_passed,
+                "violations": {
+                    k: v
+                    for k, v in violations.items()
+                    if not k.startswith("_") and isinstance(v, int | float)
+                },
+                "force_fail": bool(violations.get("_force_fail")),
+                "flagged_events": list(violations.get("_flagged_events") or []),
+                "snapshots": [
+                    {
+                        "url": f"/teacher/proctoring/snapshots/{s.id}",
+                        "event_type": s.event_type,
+                        "captured_at": s.captured_at,
+                    }
+                    for s in sorted(attempt.snapshots, key=lambda s: s.captured_at)
+                ],
+            }
+        )
+
     return render(
         request,
         "teacher_submission_review.html",
@@ -973,6 +1009,7 @@ async def teacher_review_submission(
             "assignment": subjects_assignment,
             "subject": subjects_assignment.subject,
             "ai_summary": ai_summary,
+            "proctoring": proctoring,
         },
     )
 

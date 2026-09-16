@@ -115,6 +115,42 @@
     </div>
     {% endif %}
 
+    {% if proctoring %}
+    <div id="proctoring-evidence" class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+      <h2 class="font-semibold text-slate-900 mb-4">{{ vocab.teacher.proctoring_title }}</h2>
+      <div class="space-y-5">
+        {% for a in proctoring %}
+        <div class="border border-slate-100 rounded-lg p-3">
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            <span class="font-medium text-slate-800">{{ vocab.teacher.attempt_label }} #{{ a.attempt_id }}</span>
+            <span class="text-slate-400 text-xs">{{ a.started_at.strftime("%d.%m.%Y %H:%M") }}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full {% if a.force_fail %}bg-red-100 text-red-700{% elif a.is_passed %}bg-green-100 text-green-700{% else %}bg-slate-100 text-slate-600{% endif %}">{{ a.status }}</span>
+          </div>
+          {% if a.violations %}
+          <ul class="mt-2 flex flex-wrap gap-1.5">
+            {% for ev, n in a.violations.items() %}
+            <li class="text-xs px-2 py-0.5 rounded bg-amber-50 text-amber-800 font-mono">{{ ev }} × {{ n }}</li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="mt-2 text-xs text-slate-400">{{ vocab.teacher.no_violations }}</p>
+          {% endif %}
+          {% if a.snapshots %}
+          <div class="mt-3 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+            {% for s in a.snapshots %}
+            <a href="{{ s.url }}" target="_blank" class="block">
+              <img src="{{ s.url }}" alt="{{ s.event_type }}" class="w-full aspect-[4/3] object-cover rounded border border-slate-200 hover:ring-2 hover:ring-indigo-400">
+              <span class="block mt-0.5 text-[10px] font-mono text-slate-500 truncate">{{ s.event_type }} · {{ s.captured_at.strftime("%H:%M:%S") }}</span>
+            </a>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
   </div>
 
   <div class="lg:col-span-1">
