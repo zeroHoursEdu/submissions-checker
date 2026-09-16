@@ -41,6 +41,9 @@ def _register_jobs() -> None:
     from submissions_checker.core.config import get_settings
     from submissions_checker.workers.scheduled.metrics_refresh import refresh_metrics
     from submissions_checker.workers.scheduled.outbox_processor import process_outbox_messages
+    from submissions_checker.workers.scheduled.subject_stats_refresh import (
+        refresh_subject_gradebook_stats,
+    )
     from submissions_checker.workers.scheduled.teacher_digest_processor import (
         flush_teacher_digests,
     )
@@ -84,6 +87,21 @@ def _register_jobs() -> None:
     )
 
     logger.info("Registered metrics refresh job (interval: %ss)", settings.metrics_refresh_interval)
+
+    # Subject gradebook stats — cached Панель stat-card numbers
+    scheduler.add_job(
+        refresh_subject_gradebook_stats,
+        trigger=IntervalTrigger(seconds=settings.subject_stats_refresh_interval),
+        id="subject_stats_refresh",
+        name="Refresh subject gradebook stats",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    logger.info(
+        "Registered subject stats refresh job (interval: %ss)",
+        settings.subject_stats_refresh_interval,
+    )
 
 
 async def start_scheduler() -> None:

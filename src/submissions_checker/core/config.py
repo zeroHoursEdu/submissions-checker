@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # Metrics: how often the DB-derived gauges (students, backlogs, outbox age) are recomputed.
     metrics_refresh_interval: int = 60
 
+    # Subject gradebook stats: how often the cached stat-card numbers (average
+    # mark, pass %, pending review, cheating %) are recomputed per subject.
+    subject_stats_refresh_interval: int = 300
+
     # Subject plugins directory (gitignored; each subdirectory is a plugin with config.yml)
     plugins_dir: str = "plugins"
 
