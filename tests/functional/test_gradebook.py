@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.db.models import (
@@ -27,7 +28,7 @@ from submissions_checker.db.models import (
     SubmissionSourceType,
     SubmissionStatus,
 )
-from submissions_checker.db.models.enums import QuizAttemptStatus
+from submissions_checker.db.models.enums import QuizAttemptStatus, UserRole
 from submissions_checker.services.gradebook import (
     fetch_grid_rows,
     fetch_integrity_rows,
@@ -60,6 +61,7 @@ async def _make_assignment(
     min_grade: int = 0,
     max_grade: int = 100,
     deadline: datetime | None = None,
+    config: dict | None = None,
 ) -> SubjectsAssignment:
     sa = SubjectsAssignment(
         subject_id=subject_id,
@@ -68,6 +70,7 @@ async def _make_assignment(
         min_grade=min_grade,
         max_grade=max_grade,
         deadline=deadline,
+        config=config or {},
     )
     db.add(sa)
     await db.commit()
@@ -556,3 +559,85 @@ async def test_fetch_grid_rows_null_grade_breakdown_yields_none_sub_marks(
 
     assert rows[0].quiz_score is None
     assert rows[0].review_score is None
+
+
+# ── search-by-email + enroll-by-search routes ───────────────────────────────
+
+
+async def test_search_students_requires_three_characters(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}/students/search?q=ab")
+    assert resp.status_code == 422
+
+
+async def test_search_students_matches_email_substring(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    student = await make_student(full_name="Search Target", email="findme@example.com")
+    await make_student(full_name="Nobody", email="other@example.com")
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}/students/search?q=findme")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == student.id
+    assert data[0]["email"] == "findme@example.com"
+
+
+async def test_search_students_other_teachers_subject_is_403(
+    client: AsyncClient, db: AsyncSession, teacher, make_user
+) -> None:
+    other = await make_user(role=UserRole.TEACHER, username="other-search")
+    subject = await _make_subject(db, owner_id=other.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}/students/search?q=abc")
+    assert resp.status_code == 403
+
+
+async def test_enroll_by_search_creates_enrollment(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    await _make_assignment(db, subject.id, code="lab1")
+    student = await make_student(full_name="Enroll Me", email="enrollme@example.com")
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/students/enroll-by-search",
+        data={"student_id": str(student.id)},
+    )
+    assert resp.status_code == 303
+
+    enrollment = (
+        await db.execute(
+            select(SubjectsStudents).where(
+                SubjectsStudents.subject_id == subject.id,
+                SubjectsStudents.student_id == student.id,
+            )
+        )
+    ).scalar_one_or_none()
+    assert enrollment is not None
+
+
+async def test_enroll_by_search_requires_variant_when_subject_needs_one(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    await _make_assignment(
+        db, subject.id, code="lab1", config={"variants_required": True, "variants": {"a": {}}}
+    )
+    student = await make_student(email="needsvariant@example.com")
+    authenticate(client, teacher)
+
+    resp = await client.post(
+        f"/teacher/subjects/{subject.id}/students/enroll-by-search",
+        data={"student_id": str(student.id)},
+    )
+    assert resp.status_code == 422

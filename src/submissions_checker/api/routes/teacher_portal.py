@@ -1153,6 +1153,76 @@ async def enroll_student(
     return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
 
 
+@router.get("/subjects/{subject_id}/students/search")
+async def search_students_by_email(
+    subject_id: int,
+    q: str,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> list[dict[str, Any]]:
+    """Autocomplete source for the Операції tab's search-enroll flow.
+
+    3+ chars, ILIKE on email — enroll-only, never creates students (mirrors
+    the CSV import route's enroll-only contract).
+    """
+    await require_subject_access(db, subject_id, current_user)
+    if len(q) < 3:
+        raise HTTPException(status_code=422, detail="Query must be at least 3 characters")
+
+    result = await db.execute(
+        select(Student.id, Student.full_name, Student.email)
+        .where(Student.type == EntityType.REAL, Student.email.ilike(f"%{q}%"))
+        .order_by(Student.full_name)
+        .limit(10)
+    )
+    return [{"id": row.id, "full_name": row.full_name, "email": row.email} for row in result]
+
+
+@router.post("/subjects/{subject_id}/students/enroll-by-search")
+async def enroll_student_by_search(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    student_id: int = Form(...),
+    variant: str = Form(""),
+) -> RedirectResponse:
+    """Enroll one student found via search, reusing the same enrollment logic
+    button-enroll and CSV-enroll already share (_ensure_assignment_rows)."""
+    await require_subject_access(db, subject_id, current_user)
+
+    sa_rows_result = await db.execute(
+        select(SubjectsAssignment.id, SubjectsAssignment.config).where(
+            SubjectsAssignment.subject_id == subject_id
+        )
+    )
+    sa_rows = sa_rows_result.all()
+    needs_variant = any((row.config or {}).get("variants_required") for row in sa_rows)
+    clean_variant = variant.strip() or None
+    if needs_variant and not clean_variant:
+        raise HTTPException(status_code=422, detail="This subject requires a variant")
+
+    existing = await db.execute(
+        select(SubjectsStudents).where(
+            SubjectsStudents.subject_id == subject_id,
+            SubjectsStudents.student_id == student_id,
+        )
+    )
+    if existing.scalar_one_or_none() is None:
+        db.add(SubjectsStudents(subject_id=subject_id, student_id=student_id))
+        await _ensure_assignment_rows(db, student_id, [row.id for row in sa_rows], clean_variant)
+        await audit(
+            db,
+            action="enroll_student_by_search",
+            actor_id=current_user.user_id,
+            actor_username=current_user.username,
+            subject_id=subject_id,
+            student_id=student_id,
+        )
+        await db.commit()
+
+    return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
+
+
 @router.post("/subjects/{subject_id}/unenroll/{student_id_param}")
 async def unenroll_student(
     subject_id: int,
