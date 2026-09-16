@@ -100,6 +100,7 @@ class IntegrityRow:
     tab_switch: int
     window_blur: int
     force_fail: bool
+    other_events: int
     duration_seconds: int | None
     median_seconds: int | None
     duration_anomalous: bool
@@ -304,9 +305,17 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
             SubjectsAssignment.id == StudentAssignment.subjects_assignment_id,
         )
         .join(Student, Student.id == StudentAssignment.student_id)
+        .join(
+            SubjectsStudents,
+            and_(
+                SubjectsStudents.student_id == Student.id,
+                SubjectsStudents.subject_id == subject_id,
+            ),
+        )
         .where(
             SubjectsAssignment.subject_id == subject_id,
             QuizAttempt.submitted_at.is_not(None),
+            Student.type == EntityType.REAL,
         )
         .order_by(QuizAttempt.started_at.desc())
     )
@@ -337,6 +346,15 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
         tab_switch = int(violations.get("tab_switch", 0))
         window_blur = int(violations.get("window_blur", 0))
         force_fail = bool(violations.get("_force_fail", False))
+        other_events = int(
+            sum(
+                v
+                for k, v in violations.items()
+                if not k.startswith("_")
+                and k not in ("tab_switch", "window_blur")
+                and isinstance(v, int | float)
+            )
+        )
         median = medians[row.assignment_id]
         anomalous = duration_anomalous(duration, median)
         severity = severity_for(
@@ -351,11 +369,12 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
                 tab_switch=tab_switch,
                 window_blur=window_blur,
                 force_fail=force_fail,
+                other_events=other_events,
                 duration_seconds=duration,
                 median_seconds=median,
                 duration_anomalous=anomalous,
                 severity=severity,
-                flagged=(severity is not None) or anomalous,
+                flagged=(severity is not None) or anomalous or other_events > 0,
             )
         )
     integrity_rows.sort(key=lambda r: (r.student_name, r.assignment_title))

@@ -503,6 +503,7 @@ teacher:
   integrity_col_assignment: Завдання
   integrity_col_tab_switch: Перемикання вкладок
   integrity_col_window_blur: Втрата фокусу вікна
+  integrity_col_other_events: Інші події
   integrity_col_duration: Тривалість
   integrity_col_severity: Рівень
   integrity_severity_high: Високий

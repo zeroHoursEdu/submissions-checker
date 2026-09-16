@@ -232,6 +232,44 @@ async def test_fetch_integrity_rows_computes_severity_and_duration(
     assert row.flagged is True
 
 
+async def test_fetch_integrity_rows_counts_other_event_types(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    """tab_switch/window_blur aren't the only anti-cheat event types (see
+    docs/anti-cheat.md): copy_attempt, keyboard_shortcut, right_click, resize,
+    fullscreen_exit must still surface as a count and still flag the row/dot,
+    even though severity_for stays spec-locked to tab_switch/window_blur/_force_fail."""
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
+    student = await make_student(full_name="Other Events Student")
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id)
+    sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    await _make_quiz_attempt(
+        db,
+        sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=100),
+        violations={"copy_attempt": 4, "resize": 2},
+    )
+
+    rows = await fetch_integrity_rows(db, subject.id)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.tab_switch == 0
+    assert row.window_blur == 0
+    assert row.other_events == 6
+    assert row.flagged is True
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+
+    assert resp.status_code == 200
+    assert f'data-scroll-to="integrity-row-{student.id}-{a1.id}"' in resp.text
+
+
 async def test_fetch_integrity_rows_excludes_unfinished_attempts(
     db: AsyncSession, teacher, make_student
 ) -> None:
@@ -280,6 +318,58 @@ async def test_fetch_integrity_rows_median_is_per_assignment(
     assert by_student["S1"].median_seconds == 330
     assert by_student["S2"].duration_anomalous is True
     assert by_student["S1"].duration_anomalous is False
+
+
+async def test_fetch_integrity_rows_excludes_test_students(
+    db: AsyncSession, teacher, make_student, make_group
+) -> None:
+    """A Test Student account (never enrolled via subjects_students — see the
+    owner-only "Test Student" panel, which promises stats exclude this account)
+    must not show up as a ghost row here, nor pollute the per-assignment median
+    used to flag real students' attempts as anomalous."""
+    from submissions_checker.db.models.enums import EntityType
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
+
+    student = await make_student(full_name="Real Student")
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id)
+    sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    await _make_quiz_attempt(
+        db,
+        sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=100),
+        violations={"tab_switch": 3},
+    )
+
+    group = await make_group()
+    test_student = Student(
+        group_id=group.id,
+        email="test-student@internal",
+        full_name="Test Student",
+        type=EntityType.TEST,
+    )
+    db.add(test_student)
+    await db.commit()
+    await db.refresh(test_student)
+    # Note: no _enroll(db, subject.id, test_student.id) — mirrors the real
+    # Test Student account, which is never in subjects_students.
+    test_sa = await _make_student_assignment(db, test_student.id, a1.id)
+    test_sub = await _make_submission(db, test_sa.id, status=SubmissionStatus.COMPLETED)
+    await _make_quiz_attempt(
+        db,
+        test_sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=100),
+        violations={"tab_switch": 3},
+    )
+
+    rows = await fetch_integrity_rows(db, subject.id)
+    assert len(rows) == 1
+    assert rows[0].student_name == "Real Student"
 
 
 # ── teacher_subject route wiring (Task 7) ────────────────────────────────────
@@ -352,6 +442,8 @@ async def test_grades_tab_renders_stats_and_grid(
     assert "ЛР1" in resp.text
     assert "Grid Student" in resp.text
     assert ">90<" in resp.text  # the grade appears as a cell value
+    assert "90.0" in resp.text  # average score stat card
+    assert "100.0%" in resp.text  # pass rate stat card — the one student passed the one assignment
 
 
 async def test_integrity_table_shows_severity_and_flag_filter(
@@ -379,7 +471,7 @@ async def test_integrity_table_shows_severity_and_flag_filter(
     assert "Flagged Student" in resp.text
     assert f'id="integrity-row-{student.id}-{a1.id}"' in resp.text
     assert f'id="cell-{student.id}-{a1.id}"' in resp.text
-    assert "violation-dot" in resp.text
+    assert f'data-scroll-to="integrity-row-{student.id}-{a1.id}"' in resp.text
     assert "data-flagged-only-toggle" in resp.text
 
 

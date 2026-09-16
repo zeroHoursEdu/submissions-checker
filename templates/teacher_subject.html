@@ -76,7 +76,7 @@
   </button>
 </div>
 
-<div id="tab-panel-overview" class="tab-panel" hidden>
+<div id="tab-panel-overview" class="tab-panel" {% if default_tab != "overview" %}hidden{% endif %}>
   {% if enroll_result %}
   <div class="mb-4 px-4 py-3 rounded-lg border text-sm {% if enroll_result.rejected %}bg-amber-50 border-amber-200 text-amber-800{% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}">
     <p>
@@ -199,7 +199,7 @@
   {% endif %}
 </div>
 
-<div id="tab-panel-students" class="tab-panel" hidden>
+<div id="tab-panel-students" class="tab-panel" {% if default_tab != "students" %}hidden{% endif %}>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
       <h2 class="font-semibold text-slate-900">{{ vocab.teacher.enrolled_students }}</h2>
@@ -228,7 +228,7 @@
   </div>
 </div>
 
-<div id="tab-panel-assignments" class="tab-panel" hidden>
+<div id="tab-panel-assignments" class="tab-panel" {% if default_tab != "assignments" %}hidden{% endif %}>
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
       <h2 class="font-semibold text-slate-900">{{ vocab.teacher.assignments }}</h2>
@@ -264,7 +264,7 @@
   </div>
 </div>
 
-<div id="tab-panel-grades" class="tab-panel" hidden>
+<div id="tab-panel-grades" class="tab-panel" {% if default_tab != "grades" %}hidden{% endif %}>
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
     <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
       <div class="text-xl font-bold text-slate-900">
@@ -322,8 +322,8 @@
                   {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700
                   {% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700
                   {% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700
-                  {% else %}text-slate-300{% endif %}">{% if cell and cell.grade is not none %}{{ cell.grade }}{% else %}—{% endif %}{% if violation and (violation.tab_switch or violation.window_blur or violation.force_fail) %}
-              <span title="tab_switch: {{ violation.tab_switch }}, window_blur: {{ violation.window_blur }}{% if violation.force_fail %}, force_fail{% endif %}"
+                  {% else %}text-slate-300{% endif %}">{% if cell and cell.grade is not none %}{{ cell.grade }}{% else %}—{% endif %}{% if violation and (violation.tab_switch or violation.window_blur or violation.force_fail or violation.other_events) %}
+              <span title="tab_switch: {{ violation.tab_switch }}, window_blur: {{ violation.window_blur }}{% if violation.other_events %}, other: {{ violation.other_events }}{% endif %}{% if violation.force_fail %}, force_fail{% endif %}"
                     class="violation-dot absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-red-500 cursor-pointer"
                     data-scroll-to="integrity-row-{{ row.student_id }}-{{ col.assignment_id }}"></span>
               {% endif %}</td>
@@ -360,6 +360,7 @@
             <th class="px-4 py-2 text-left font-medium text-slate-600">{{ vocab.teacher.integrity_col_assignment }}</th>
             <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_tab_switch }}</th>
             <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_window_blur }}</th>
+            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_other_events }}</th>
             <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_duration }}</th>
             <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_severity }}</th>
           </tr>
@@ -373,6 +374,7 @@
             <td class="px-4 py-2 text-slate-600">{{ row.assignment_title }}</td>
             <td class="px-4 py-2 text-center">{{ row.tab_switch }}</td>
             <td class="px-4 py-2 text-center">{{ row.window_blur }}</td>
+            <td class="px-4 py-2 text-center">{{ row.other_events }}</td>
             <td class="px-4 py-2 text-center {% if row.duration_anomalous %}text-red-600 font-medium{% else %}text-slate-600{% endif %}">
               {% if row.duration_seconds is not none %}
                 {{ row.duration_seconds }}s
