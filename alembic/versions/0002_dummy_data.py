@@ -50,13 +50,15 @@ def upgrade() -> None:
         ("Mykola Shevchenko","mykola@example.com",  "mykola-shevchenko"),
     ]
     student_ids: dict[str, int] = {}
+    # github_username is still NOT NULL at this revision (0004 relaxes it, 0027 drops it),
+    # so the seed has to supply a value; the key doubles as that placeholder.
     for full_name, email, key in students_raw:
         sid = conn.execute(
             text(
-                "INSERT INTO students (group_id, email, full_name) "
-                "VALUES (:gid, :email, :name) RETURNING id"
+                "INSERT INTO students (group_id, github_username, email, full_name) "
+                "VALUES (:gid, :handle, :email, :name) RETURNING id"
             ),
-            {"gid": group_id, "email": email, "name": full_name},
+            {"gid": group_id, "handle": key, "email": email, "name": full_name},
         ).scalar_one()
         student_ids[key] = sid
 
@@ -262,8 +264,9 @@ def upgrade() -> None:
 
     # ── Submissions (varied statuses for UI variety) ──────────────────────────
     submissions = [
-        # Ivan – Lab 2 Python: awaiting teacher review
-        (sa_ids[(ivan, py_asgn_ids[1])], "ZIP_UPLOAD", "AWAITING_TEACHER_REVIEW"),
+        # Ivan – Lab 2 Python: in review. Only the 0001 enum values exist at this
+        # revision; 0027 later maps REVIEWING to AWAITING_AI_REVIEW.
+        (sa_ids[(ivan, py_asgn_ids[1])], "ZIP_UPLOAD", "REVIEWING"),
         # Olena – Lab 2 DB: uploaded ZIP, waiting to be processed
         (sa_ids[(olena, db_asgn_ids[1])], "ZIP_UPLOAD", "PENDING"),
         # Mykola – Lab 1 DB: failed

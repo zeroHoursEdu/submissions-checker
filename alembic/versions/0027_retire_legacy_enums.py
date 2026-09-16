@@ -52,30 +52,47 @@ _EVENT_VALUES = (
 )
 
 
-def _recreate_enum(type_name: str, table: str, column: str, values: tuple[str, ...]) -> None:
+def _recreate_enum(
+    type_name: str,
+    table: str,
+    column: str,
+    values: tuple[str, ...],
+    mapping: dict[str, str] | None = None,
+) -> None:
+    """Swap *column* onto a freshly created enum holding only *values*.
+
+    Any legacy value listed in *mapping* is rewritten inside the USING cast. That
+    matters on a fresh database: every migration runs in one transaction, and
+    PostgreSQL refuses to *use* a value added with ADD VALUE (0010 and later)
+    until that transaction commits — so an UPDATE naming 'VALIDATING' would fail.
+    A CASE over the text form and a cast to the brand-new type sidesteps that.
+    """
     quoted = ", ".join(f"'{v}'" for v in values)
     op.execute(f"ALTER TYPE {type_name} RENAME TO {type_name}_old")
     op.execute(f"CREATE TYPE {type_name} AS ENUM ({quoted})")
-    op.execute(
-        f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {type_name} "
-        f"USING {column}::text::{type_name}"
-    )
+    if mapping:
+        whens = " ".join(f"WHEN '{old}' THEN '{new}'" for old, new in mapping.items())
+        using = f"(CASE {column}::text {whens} ELSE {column}::text END)::{type_name}"
+    else:
+        using = f"{column}::text::{type_name}"
+    op.execute(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE {type_name} USING {using}")
     op.execute(f"DROP TYPE {type_name}_old")
 
 
 def upgrade() -> None:
-    # 1. submissions.status — map legacy values, then recreate the enum.
-    for old, new in _STATUS_MAP.items():
-        op.execute(f"UPDATE submissions SET status = '{new}' WHERE status = '{old}'")
+    # 1. submissions.status — legacy values are mapped inside the type swap.
     op.execute("ALTER TABLE submissions ALTER COLUMN status DROP DEFAULT")
-    _recreate_enum("submission_status", "submissions", "status", _STATUS_VALUES)
+    _recreate_enum("submission_status", "submissions", "status", _STATUS_VALUES, _STATUS_MAP)
     op.execute("ALTER TABLE submissions ALTER COLUMN status SET DEFAULT 'PENDING'")
 
     # 2. submissions.source_type — everything is a ZIP upload now.
-    op.execute(
-        "UPDATE submissions SET source_type = 'ZIP_UPLOAD' WHERE source_type <> 'ZIP_UPLOAD'"
+    _recreate_enum(
+        "submission_source_type",
+        "submissions",
+        "source_type",
+        ("ZIP_UPLOAD",),
+        {"GITHUB_PR": "ZIP_UPLOAD", "GITLAB_MR": "ZIP_UPLOAD"},
     )
-    _recreate_enum("submission_source_type", "submissions", "source_type", ("ZIP_UPLOAD",))
 
     # 3. outbox_messages.event_type — stray retired rows carry no work; delete them.
     op.execute("DELETE FROM outbox_messages WHERE event_type IN ('PULL', 'REVIEW', 'NOTIFY')")

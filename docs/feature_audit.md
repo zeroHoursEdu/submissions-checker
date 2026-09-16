@@ -18,7 +18,14 @@ Priorities are my call: **P1** do soon · **P2** worth doing · **P3** when conv
 
 ## A. Delete
 
-### A1. GitHub / GitLab ingest leftovers — P1
+> **Done 2026-09-17** — all §A items, B4, B6, B11 (scoped) and B12 landed on branch
+> `cleanup-dead-code` via `docs/superpowers/plans/2026-09-17-cleanup-dead-code.md`.
+> B11 scope: only `0007` became a no-op and the dead `migrations/` mount went; `0002`/`0003`
+> stay as migrations because `make e2e` and the login page's development hint rely on
+> boot-time seeding.
+
+
+### ✅ A1. GitHub / GitLab ingest leftovers — P1
 
 The PR-ingest pipeline was retired (`retire-github-pr-ingest`, 2026-06-19). What is left:
 
@@ -35,7 +42,7 @@ The PR-ingest pipeline was retired (`retire-github-pr-ingest`, 2026-06-19). What
 | `db/models/enums.py` | `SubmissionSourceType.GITHUB_PR/GITLAB_MR`, `OutboxEventType.PULL/REVIEW/NOTIFY` | keep **only** if prod DB has rows. Dev DB has 2 `GITHUB_PR` rows, both from `0002_dummy_data.py`. Check prod, then one migration: `UPDATE … SET source_type='ZIP_UPLOAD'`, drop enum values, delete `_RETIRED_EVENT_TYPES` branch in `outbox_processor.py` |
 | `.env.example` | no GITHUB_* left — OK | — |
 
-### A2. Never-wired service scaffolding — P1
+### ✅ A2. Never-wired service scaffolding — P1
 
 All have `# TODO` bodies raising `NotImplementedError`, and **zero callers** in `src/`:
 
@@ -45,14 +52,14 @@ All have `# TODO` bodies raising `NotImplementedError`, and **zero callers** in 
 
 Delete the six files and the three test files. Nothing else references them.
 
-### A3. `/api/v1/users` fake endpoints — P1
+### ✅ A3. `/api/v1/users` fake endpoints — P1
 
 `api/routes/users.py`: `POST` and `GET /{id}` return `{"status": "not_implemented"}` with a
 200, mounted in prod via `main.py`. Known bug #5. Delete the router, the `include_router`
 line, the `api_v1_prefix` setting, and the assertions in
 `tests/functional/test_coverage_gaps.py` / `tests/integration/test_api.py` that hit it.
 
-### A4. Orphaned templates — P2
+### ✅ A4. Orphaned templates — P2
 
 Never passed to `render(...)` anywhere in `src/` (confirmed by grep on every `"*.html"`
 literal):
@@ -63,7 +70,7 @@ literal):
 
 Delete all three. Also drop the vocab keys they alone use (`vocab.teacher.github_username_label`, `col_github`, quiz-editor strings) from `i18n/uk.yml`.
 
-### A5. Legacy submission statuses — P2
+### ✅ A5. Legacy submission statuses — P2
 
 `SubmissionStatus.PROCESSING / REVIEWING / CHECKING / CHECK_FAILED / WAITING_FOR_TEACHER_REVIEW`,
 the `start_check`, `check_passed_*`, `teacher_approve_quiz/done` transitions in
@@ -72,12 +79,12 @@ the `start_check`, `check_passed_*`, `teacher_approve_quiz/done` transitions in
 (23–31). Dev DB has **zero** rows in any legacy status. If prod is the same, delete in one
 change: migration to drop enum values, remove transitions, remove template branches.
 
-### A6. Unused settings — P3
+### ✅ A6. Unused settings — P3
 
 `core/config.py`: `ai_temperature`, `base_url` (not `app_base_url`), `api_v1_prefix`
 have no readers. `.env.example` still lists `AI_TEMPERATURE`. Remove.
 
-### A7. Stale docs — P2
+### ✅ A7. Stale docs — P2
 
 - `docs/analytics.md` — describes `/teacher/analytics` pages removed in `e9611a2` ("Remove the in-app analytics pages"). Delete.
 - `docs/statuses.md`, `docs/jobs.md` — self-marked "DEPRECATED / HISTORICAL". Delete; git history keeps them.
@@ -85,7 +92,7 @@ have no readers. `.env.example` still lists `AI_TEMPERATURE`. Remove.
 - `docs/missing_features.md` — see §D; either fold into this file or delete.
 - `scripts/quiz_form.gs` — Google Apps Script for the retired Google-Forms quiz pipeline (`docs/jobs.md` era). Delete.
 
-### A8. Openspec housekeeping — P3
+### ✅ A8. Openspec housekeeping — P3
 
 `openspec/changes/` still holds:
 
@@ -93,7 +100,7 @@ have no readers. `.env.example` still lists `AI_TEMPERATURE`. Remove.
 - **100 % done, never archived**: `config-only-subject-management` (31/31), `gather-feedbacks` (22/22), `multilanguage-i18n-support` (28/28), `rebrand-and-hide-demo-credentials` (13/13), `test-mode-for-teacher` (17/17). Run `/opsx:archive` on each.
 - `prod-deployment` 57/61 — check the 4 open tasks, then archive.
 
-### A9. Root-level clutter (all untracked, none affects the build) — P3
+### ✅ A9. Root-level clutter (all untracked, none affects the build) — P3
 
 | Path | What it is |
 |---|---|
@@ -174,7 +181,7 @@ email path all exist. **Nothing enqueues the event**: no scheduled job in
 (StudentAssignments with `deadline` in N days and no submission → enqueue once, dedup by
 `(sa_id, deadline)`), or delete the four pieces. The former is a real student-facing win.
 
-### B4. i18n is single-language — P2
+### ✅ B4. i18n is single-language — P2
 
 Only `i18n/uk.yml` exists; `en.yml` was never committed. `base.html` hides the selector
 when `available_languages | length <= 1`, so `/set-language` and the whole
@@ -192,7 +199,7 @@ Deliberately unlinked by `config-only-subject-management`, still live and author
   Операції, or remove the route.
 - (`feedback/export.csv` is fine — linked from `teacher_feedback_view.html`.)
 
-### B6. `SHORT_ANSWER` question type is a dead end — P2
+### ✅ B6. `SHORT_ANSWER` question type is a dead end — P2
 
 Answers are stored, `is_correct` is `None`, nothing scores them, no teacher UI grades them,
 `max_score` still counts them (so a quiz with one short-answer question can never reach
@@ -235,14 +242,14 @@ An attempt paused and never resumed stays `IN_PROGRESS` forever (documented in
 A "Retry / Send to teacher review" button on the submission review page, allowed from
 `AI_REVIEW_FAILED` and any non-terminal status older than X minutes, closes this.
 
-### B11. Migrations carry dev seed data — P3
+### ✅ B11. Migrations carry dev seed data — P3
 
 `0002_dummy_data.py` and `0007_quiz_dummy_data.py` insert rows when
 `ENVIRONMENT=development`. It works (gated), but they run on every fresh dev DB and the
 seed includes `GITHUB_PR` submissions (A1). Consider moving the seed to
 `scripts/seed_dev.py` and making the two migrations no-ops.
 
-### B12. README is a description of a different product — P1
+### ✅ B12. README is a description of a different product — P1
 
 Whole file describes GitHub webhooks, PR comments, SQL-file migrations, and a
 `services/github/` tree. Replace with: what it is (ZIP upload → sandboxed checks → optional
