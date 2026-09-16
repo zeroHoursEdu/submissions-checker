@@ -130,3 +130,36 @@ def median_duration(durations: list[int]) -> int | None:
     if not durations:
         return None
     return round(statistics.median(durations))
+
+
+def compute_stats(rows: list[RosterRow], *, now: datetime) -> GradebookStats:
+    graded = [r.grade for r in rows if r.grade is not None]
+    average_score = round(sum(graded) / len(graded), 1) if graded else None
+
+    by_student: dict[int, list[RosterRow]] = {}
+    for r in rows:
+        by_student.setdefault(r.student_id, []).append(r)
+    total_students = len(by_student)
+    passed_students = sum(
+        1
+        for student_rows in by_student.values()
+        if all(r.grade is not None for r in student_rows)
+    )
+    pass_rate_pct = round(100 * passed_students / total_students, 1) if total_students else 0.0
+
+    overdue_count = sum(
+        1 for r in rows if r.grade is None and r.deadline is not None and r.deadline < now
+    )
+    pending_review_count = sum(
+        1
+        for r in rows
+        if r.grade is None
+        and r.submission_status is not None
+        and r.submission_status not in _TERMINAL_STATUSES
+    )
+    return GradebookStats(
+        average_score=average_score,
+        pass_rate_pct=pass_rate_pct,
+        overdue_count=overdue_count,
+        pending_review_count=pending_review_count,
+    )

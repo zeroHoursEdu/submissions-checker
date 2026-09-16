@@ -94,3 +94,84 @@ def test_median_duration_even_count_rounds() -> None:
 
 def test_median_duration_empty_list_is_none() -> None:
     assert median_duration([]) is None
+
+
+from datetime import UTC, datetime, timedelta
+
+from submissions_checker.services.gradebook import RosterRow, compute_stats
+
+_NOW = datetime(2026, 9, 16, tzinfo=UTC)
+
+
+def _row(
+    *,
+    student_id: int = 1,
+    assignment_id: int = 1,
+    grade: int | None = None,
+    deadline: datetime | None = None,
+    submission_status: SubmissionStatus | None = None,
+    min_grade: int = 0,
+    max_grade: int = 100,
+) -> RosterRow:
+    return RosterRow(
+        student_id=student_id,
+        student_name=f"Student {student_id}",
+        assignment_id=assignment_id,
+        assignment_code=f"a{assignment_id}",
+        assignment_title=f"Assignment {assignment_id}",
+        min_grade=min_grade,
+        max_grade=max_grade,
+        deadline=deadline,
+        student_assignment_id=student_id * 100 + assignment_id,
+        grade=grade,
+        submission_status=submission_status,
+    )
+
+
+def test_compute_stats_average_score_over_graded_only() -> None:
+    rows = [_row(grade=80), _row(grade=None), _row(grade=60, assignment_id=2)]
+    stats = compute_stats(rows, now=_NOW)
+    assert stats.average_score == 70.0
+
+
+def test_compute_stats_average_score_none_when_nothing_graded() -> None:
+    rows = [_row(grade=None)]
+    assert compute_stats(rows, now=_NOW).average_score is None
+
+
+def test_compute_stats_pass_rate_requires_every_assignment_graded() -> None:
+    # Student 1 graded on both assignments -> passed. Student 2 graded on only one -> not.
+    rows = [
+        _row(student_id=1, assignment_id=1, grade=50),
+        _row(student_id=1, assignment_id=2, grade=50),
+        _row(student_id=2, assignment_id=1, grade=50),
+        _row(student_id=2, assignment_id=2, grade=None),
+    ]
+    stats = compute_stats(rows, now=_NOW)
+    assert stats.pass_rate_pct == 50.0
+
+
+def test_compute_stats_pass_rate_zero_assignments_is_zero() -> None:
+    assert compute_stats([], now=_NOW).pass_rate_pct == 0.0
+
+
+def test_compute_stats_overdue_counts_ungraded_past_deadline_including_never_submitted() -> None:
+    past = _NOW - timedelta(days=1)
+    future = _NOW + timedelta(days=1)
+    rows = [
+        _row(assignment_id=1, grade=None, deadline=past, submission_status=None),
+        _row(assignment_id=2, grade=None, deadline=future, submission_status=None),
+        _row(assignment_id=3, grade=50, deadline=past),
+        _row(assignment_id=4, grade=None, deadline=None),
+    ]
+    assert compute_stats(rows, now=_NOW).overdue_count == 1
+
+
+def test_compute_stats_pending_review_counts_ungraded_non_terminal_submissions() -> None:
+    rows = [
+        _row(assignment_id=1, grade=None, submission_status=SubmissionStatus.TESTING),
+        _row(assignment_id=2, grade=None, submission_status=SubmissionStatus.COMPLETED),
+        _row(assignment_id=3, grade=None, submission_status=None),
+        _row(assignment_id=4, grade=None, submission_status=SubmissionStatus.AWAITING_TEACHER_REVIEW),
+    ]
+    assert compute_stats(rows, now=_NOW).pending_review_count == 2
