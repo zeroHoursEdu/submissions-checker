@@ -180,13 +180,54 @@ All rules cleared, no protections.
 
 ---
 
+## Camera proctoring
+
+Optional webcam monitoring, configured under `anti_cheat.camera`. Detection runs **in the
+browser** (MediaPipe Face Landmarker, served from this app's `/static/vendor/`, never a CDN);
+only events — and, when enabled, evidence frames on flagged actions — leave the student's
+machine. The student must have accepted the recording notice once (`/portal/consent`).
+
+```yaml
+anti_cheat:
+  camera:
+    enabled: true
+    require_camera: true        # default false
+    on_no_camera: fail          # fail | warn (default warn) — when access is denied
+    capture_snapshots: true     # default false — upload a frame when an action fires
+    snapshot_on: [flag, fail]   # actions that trigger a frame (default [])
+    detectors:
+      face_absent:     { enabled: true, sustain_seconds: 3 }
+      multiple_faces:  { enabled: true, sustain_seconds: 1 }
+      looking_away:    { enabled: true, sustain_seconds: 3, yaw_deg: 25, pitch_deg: 20 }
+  rules:
+    - { event: camera_face_absent,    threshold: 3, action: { type: warn, message: "Please stay in frame." } }
+    - { event: camera_multiple_faces, threshold: 1, action: { type: flag } }
+    - { event: camera_looking_away,   threshold: 5, action: { type: reduce_time, penalty_seconds: 60 } }
+```
+
+Events the camera module emits (each is an ordinary rule event; without a matching rule it is
+counted but does nothing):
+
+| Event | Fires when |
+|---|---|
+| `camera_blocked` | the browser refused camera access (once, at start) |
+| `camera_model_unavailable` | the detector could not start (assets missing, unsupported browser); recording still runs |
+| `camera_face_absent` | no face for `sustain_seconds` (edge-triggered; re-arms when a face returns) |
+| `camera_multiple_faces` | two or more faces for `sustain_seconds` |
+| `camera_looking_away` | head yaw/pitch beyond `yaw_deg`/`pitch_deg` for `sustain_seconds` |
+
+Evidence frames are stored in object storage under `proctoring/attempt-<id>/` and are readable
+only through `GET /teacher/proctoring/snapshots/{id}` by a teacher authorized for the subject.
+
+---
+
 ## Teacher view
 
-The assignment grade table (`/teacher/subjects/{id}/assignments/{id}`) includes a **Flags** column showing:
-
-- **Auto-failed** (red badge) — attempt was terminated by `fail` action
-- **N events** (amber badge) — sum of all recorded violation counts; no auto-fail yet
-- **—** — no violations recorded
+- The assignment board (`/teacher/subjects/{id}/assignments/{id}`) shows a **Flags** column:
+  **Auto-failed** (red), **N events** (amber), an **AI ·** badge when the AI review flagged
+  the submission, and up to six evidence thumbnails.
+- The submission review page (`/teacher/submissions/{id}/review`) lists every quiz attempt
+  with its per-event counts and every evidence frame in capture order.
 
 ---
 
@@ -226,3 +267,14 @@ The time penalty is applied server-side when calculating `seconds_remaining` on 
 4. **`window_blur` fires on legitimate interactions.** Clicking a notification, switching to a file picker, or interacting with the OS taskbar all fire `blur`. Keep the threshold high (≥ 5) if using this event.
 
 5. **`resize` threshold.** Resize events fire continuously while the user drags the window border. The JS debounces this and only counts changes ≥ 150 px, but rapid back-and-forth may still generate multiple counts.
+
+6. **Camera detection is heuristic.** Face-absent fires on poor lighting, a hand over the
+   face or leaning out of frame; multiple-faces fires on a poster or a passer-by;
+   looking-away depends on camera placement. Use `flag`/`warn` actions and `sustain_seconds`
+   ≥ 2 for camera events; reserve `fail` for `camera_multiple_faces` in supervised settings.
+
+7. **Camera needs HTTPS.** `getUserMedia` is only available on a secure context, so over plain
+   HTTP the gate reports `camera_blocked` for everyone.
+
+8. **Detection can be disabled by the student** (blocking `/static/vendor/`, devtools). The
+   `camera_model_unavailable` event makes that visible; treat an attempt with it as unproctored.

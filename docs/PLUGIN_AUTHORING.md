@@ -317,7 +317,7 @@ assignments:
 | `show_correct_answers_after` | bool | `false` | Reveal the correct answers on the result page. Leave `false` when students get more than one attempt from a pool, or the first attempt hands them the answer key. |
 | `time_limit_minutes` | int | none | Budget for the whole attempt. Expiry finalises the attempt as `TIMED_OUT`. |
 | `question_time_default_seconds` | int | none | Per-question budget applied to every question that does not set its own. |
-| `anti_cheat` | map | none | Proctoring and punishment rules — see `docs/anti-cheat.md`. |
+| `anti_cheat` | map | none | Proctoring and punishment rules, including the optional `camera` block (browser-side face detection, evidence frames) — see `docs/anti-cheat.md`. |
 
 ### Question keys
 

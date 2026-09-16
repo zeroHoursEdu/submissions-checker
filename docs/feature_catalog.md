@@ -142,7 +142,7 @@ names/details a student sees is controlled by the subject config.
 | Start / resume a quiz (consent required; resumes an in-progress attempt; redirects to result if already passed; enforces `max_quiz_attempts`) | STUDENT (owner) | `GET /portal/subjects/{subject}/assignments/{sa_id}/quiz` |
 | Take the quiz (snapshotted questions, optional shuffle, optional timer) | STUDENT (owner) | `GET /portal/quiz/{attempt_id}` |
 | Report an anti-cheat event (tab-switch, blur, copy, shortcut, fullscreen exit, …; may warn / flag / penalize time / fail) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/event` |
-| Submit a webcam proctoring snapshot (when enabled + consented; skipped silently if storage absent) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/snapshot` |
+| Submit a webcam proctoring snapshot (browser-side MediaPipe face detection, models served from `/static/vendor/`; when enabled + consented; skipped silently if storage absent) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/snapshot` |
 | Submit the quiz (auto-graded; status COMPLETED / TIMED_OUT / VIOLATION_FAIL; pass marks the submission COMPLETED) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/submit` |
 | See quiz result (score, pass/fail, per-question breakdown; correct answers only if the teacher enabled it) | STUDENT (owner) | `GET /portal/quiz/{attempt_id}/result` |
 | Report a question as incorrect / invalid (non-blocking: works mid-attempt and from the result page, changes no answer and no clock; unlimited) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/dispute` |

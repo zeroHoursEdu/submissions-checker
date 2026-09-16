@@ -1150,3 +1150,58 @@ async def test_quiz_page_loads_proctoring_assets_from_static(
     for host in ("cdn.jsdelivr.net", "esm.sh", "storage.googleapis.com"):
         assert host not in body
     assert "coco-ssd" not in body and "tfjs" not in body
+
+
+async def test_camera_events_hit_the_rule_engine(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    rules = [
+        _rule("camera_face_absent", 2, {"type": "flag"}),
+        _rule("camera_multiple_faces", 1, {"type": "fail", "message": "Another person detected."}),
+    ]
+    attempt = await _make_attempt(
+        db,
+        sub.id,
+        cfg,
+        config_snapshot={
+            "pass_threshold_pct": 0.6,
+            "anti_cheat": {"rules": rules, "camera": {"enabled": True}},
+        },
+    )
+    r1 = await student_client.post(
+        f"/portal/quiz/{attempt.id}/event", json={"type": "camera_face_absent"}
+    )
+    assert r1.json()["action"] == "none"
+    r2 = await student_client.post(
+        f"/portal/quiz/{attempt.id}/event", json={"type": "camera_face_absent"}
+    )
+    assert r2.json()["action"] == "flag"
+    r3 = await student_client.post(
+        f"/portal/quiz/{attempt.id}/event", json={"type": "camera_multiple_faces"}
+    )
+    assert r3.json()["action"] == "fail"
+    await db.refresh(attempt)
+    assert attempt.violations["camera_face_absent"] == 2
+    assert "camera_face_absent" in attempt.violations["_flagged_events"]
+    assert attempt.violations["_force_fail"] is True
+
+
+async def test_camera_model_unavailable_is_recorded_without_a_rule(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(
+        db,
+        sub.id,
+        cfg,
+        config_snapshot={"pass_threshold_pct": 0.6, "anti_cheat": {"camera": {"enabled": True}}},
+    )
+    r = await student_client.post(
+        f"/portal/quiz/{attempt.id}/event", json={"type": "camera_model_unavailable"}
+    )
+    assert r.status_code == 200 and r.json()["action"] == "none"
+    await db.refresh(attempt)
+    assert attempt.violations["camera_model_unavailable"] == 1
