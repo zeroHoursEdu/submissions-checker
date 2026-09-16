@@ -89,7 +89,7 @@ detail.
 | Submit work as a ZIP (≤ 50 MB; deadline/late-policy, completed-once, and `max_submissions` checks; queued for checking; similarity score recorded) — audited `student_submit` | STUDENT (owner) | `POST /portal/subjects/{subject}/assignments/{sa_id}/submit` |
 | Watch checking progress (refresh the assignment page) | STUDENT (owner) | `GET /portal/subjects/{subject}/assignments/{sa_id}` |
 | Assignment review board (per-student latest submission, grade, integrity flags) | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}` |
-| Review one submission (test results, AI review, submitted code) | Owner / ADMIN | `GET /teacher/submissions/{id}/review` |
+| Review one submission (test results, AI verdict when the mode ran one, proctoring evidence, submitted archive) | Owner / ADMIN | `GET /teacher/submissions/{id}/review` |
 | Approve / reject a submission (emails the student) — audited `teacher_approve_submission` / `teacher_reject_submission` | Owner / ADMIN | `POST /teacher/submissions/{id}/review` |
 | Export grades CSV — **endpoint only, no UI button** | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
 
@@ -126,6 +126,11 @@ AWAITING_TEACHER_REVIEW ──teacher_approve──▶ COMPLETED
 | `tests_then_teacher` | → AWAITING_TEACHER_REVIEW | Yes |
 | `tests_then_ai_then_teacher` | AI review → AWAITING_TEACHER_REVIEW | Yes |
 | `tests_then_quiz` | → QUIZ_SENT (student takes a quiz) | No |
+
+AI verdicts (cheating / AI-generated flags with confidence and reason, a code mark, a
+student-facing comment) are shown to the teacher on the review page and as a red badge on the
+assignment board; the comment reaches the student only when `ai_review.show_comment_to_student`
+is set. See `docs/PLUGIN_AUTHORING.md` › AI Review Block.
 
 Tests run in a locked-down sandbox (no internet, time- and memory-limited). Which per-test
 names/details a student sees is controlled by the subject config.

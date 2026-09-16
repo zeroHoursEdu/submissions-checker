@@ -241,6 +241,35 @@ output.write_text(json.dumps({
 
 ---
 
+## AI Review Block
+
+Used by `tests_then_ai`, `tests_then_ai_then_teacher` and `tests_then_ai_then_quiz`. The
+worker sends the README (task) and the student's source files to the configured provider
+(`AI_PROVIDER=openai|anthropic`) and stores a structured verdict on the submission.
+
+```yaml
+assignments:
+  lab3:
+    review_mode: tests_then_ai_then_teacher
+    ai_review:
+      cheating_threshold: 0.6        # default 0.5 — confidence at/above which "cheating" flags
+      ai_generated_threshold: 0.7    # default 0.5
+      source_extensions: [java, xml] # default: a broad list (py, java, kt, c/cpp/h, cs, js/ts, go, rs, …)
+      show_comment_to_student: true  # default false — student sees the AI comment on the assignment page
+    grading:
+      show_breakdown_to_student: true  # default false — student sees the works/quality/quiz weights
+```
+
+| Key | Effect |
+|---|---|
+| `cheating_threshold`, `ai_generated_threshold` | A verdict is **flagged** when the model says yes *and* its confidence meets the threshold. Under `tests_then_ai_then_quiz` a flagged submission goes to the teacher instead of the quiz. Flagged submissions get a red `AI ·` badge on the assignment board and a highlighted panel on the review page. |
+| `source_extensions` | Which files count as code. Case-insensitive, leading dot optional. Files under `build/`, `target/`, `node_modules/`, `.git/` are always skipped; total code sent is capped at 200 k characters. |
+| `show_comment_to_student` | The verdict's `comment` is written for the student; it is hidden unless this is `true`. |
+| `grading.show_breakdown_to_student` | Shows the grade composition on the student's assignment page. |
+
+The `code_mark` (0–100) feeds the grade through `grading.quality_weight` — see the Grading
+section. The teacher always sees the full verdict on `/teacher/submissions/{id}/review`.
+
 ## Quiz Block
 
 A quiz lives at `assignments.<code>.quiz` in `config.yml`. It is read from the pinned plugin
