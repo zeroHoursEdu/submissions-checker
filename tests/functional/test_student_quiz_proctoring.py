@@ -1129,3 +1129,24 @@ async def test_start_quiz_questions_to_send_limits_with_required(
 # for those is already covered in test_student_quiz.py; the event/snapshot endpoints
 # intentionally accept without a consent redirect, so there is no consent branch to
 # assert here.
+
+
+async def test_quiz_page_loads_proctoring_assets_from_static(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(
+        db,
+        sub.id,
+        cfg,
+        config_snapshot={"pass_threshold_pct": 0.6, "anti_cheat": {"camera": {"enabled": True}}},
+    )
+    resp = await student_client.get(f"/portal/quiz/{attempt.id}")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "/static/vendor/mediapipe/vision_bundle.mjs" in body
+    assert "/static/vendor/mediapipe/face_landmarker.task" in body
+    for host in ("cdn.jsdelivr.net", "esm.sh", "storage.googleapis.com"):
+        assert host not in body
+    assert "coco-ssd" not in body and "tfjs" not in body

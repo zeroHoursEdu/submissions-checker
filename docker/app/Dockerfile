@@ -53,6 +53,9 @@ COPY alembic.ini ./
 COPY templates ./templates
 COPY static ./static
 COPY i18n ./i18n
+# Proctoring models are served from /static, never a CDN (see scripts/fetch_vendor_assets.py).
+COPY scripts/fetch_vendor_assets.py scripts/vendor_assets.sha256 ./scripts/
+RUN python scripts/fetch_vendor_assets.py
 
 EXPOSE 8000
 
@@ -99,6 +102,9 @@ COPY templates ./templates
 COPY static ./static
 COPY i18n ./i18n
 COPY docker/app/healthcheck.py ./healthcheck.py
+# Proctoring models are served from /static, never a CDN (see scripts/fetch_vendor_assets.py).
+COPY scripts/fetch_vendor_assets.py scripts/vendor_assets.sha256 ./scripts/
+RUN python scripts/fetch_vendor_assets.py
 
 # Socket access is granted at runtime by supplementary group (`group_add` in compose),
 # because the host's docker group id is host-specific and must not be baked in.

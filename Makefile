@@ -23,7 +23,10 @@ install: venv ## Install dependencies with uv (creates venv if needed)
 dev: ## Start development server with hot reload
 	docker compose up app
 
-up: ## Start all Docker services (postgres and app)
+vendor-assets: ## Download the self-hosted proctoring models into static/vendor/
+	python3 scripts/fetch_vendor_assets.py
+
+up: vendor-assets ## Start all Docker services (postgres and app)
 	docker compose up -d
 
 down: ## Stop all Docker services
@@ -81,7 +84,7 @@ clean: ## Clean up generated files
 	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name ".coverage" -delete
 
-e2e: ## Run E2E tests (headless). Options: TAGS=@tag SCENARIO="name" FILE=features/foo.feature
+e2e: vendor-assets ## Run E2E tests (headless). Options: TAGS=@tag SCENARIO="name" FILE=features/foo.feature
 	@echo "Starting E2E stack..."
 	docker compose -f docker-compose.e2e.yml up -d --build --wait
 	@echo "Running E2E tests..."
@@ -116,8 +119,8 @@ e2e-down: ## Stop E2E Docker stack
 e2e-logs: ## View E2E app logs
 	docker compose -f docker-compose.e2e.yml logs -f app-e2e
 
-setup: ## Run development environment setup
-	./scripts/dev_setup.sh
+setup: vendor-assets ## Run development environment setup
+	./dev_setup.sh
 
 build: ## Build Docker images
 	docker compose build

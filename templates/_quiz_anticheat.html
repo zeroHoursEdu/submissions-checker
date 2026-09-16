@@ -168,10 +168,11 @@
 <script type="module">
 // ─── Camera proctoring (client-side ML) ───────────────────────────
 // Emits camera_* events through the SAME /event endpoint + rule engine as the
-// passive anti-cheat above. Detection runs entirely in the browser; only events
-// (and, on flagged actions, evidence frames) leave the device.
-import { FilesetResolver, FaceLandmarker }
-  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+// passive anti-cheat above. Detection (MediaPipe Face Landmarker: face count and
+// head pose) runs entirely in the browser from assets served under /static/vendor —
+// never a third-party CDN at exam time. Only events (and, on flagged actions,
+// evidence frames) leave the device.
+import { FilesetResolver, FaceLandmarker } from "/static/vendor/mediapipe/vision_bundle.mjs";
 
 const cfg = {{ proctoring_config | tojson }};
 const attemptId = {{ attempt.id }};
@@ -294,28 +295,21 @@ async function start() {
   video.srcObject = stream;
   await video.play().catch(() => {});
 
-  // 2. Load FaceLandmarker (face count + head pose).
+  // 2. Load FaceLandmarker (face count + head pose) from our own static files.
   let landmarker = null;
   try {
-    const fileset = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    const fileset = await FilesetResolver.forVisionTasks("/static/vendor/mediapipe/wasm");
     landmarker = await FaceLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
+      baseOptions: { modelAssetPath: "/static/vendor/mediapipe/face_landmarker.task" },
       runningMode: "VIDEO",
       numFaces: 2,
       outputFacialTransformationMatrixes: true,
     });
-  } catch (_) { /* fall through — gate still opens so the quiz is usable */ }
-
-  // 3. Optional phone/object detector (heavy, best-effort).
-  let objModel = null;
-  if (det.phone && det.phone.enabled) {
-    try {
-      await import("https://esm.sh/@tensorflow/tfjs@4.22.0");
-      const coco = await import("https://esm.sh/@tensorflow-models/coco-ssd@2.2.3");
-      objModel = await coco.load();
-    } catch (_) {}
+  } catch (_) {
+    // Assets missing or unsupported browser: the quiz stays usable, but the teacher
+    // gets an event saying detection never ran for this attempt.
+    report('camera_model_unavailable');
+    document.getElementById('proctor-status').textContent = "{{ vocab.quiz.proctor_detection_off }}";
   }
 
   openGate();
@@ -351,20 +345,6 @@ async function start() {
     requestAnimationFrame(faceLoop);
   }
   requestAnimationFrame(faceLoop);
-
-  // Phone loop — slow interval on a downscaled frame.
-  if (objModel) {
-    const minConf = (det.phone.min_confidence != null) ? det.phone.min_confidence : 0.5;
-    let wasPhone = false;
-    setInterval(async () => {
-      try {
-        const preds = await objModel.detect(video);
-        const hit = preds.some(p => (p.class === 'cell phone' || p.class === 'book') && p.score >= minConf);
-        if (hit && !wasPhone) report('camera_phone_detected');  // rising edge only
-        wasPhone = hit;
-      } catch (_) {}
-    }, ((det.phone.sample_seconds || 4) * 1000));
-  }
 }
 
 start();

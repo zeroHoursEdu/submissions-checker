@@ -132,6 +132,7 @@ quiz:
   proctor_loading: Завантаження системи проктерингу…
   proctor_camera_required: Для цього тесту потрібна камера. Надайте доступ до камери та перезавантажте сторінку.
   proctor_camera_denied: Доступ до камери відхилено. Тест заблоковано — зверніться до викладача.
+  proctor_detection_off: Запис ведеться; автоматичне розпізнавання недоступне
 
   # Report a broken question (student side).
   report_question: Повідомити про помилку

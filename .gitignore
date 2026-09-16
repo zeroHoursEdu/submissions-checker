@@ -219,3 +219,6 @@ plugins/
 
 # Local host-access helpers (contain server addresses; never shared)
 ssh/
+
+# Self-hosted browser models for quiz proctoring (fetched by scripts/fetch_vendor_assets.py)
+static/vendor/
