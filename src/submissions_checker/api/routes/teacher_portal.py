@@ -38,6 +38,7 @@ from submissions_checker.db.models import (
     Student,
     StudentAssignment,
     Subject,
+    SubjectGradebookStats,
     SubjectsAssignment,
     SubjectsStudents,
     SubjectTestStudent,
@@ -55,6 +56,10 @@ from submissions_checker.db.models.enums import (
 from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
+from submissions_checker.services.gradebook import (
+    build_student_grid,
+    fetch_grid_rows,
+)
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
 
@@ -287,15 +292,6 @@ async def teacher_subject(
 ) -> HTMLResponse:
     subject = await require_subject_access(db, subject_id, current_user)
 
-    students_result = await db.execute(
-        select(Student, Group.name.label("group_name"))
-        .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
-        .join(Group, Group.id == Student.group_id)
-        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
-        .order_by(Group.name, Student.full_name)
-    )
-    students = [{"student": row.Student, "group_name": row.group_name} for row in students_result]
-
     assignments_result = await db.execute(
         select(SubjectsAssignment)
         .where(SubjectsAssignment.subject_id == subject_id)
@@ -353,13 +349,33 @@ async def teacher_subject(
             "rejected_overflow": max(rejected_total - len(rejected_rows), 0),
         }
 
+    cached_stats = await db.get(SubjectGradebookStats, subject_id)
+    grid_rows = await fetch_grid_rows(db, subject_id)
+    student_grid = build_student_grid(grid_rows)
+
+    task_pending_counts: dict[int, int] = {}
+    for row in grid_rows:
+        if (
+            row.grade is None
+            and row.submission_status is not None
+            and row.submission_status not in (SubmissionStatus.COMPLETED, SubmissionStatus.FAILED)
+        ):
+            task_pending_counts[row.assignment_id] = (
+                task_pending_counts.get(row.assignment_id, 0) + 1
+            )
+
+    default_tab = (
+        "operations"
+        if (enroll_result or test_student_flash or feedback_sent or feedback_error)
+        else "panel"
+    )
+
     return render(
         request,
         "teacher_subject.html",
         {
             "current_user": current_user,
             "subject": subject,
-            "students": students,
             "assignments": assignments,
             "current_semester": current_semester,
             "feedback_request": feedback_request,
@@ -368,6 +384,10 @@ async def teacher_subject(
             "test_student_info": test_student_info,
             "test_student_flash": test_student_flash,
             "enroll_result": enroll_result,
+            "cached_stats": cached_stats,
+            "student_grid": student_grid,
+            "task_pending_counts": task_pending_counts,
+            "default_tab": default_tab,
         },
     )
 
@@ -1131,6 +1151,76 @@ async def enroll_student(
             student_id=student_id_param,
         )
         await db.commit()
+    return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
+
+
+@router.get("/subjects/{subject_id}/students/search")
+async def search_students_by_email(
+    subject_id: int,
+    q: str,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> list[dict[str, Any]]:
+    """Autocomplete source for the Операції tab's search-enroll flow.
+
+    3+ chars, ILIKE on email — enroll-only, never creates students (mirrors
+    the CSV import route's enroll-only contract).
+    """
+    await require_subject_access(db, subject_id, current_user)
+    if len(q) < 3:
+        raise HTTPException(status_code=422, detail="Query must be at least 3 characters")
+
+    result = await db.execute(
+        select(Student.id, Student.full_name, Student.email)
+        .where(Student.type == EntityType.REAL, Student.email.ilike(f"%{q}%"))
+        .order_by(Student.full_name)
+        .limit(10)
+    )
+    return [{"id": row.id, "full_name": row.full_name, "email": row.email} for row in result]
+
+
+@router.post("/subjects/{subject_id}/students/enroll-by-search")
+async def enroll_student_by_search(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    student_id: int = Form(...),
+    variant: str = Form(""),
+) -> RedirectResponse:
+    """Enroll one student found via search, reusing the same enrollment logic
+    button-enroll and CSV-enroll already share (_ensure_assignment_rows)."""
+    await require_subject_access(db, subject_id, current_user)
+
+    sa_rows_result = await db.execute(
+        select(SubjectsAssignment.id, SubjectsAssignment.config).where(
+            SubjectsAssignment.subject_id == subject_id
+        )
+    )
+    sa_rows = sa_rows_result.all()
+    needs_variant = any((row.config or {}).get("variants_required") for row in sa_rows)
+    clean_variant = variant.strip() or None
+    if needs_variant and not clean_variant:
+        raise HTTPException(status_code=422, detail="This subject requires a variant")
+
+    existing = await db.execute(
+        select(SubjectsStudents).where(
+            SubjectsStudents.subject_id == subject_id,
+            SubjectsStudents.student_id == student_id,
+        )
+    )
+    if existing.scalar_one_or_none() is None:
+        db.add(SubjectsStudents(subject_id=subject_id, student_id=student_id))
+        await _ensure_assignment_rows(db, student_id, [row.id for row in sa_rows], clean_variant)
+        await audit(
+            db,
+            action="enroll_student_by_search",
+            actor_id=current_user.user_id,
+            actor_username=current_user.username,
+            subject_id=subject_id,
+            student_id=student_id,
+        )
+        await db.commit()
+
     return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
 
 
