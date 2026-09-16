@@ -17,13 +17,10 @@ from submissions_checker.core import i18n
 def _reset_i18n_state():
     # Snapshot + restore the module globals so tests are isolated.
     saved_vocab = dict(i18n._VOCABULARIES)
-    saved_langs = list(i18n.AVAILABLE_LANGUAGES)
     saved_default = i18n.DEFAULT_LANG
     yield
     i18n._VOCABULARIES.clear()
     i18n._VOCABULARIES.update(saved_vocab)
-    i18n.AVAILABLE_LANGUAGES.clear()
-    i18n.AVAILABLE_LANGUAGES.extend(saved_langs)
     i18n.DEFAULT_LANG = saved_default
 
 
@@ -33,32 +30,21 @@ def _write(dir_: Path, name: str, content: str) -> None:
 
 def test_load_vocabularies_missing_dir_is_noop(tmp_path: Path) -> None:
     i18n._VOCABULARIES["stale"] = {}
-    i18n.AVAILABLE_LANGUAGES.append({"code": "stale", "label": "x"})
     i18n.load_vocabularies(tmp_path / "does-not-exist")
     # cleared even though dir is missing
     assert i18n._VOCABULARIES == {}
-    assert i18n.AVAILABLE_LANGUAGES == []
 
 
-def test_load_vocabularies_registers_languages_and_labels(tmp_path: Path) -> None:
-    _write(tmp_path, "en.yml", "_meta:\n  label: English\nhello: Hi\n")
-    _write(tmp_path, "uk.yml", "_meta:\n  label: Ukrainian\nhello: Pryvit\n")
+def test_load_vocabularies_registers_languages(tmp_path: Path) -> None:
+    _write(tmp_path, "uk.yml", "nav:\n  x: y\n")
+    _write(tmp_path, "en.yml", "nav:\n  x: z\n")
 
     i18n.load_vocabularies(tmp_path)
 
-    codes = {entry["code"] for entry in i18n.AVAILABLE_LANGUAGES}
-    assert codes == {"en", "uk"}
-    labels = {entry["code"]: entry["label"] for entry in i18n.AVAILABLE_LANGUAGES}
-    assert labels["en"] == "English"
-    assert labels["uk"] == "Ukrainian"
+    assert i18n.get_vocab("uk")["nav"]["x"] == "y"
+    assert i18n.get_vocab("en")["nav"]["x"] == "z"
     # first sorted file (en) becomes the default
     assert i18n.DEFAULT_LANG == "en"
-
-
-def test_load_vocabularies_label_falls_back_to_code(tmp_path: Path) -> None:
-    _write(tmp_path, "de.yml", "hello: Hallo\n")  # no _meta
-    i18n.load_vocabularies(tmp_path)
-    assert i18n.AVAILABLE_LANGUAGES == [{"code": "de", "label": "de"}]
 
 
 def test_load_vocabularies_empty_file_yields_empty_dict(tmp_path: Path) -> None:

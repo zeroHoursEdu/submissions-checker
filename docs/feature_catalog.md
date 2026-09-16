@@ -35,7 +35,6 @@ detail.
 | Log out (clears the cookie) | Any account | `POST /auth/logout` |
 | Forgot password (emails a single-use, ~2h reset link; response is uniform to avoid leaking which usernames exist) | Any account | `GET /auth/forgot-password`, `POST /auth/forgot-password` |
 | Reset password (≥ 8 chars, typed twice; token single-use) | Any account | `GET /auth/reset-password`, `POST /auth/reset-password` |
-| Choose interface language (English / Ukrainian; remembered ~1 year) | Anyone | `POST /set-language` |
 | Create teacher account (username + password ≥ 8 chars; bcrypt-hashed) — audited `create_teacher` | ADMIN only | `GET /admin/teachers/create`, `POST /admin/teachers/create` |
 | List all accounts | ADMIN only | `GET /admin/users` |
 | Activate / deactivate an account (cannot deactivate self; inactive accounts can't authenticate) — audited `toggle_user_active` | ADMIN only | `POST /admin/users/{id}/toggle-active` |

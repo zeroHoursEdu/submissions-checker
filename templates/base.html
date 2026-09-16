@@ -59,18 +59,6 @@
             {{ vocab.nav.settings_link }}
           </a>
           {% endif %}
-          {% if available_languages | length > 1 %}
-          <form method="POST" action="/set-language" class="flex items-center">
-            <select name="lang" onchange="this.form.submit()"
-                    class="text-xs bg-indigo-600 text-indigo-100 border border-indigo-500 rounded px-1 py-0.5 focus:outline-none cursor-pointer">
-              {% for lang in available_languages %}
-              <option value="{{ lang.code }}" {% if request.cookies.get('lang') == lang.code %}selected{% endif %}>
-                {{ lang.label }}
-              </option>
-              {% endfor %}
-            </select>
-          </form>
-          {% endif %}
           <form action="/auth/logout" method="POST">
             <button type="submit"
                     class="text-xs font-medium text-indigo-100 hover:text-white border border-indigo-500

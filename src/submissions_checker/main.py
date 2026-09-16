@@ -14,7 +14,6 @@ from submissions_checker.api.routes import (
     auth,
     feedback,
     health,
-    i18n,
     notifications,
     student_portal,
     student_quiz,
@@ -126,7 +125,6 @@ def create_app() -> FastAPI:
     app.include_router(teacher_disputes.router)
     app.include_router(admin.router)
     app.include_router(notifications.router)
-    app.include_router(i18n.router)
 
     # Serve static assets
     app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import DebugUndefined
 
 from submissions_checker.core.config import get_settings
-from submissions_checker.core.i18n import AVAILABLE_LANGUAGES, get_vocab
+from submissions_checker.core.i18n import get_vocab
 
 _settings = get_settings()
 _undefined = DebugUndefined if _settings.is_development else None
@@ -24,13 +24,12 @@ def render(
     context: dict[str, Any] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    """Render a template with vocab and available_languages injected into context."""
+    """Render a template with vocab injected into context."""
     lang_cookie = request.cookies.get("lang")
     vocab = get_vocab(lang_cookie)
 
     merged: dict[str, Any] = {
         "vocab": vocab,
-        "available_languages": AVAILABLE_LANGUAGES,
         # Lets a template show development-only affordances. Read from the same
         # setting the seeding migrations check, so a page can never advertise
         # accounts that this environment does not have.
