@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -77,37 +78,138 @@ _SYSTEM_PROMPT = (
 )
 
 
-async def collect_lab_data(path: str) -> tuple[str, str]:
+DEFAULT_SOURCE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".py",
+        ".ipynb",
+        ".java",
+        ".kt",
+        ".scala",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".js",
+        ".mjs",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".go",
+        ".rs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".sql",
+        ".sh",
+        ".bash",
+        ".ps1",
+        ".r",
+        ".m",
+        ".pl",
+        ".lua",
+        ".dart",
+        ".vue",
+        ".html",
+        ".css",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".json",
+        ".xml",
+        ".gradle",
+        ".cmake",
+        ".md",
+        ".txt",
+    }
+)
+_IGNORE_DIRS = frozenset(
+    {
+        ".git",
+        ".github",
+        "node_modules",
+        "target",
+        "build",
+        "dist",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".idea",
+        ".vscode",
+        "bin",
+        "obj",
+    }
+)
+_MAX_FILE_CHARS = 60_000
+
+
+def _normalize_extensions(extensions: Iterable[str] | None) -> frozenset[str]:
+    if not extensions:
+        return DEFAULT_SOURCE_EXTENSIONS
+    out: set[str] = set()
+    for e in extensions:
+        e = str(e).strip().lower()
+        if e:
+            out.add(e if e.startswith(".") else f".{e}")
+    return frozenset(out) or DEFAULT_SOURCE_EXTENSIONS
+
+
+async def collect_lab_data(
+    path: str,
+    extensions: Iterable[str] | None = None,
+    *,
+    max_chars: int = 200_000,
+) -> tuple[str, str]:
     """Walk *path* in a thread and return (task_text, code_text).
 
-    Reads README files as the task description and collects .py/.md/.txt
-    source files as student code.
+    README files become the task description; every file whose extension is in
+    *extensions* (default: DEFAULT_SOURCE_EXTENSIONS) is concatenated as code.
+    Output is capped at *max_chars* so a huge upload cannot blow the model's
+    context; the cut is marked so the reviewer knows.
     """
-    ignore_dirs = {".git", ".github"}
-    allowed_extensions = {".py", ".md", ".txt"}
+    allowed = _normalize_extensions(extensions)
 
     if not Path(path).exists():
         return "Task description not found.", ""
 
     def _walk() -> tuple[str, str]:
         task_text = "Task description not found."
-        code_text = ""
+        parts: list[str] = []
+        used = 0
+        truncated = False
         for root, dirs, files in os.walk(path):
-            dirs[:] = [d for d in dirs if d not in ignore_dirs]
-            for file in files:
+            dirs[:] = sorted(d for d in dirs if d not in _IGNORE_DIRS)
+            for file in sorted(files):
                 ext = os.path.splitext(file)[1].lower()
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, path)
                 try:
                     with open(file_path, encoding="utf-8") as f:
-                        content = f.read()
-                    if file.lower().startswith("readme"):
-                        task_text = content
-                    elif ext in allowed_extensions:
-                        code_text += f"\n--- FILE: {rel_path} ---\n{content}\n"
-                except Exception:
+                        content = f.read(_MAX_FILE_CHARS + 1)
+                except (OSError, UnicodeDecodeError):
                     continue
-        return task_text, code_text
+                if len(content) > _MAX_FILE_CHARS:
+                    content = content[:_MAX_FILE_CHARS] + "\n[truncated]\n"
+                if file.lower().startswith("readme"):
+                    task_text = content
+                    continue
+                if ext not in allowed:
+                    continue
+                chunk = f"\n--- FILE: {rel_path} ---\n{content}\n"
+                if used + len(chunk) > max_chars:
+                    parts.append(chunk[: max(0, max_chars - used)])
+                    truncated = True
+                    break
+                parts.append(chunk)
+                used += len(chunk)
+            if truncated:
+                break
+        code = "".join(parts)
+        if truncated:
+            code += "\n[truncated]\n"
+        return task_text, code
 
     return await asyncio.to_thread(_walk)
 
@@ -158,7 +260,9 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> N
     subjects_assignment: SubjectsAssignment = sa.subjects_assignment
     ai_review_cfg = (subjects_assignment.config or {}).get("ai_review") or {}
 
-    task_text, code_text = await collect_lab_data(submission.repository_path or "")
+    task_text, code_text = await collect_lab_data(
+        submission.repository_path or "", ai_review_cfg.get("source_extensions")
+    )
     if not code_text:
         code_text = "# No code found"
     user_prompt = f"Assignment task:\n{task_text}\n\nStudent code:\n{code_text}"

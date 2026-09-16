@@ -360,6 +360,7 @@ async def test_ai_review_reads_repository_code(
     repo.mkdir()
     (repo / "README.md").write_text("Implement add()", encoding="utf-8")
     (repo / "main.py").write_text("def add(a, b): return a + b", encoding="utf-8")
+    (repo / "Main.java").write_text("class Main {}", encoding="utf-8")
 
     student, teacher, sa, enr, sub, subject = await _seed_submission(
         db_session,
@@ -381,6 +382,7 @@ async def test_ai_review_reads_repository_code(
     _, user_prompt = fake.calls[0]
     assert "Implement add()" in user_prompt
     assert "def add" in user_prompt
+    assert "class Main" in user_prompt
 
 
 # ══════════════════════════════════════════════════════════════════════════════
