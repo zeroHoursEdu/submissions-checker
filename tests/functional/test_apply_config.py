@@ -380,3 +380,16 @@ async def test_short_answer_question_is_rejected(
     assert "apply_error=" in location
     assert "short_answer" in location
     assert (await db.execute(select(func.count()).select_from(Subject))).scalar_one() == 0
+
+
+async def test_quiz_under_tests_only_is_rejected_on_upload(
+    teacher_client: AsyncClient, db: AsyncSession
+) -> None:
+    cfg = _base_config()
+    cfg["assignments"]["lab1"]["quiz"] = {
+        "questions": [{"type": "true_false", "text": "?", "correct": True}]
+    }
+    resp = await _post(teacher_client, _make_zip(cfg))
+    assert resp.status_code == 303
+    assert "never sends it" in urllib.parse.unquote(resp.headers["location"])
+    assert (await db.execute(select(func.count()).select_from(Subject))).scalar_one() == 0

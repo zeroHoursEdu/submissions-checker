@@ -245,6 +245,12 @@ def resolve_check_plan(
         common_check = None
         variant_check = variant_overrides.get("check_command") or sandbox_cfg.get("check_command")
 
+    if common_check and variant_check and common_check == variant_check:
+        return ConfigError(
+            f"common and variant '{variant}' resolve to the same check_command ({common_check}); "
+            "the script would run twice. Contact your teacher."
+        )
+
     if plugin_assignment.get("variants_required") and not variant:
         return ConfigError(
             "Your variant has not been assigned yet. Contact your teacher to have your variant set."

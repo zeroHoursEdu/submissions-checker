@@ -104,6 +104,10 @@ archive and the student goes straight to the quiz:
 | `quiz_only`          | Upload accepted → quiz → COMPLETED on a pass                          |
 | `quiz_then_teacher`  | Upload accepted → quiz → AWAITING_TEACHER_REVIEW → teacher approves    |
 
+A `quiz:` block is rejected at upload unless the review mode can send it: the `*_then_quiz`
+modes, `quiz_only`, `quiz_then_teacher`, or a teacher-gated mode (the teacher's approval sends
+it). Under `tests_only` / `tests_then_ai` it would never fire.
+
 Both require a `quiz` block with questions. Since there is no test score, weight the grade
 onto the quiz, otherwise the assignment grades as zero:
 
@@ -365,6 +369,9 @@ Variants allow different problem instances per student (preventing copy-paste).
 5. The `VARIANT` env var is set inside the sandbox so your check script can select the right test data.
 
 ---
+
+A variant whose `check_command` equals the common one is rejected at upload (and again at
+check time): both would run and the score denominator would double.
 
 ## Adding a New Subject
 

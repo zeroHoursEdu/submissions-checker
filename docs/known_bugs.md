@@ -243,7 +243,7 @@ reproduces.
 
 ---
 
-## 13. 🔴 `lab6`'s merged config accidentally ran its own check script twice (config bug, now fixed, noted for awareness)
+## 13. ✅ `lab6`'s merged config accidentally ran its own check script twice (config bug, now fixed, noted for awareness)
 
 Not a `submissions-checker` platform bug — a subject-authoring mistake caught during the
 2026-07-06 pythonBasics variant sweep, recorded here since it's the kind of mistake the
@@ -268,6 +268,9 @@ scratch (a different lab, a different subject, authored by a different agent —
 is a real signal that this is an easy, natural mistake to make when writing a `common:` block
 whose variants all point at the same script — worth prioritizing the platform-level guard
 suggested above rather than relying on manual review to keep catching it.
+
+**Fixed (2026-09-17):** config apply and `resolve_check_plan` both reject an identical
+common/variant `check_command`, naming the assignment and variant.
 
 ---
 

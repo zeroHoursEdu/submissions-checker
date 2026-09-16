@@ -247,3 +247,17 @@ async def test_check_submission_reports_config_error() -> None:
         plugin_dir=Path("/tmp/p"),
     )
     assert outcome.status == "config_error"
+
+
+def test_resolve_rejects_identical_common_and_variant_scripts() -> None:
+    cfg = {
+        "assignments": {
+            "lab6": {
+                "common": {"sandbox": {"image": "x", "check_command": "assignments/lab6/check.py"}},
+                "variants": {"3": {"sandbox": {"check_command": "assignments/lab6/check.py"}}},
+            }
+        }
+    }
+    err = check_core.resolve_check_plan(cfg, "lab6", "3")
+    assert isinstance(err, check_core.ConfigError)
+    assert "same check_command" in err.reason

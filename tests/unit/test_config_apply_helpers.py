@@ -226,3 +226,65 @@ def test_compute_plan_returns_dataclass(svc: ConfigApplyService, tmp_path: Path)
         {"subjectCode": "d", "name": "D", "assignments": {}}, {}, None, tmp_path
     )
     assert isinstance(plan, ConfigApplyPlan)
+
+
+# ── Config guards for the two recurring authoring mistakes ───────────────────
+
+
+def test_identical_common_and_variant_check_is_rejected(svc: ConfigApplyService) -> None:
+    cfg = {
+        "subjectCode": "x",
+        "assignments": {
+            "lab6": {
+                "common": {"sandbox": {"check_command": "assignments/lab6/check.py"}},
+                "variants": {"1": {"sandbox": {"check_command": "assignments/lab6/check.py"}}},
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="lab6.*variant '1'.*same check_command"):
+        svc._validate_check_commands(cfg)
+
+
+def test_distinct_common_and_variant_check_is_fine(svc: ConfigApplyService) -> None:
+    cfg = {
+        "subjectCode": "x",
+        "assignments": {
+            "lab1": {
+                "common": {"sandbox": {"check_command": "assignments/lab1/common.py"}},
+                "variants": {"1": {"sandbox": {"check_command": "assignments/lab1/v1.py"}}},
+            }
+        },
+    }
+    svc._validate_check_commands(cfg)
+
+
+def test_quiz_under_tests_only_is_rejected(svc: ConfigApplyService) -> None:
+    cfg = {
+        "subjectCode": "x",
+        "assignments": {
+            "lab2": {"review_mode": "tests_only", "quiz": {"questions": [{"type": "true_false"}]}}
+        },
+    }
+    with pytest.raises(ValueError, match="lab2.*quiz.*tests_only"):
+        svc._validate_quiz_reachability(cfg)
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "tests_then_quiz",
+        "tests_then_ai_then_quiz",
+        "quiz_only",
+        "quiz_then_teacher",
+        "tests_then_teacher",
+        "tests_then_ai_then_teacher",
+    ],
+)
+def test_quiz_under_reachable_modes_is_fine(svc: ConfigApplyService, mode: str) -> None:
+    cfg = {
+        "subjectCode": "x",
+        "assignments": {
+            "lab2": {"review_mode": mode, "quiz": {"questions": [{"type": "true_false"}]}}
+        },
+    }
+    svc._validate_quiz_reachability(cfg)

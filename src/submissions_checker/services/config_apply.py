@@ -42,6 +42,19 @@ logger = get_logger(__name__)
 
 _MAX_ZIP_BYTES = 50 * 1024 * 1024  # 50 MB
 _ALLOWED_QUESTION_TYPES = ("single_choice", "multiple_choice", "true_false", "ordering")
+# Review modes under which a `quiz:` block can ever reach the student: the *_quiz modes
+# send it automatically, the teacher-gated ones send it on approval.
+_QUIZ_REACHABLE_MODES = frozenset(
+    {
+        "tests_then_quiz",
+        "tests_then_ai_then_quiz",
+        "quiz_only",
+        "quiz_then_teacher",
+        "tests_then_teacher",
+        "tests_then_ai_then_teacher",
+        "tests_then_ai_teacher",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +128,8 @@ class ConfigApplyService:
         if not subject_code:
             raise ValueError("config.yml must contain a non-empty 'subjectCode' field")
         self._validate_quiz_questions(new_cfg)
+        self._validate_check_commands(new_cfg)
+        self._validate_quiz_reachability(new_cfg)
 
         sha256 = hashlib.sha256(zip_bytes).hexdigest()
 
@@ -147,6 +162,39 @@ class ConfigApplyService:
     # ------------------------------------------------------------------
     # Helpers: pre-flight checks
     # ------------------------------------------------------------------
+
+    def _validate_check_commands(self, new_cfg: dict[str, Any]) -> None:
+        """Reject a variant whose check_command equals the common one.
+
+        run_check executes both scripts and merges their test lists, so an
+        identical pair runs the same script twice and doubles the score
+        denominator. It happened in two subjects in a row (known bug #13).
+        """
+        for code, a_cfg in (new_cfg.get("assignments") or {}).items():
+            common_cmd = (((a_cfg or {}).get("common") or {}).get("sandbox") or {}).get(
+                "check_command"
+            )
+            if not common_cmd:
+                continue
+            for variant, v_cfg in ((a_cfg or {}).get("variants") or {}).items():
+                v_cmd = ((v_cfg or {}).get("sandbox") or {}).get("check_command")
+                if v_cmd and v_cmd == common_cmd:
+                    raise ValueError(
+                        f"assignment '{code}' variant '{variant}' uses the same check_command as "
+                        f"common ({common_cmd}); drop one — the script would run twice and double "
+                        f"the score denominator"
+                    )
+
+    def _validate_quiz_reachability(self, new_cfg: dict[str, Any]) -> None:
+        """Reject a quiz block under a review mode that can never send it."""
+        for code, a_cfg in (new_cfg.get("assignments") or {}).items():
+            has_quiz = bool(((a_cfg or {}).get("quiz") or {}).get("questions"))
+            mode = str((a_cfg or {}).get("review_mode", "tests_only"))
+            if has_quiz and mode not in _QUIZ_REACHABLE_MODES:
+                raise ValueError(
+                    f"assignment '{code}' has a quiz but review_mode '{mode}' never sends it; "
+                    f"use one of: {', '.join(sorted(_QUIZ_REACHABLE_MODES))}"
+                )
 
     def _validate_quiz_questions(self, new_cfg: dict[str, Any]) -> None:
         """Reject question types the grader cannot score.
