@@ -28,7 +28,11 @@ from submissions_checker.db.models import (
     SubmissionStatus,
 )
 from submissions_checker.db.models.enums import QuizAttemptStatus
-from submissions_checker.services.gradebook import fetch_integrity_rows, fetch_roster_rows
+from submissions_checker.services.gradebook import (
+    fetch_grid_rows,
+    fetch_integrity_rows,
+    fetch_roster_rows,
+)
 from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio
@@ -505,3 +509,50 @@ async def test_grid_cell_has_no_violation_dot_for_a_clean_quiz_attempt(
     # querySelectorAll(".violation-dot") selector regardless of any cell rendering one —
     # assert on the specific data-scroll-to attribute a rendered dot span would carry.
     assert f'data-scroll-to="integrity-row-{student.id}-{a1.id}"' not in resp.text
+
+
+# ── fetch_grid_rows ──────────────────────────────────────────────────────────
+
+
+async def test_fetch_grid_rows_includes_group_name_and_grade_breakdown(
+    db: AsyncSession, teacher, make_student, make_group
+) -> None:
+    group = await make_group(name="IT-21")
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Lab 1", code="lab1", min_grade=50)
+    student = await make_student(full_name="Grid Row Student", group=group)
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id, grade=90)
+    sub = Submission(
+        students_assignment_id=sa.id,
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+        source_metadata={},
+        status=SubmissionStatus.COMPLETED,
+        grade_breakdown={"quiz_score": 85.0, "quality_score": 92.0, "works_score": 90.0},
+    )
+    db.add(sub)
+    await db.commit()
+
+    rows = await fetch_grid_rows(db, subject.id)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.group_name == "IT-21"
+    assert row.grade == 90
+    assert row.quiz_score == 85.0
+    assert row.review_score == 92.0
+
+
+async def test_fetch_grid_rows_null_grade_breakdown_yields_none_sub_marks(
+    db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id)
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    await _make_student_assignment(db, student.id, a1.id)
+
+    rows = await fetch_grid_rows(db, subject.id)
+
+    assert rows[0].quiz_score is None
+    assert rows[0].review_score is None
