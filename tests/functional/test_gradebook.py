@@ -2,9 +2,10 @@
 teacher_subject render.
 
 Pure classification/aggregation logic (severity, duration anomaly, cell status,
-compute_stats, build_grid) is covered without a database in
-tests/unit/test_gradebook.py; this file only exercises the two functions that
-touch Postgres, plus the route wiring in Task 7 onward. Fixture helpers mirror
+compute_cached_stats, build_student_grid) is covered without a database in
+tests/unit/test_gradebook.py; this file exercises the DB-touching query
+functions (fetch_roster_rows, fetch_integrity_rows, fetch_grid_rows) plus the
+route/template wiring for the reworked tabs. Fixture helpers mirror
 tests/functional/test_portal_detail_pages.py.
 """
 

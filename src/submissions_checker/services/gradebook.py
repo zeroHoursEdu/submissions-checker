@@ -6,9 +6,13 @@ and handed to the template pre-shaped — no per-row recomputation in Jinja or J
 Split the way `services.grading` splits `compute_grade` (pure) from
 `finalize_grade` (DB-touching): the classification rules below (`cell_status`,
 `severity_for`, `duration_anomalous`, `median_duration`) and the aggregations
-built on top of them (`compute_stats`, `build_grid`) are pure and DB-free;
-`fetch_roster_rows` / `fetch_integrity_rows` are the only two functions that
-touch the database.
+built on top of them (`compute_cached_stats`, `build_student_grid`) are pure
+and DB-free; `fetch_roster_rows`, `fetch_integrity_rows`, `fetch_grid_rows`
+are the only functions that touch the database.
+
+`compute_cached_stats` is never called live per request — it's the scheduled
+job's (workers.scheduled.subject_stats_refresh) calculation, cached into
+subject_gradebook_stats and read live by the teacher_subject route.
 """
 
 from __future__ import annotations
@@ -54,42 +58,6 @@ class RosterRow:
     student_assignment_id: int | None
     grade: int | None
     submission_status: SubmissionStatus | None
-
-
-@dataclass(frozen=True)
-class GradebookStats:
-    average_score: float | None
-    pass_rate_pct: float
-    overdue_count: int
-    pending_review_count: int
-
-
-@dataclass(frozen=True)
-class GradebookCell:
-    student_assignment_id: int | None
-    grade: int | None
-    status: CellStatus
-
-
-@dataclass(frozen=True)
-class GradebookColumn:
-    assignment_id: int
-    title: str
-    max_grade: int
-
-
-@dataclass(frozen=True)
-class GradebookRow:
-    student_id: int
-    student_name: str
-    cells: dict[int, GradebookCell]
-    total: int | None
-
-
-@dataclass(frozen=True)
-class GradebookGrid:
-    columns: list[GradebookColumn]
-    rows: list[GradebookRow]
 
 
 @dataclass(frozen=True)
@@ -144,65 +112,6 @@ def median_duration(durations: list[int]) -> int | None:
     if not durations:
         return None
     return round(statistics.median(durations))
-
-
-def compute_stats(rows: list[RosterRow], *, now: datetime) -> GradebookStats:
-    graded = [r.grade for r in rows if r.grade is not None]
-    average_score = round(sum(graded) / len(graded), 1) if graded else None
-
-    by_student: dict[int, list[RosterRow]] = {}
-    for r in rows:
-        by_student.setdefault(r.student_id, []).append(r)
-    total_students = len(by_student)
-    passed_students = sum(
-        1 for student_rows in by_student.values() if all(r.grade is not None for r in student_rows)
-    )
-    pass_rate_pct = round(100 * passed_students / total_students, 1) if total_students else 0.0
-
-    overdue_count = sum(
-        1 for r in rows if r.grade is None and r.deadline is not None and r.deadline < now
-    )
-    pending_review_count = sum(
-        1
-        for r in rows
-        if r.grade is None
-        and r.submission_status is not None
-        and r.submission_status not in _TERMINAL_STATUSES
-    )
-    return GradebookStats(
-        average_score=average_score,
-        pass_rate_pct=pass_rate_pct,
-        overdue_count=overdue_count,
-        pending_review_count=pending_review_count,
-    )
-
-
-def build_grid(rows: list[RosterRow]) -> GradebookGrid:
-    columns: list[GradebookColumn] = []
-    seen_assignments: set[int] = set()
-    for r in rows:
-        if r.assignment_id not in seen_assignments:
-            seen_assignments.add(r.assignment_id)
-            columns.append(GradebookColumn(r.assignment_id, r.assignment_title, r.max_grade))
-
-    cells_by_student: dict[int, dict[int, GradebookCell]] = {}
-    names_by_student: dict[int, str] = {}
-    for r in rows:
-        cells_by_student.setdefault(r.student_id, {})[r.assignment_id] = GradebookCell(
-            r.student_assignment_id,
-            r.grade,
-            cell_status(r.grade, r.min_grade, r.submission_status),
-        )
-        names_by_student[r.student_id] = r.student_name
-
-    grid_rows = []
-    for student_id, cells in cells_by_student.items():
-        grades = [c.grade for c in cells.values() if c.grade is not None]
-        total = sum(grades) if grades else None
-        grid_rows.append(GradebookRow(student_id, names_by_student[student_id], cells, total))
-    grid_rows.sort(key=lambda row: row.student_name)
-
-    return GradebookGrid(columns=columns, rows=grid_rows)
 
 
 async def fetch_roster_rows(db: AsyncSession, subject_id: int) -> list[RosterRow]:
@@ -283,9 +192,10 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
 
     "Latest" matches the same simplification `teacher_assignment`'s violation_flags
     already makes (teacher_portal.py, the `viol_result` block): when a student has
-    retried a quiz, the most recent attempt is the one shown. This is also the
-    exact attempt the gradebook cell's violation indicator (Task 9) points at, so
-    a click on the cell always finds a matching row here.
+    retried a quiz, the most recent attempt is the one shown. Consumed by
+    workers.scheduled.subject_stats_refresh for the cheating % stat card — the
+    per-attempt integrity table this once fed on the page itself was dropped in
+    the subject-tabs rework in favor of that single aggregate number.
     """
     result = await db.execute(
         select(
@@ -542,9 +452,7 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
                 StudentAssignment.subjects_assignment_id == SubjectsAssignment.id,
             ),
         )
-        .outerjoin(
-            latest_sub_sq, latest_sub_sq.c.students_assignment_id == StudentAssignment.id
-        )
+        .outerjoin(latest_sub_sq, latest_sub_sq.c.students_assignment_id == StudentAssignment.id)
         .outerjoin(
             Submission,
             and_(

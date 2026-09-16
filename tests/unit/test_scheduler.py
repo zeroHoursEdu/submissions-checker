@@ -41,7 +41,11 @@ def test_init_scheduler_registers_jobs_with_intervals(monkeypatch) -> None:
     sched = _fake_scheduler()
     _install_fake_scheduler(monkeypatch, sched)
 
-    fake_settings = MagicMock(teacher_digest_flush_interval=45, metrics_refresh_interval=60)
+    fake_settings = MagicMock(
+        teacher_digest_flush_interval=45,
+        metrics_refresh_interval=60,
+        subject_stats_refresh_interval=300,
+    )
     monkeypatch.setattr("submissions_checker.core.config.get_settings", lambda: fake_settings)
 
     result = scheduler_module.init_scheduler()
@@ -49,10 +53,16 @@ def test_init_scheduler_registers_jobs_with_intervals(monkeypatch) -> None:
     assert result is sched
     assert scheduler_module._scheduler is sched
 
-    # Three jobs: outbox processor (10s), teacher digest (45s), metrics refresh (60s).
-    assert sched.add_job.call_count == 3
+    # Four jobs: outbox processor (10s), teacher digest (45s), metrics refresh
+    # (60s), subject stats refresh (300s).
+    assert sched.add_job.call_count == 4
     by_id = {c.kwargs["id"]: c for c in sched.add_job.call_args_list}
-    assert set(by_id) == {"outbox_processor", "teacher_digest_processor", "metrics_refresh"}
+    assert set(by_id) == {
+        "outbox_processor",
+        "teacher_digest_processor",
+        "metrics_refresh",
+        "subject_stats_refresh",
+    }
     assert by_id["metrics_refresh"].kwargs["trigger"].interval.total_seconds() == 60
     assert by_id["metrics_refresh"].kwargs["max_instances"] == 1
 
@@ -64,13 +74,21 @@ def test_init_scheduler_registers_jobs_with_intervals(monkeypatch) -> None:
     assert digest.kwargs["trigger"].interval.total_seconds() == 45
     assert digest.kwargs["max_instances"] == 1
 
+    subject_stats = by_id["subject_stats_refresh"]
+    assert subject_stats.kwargs["trigger"].interval.total_seconds() == 300
+    assert subject_stats.kwargs["max_instances"] == 1
+
 
 def test_init_scheduler_is_idempotent(monkeypatch) -> None:
     sched = _fake_scheduler()
     _install_fake_scheduler(monkeypatch, sched)
     monkeypatch.setattr(
         "submissions_checker.core.config.get_settings",
-        lambda: MagicMock(teacher_digest_flush_interval=30, metrics_refresh_interval=60),
+        lambda: MagicMock(
+            teacher_digest_flush_interval=30,
+            metrics_refresh_interval=60,
+            subject_stats_refresh_interval=300,
+        ),
     )
 
     first = scheduler_module.init_scheduler()

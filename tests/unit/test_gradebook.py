@@ -9,18 +9,16 @@ tests/functional/test_gradebook.py, matching how services.grading splits
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.services.gradebook import (
     GridSourceRow,
     IntegrityRow,
     RosterRow,
-    build_grid,
     build_student_grid,
     cell_status,
     compute_cached_stats,
-    compute_stats,
     duration_anomalous,
     median_duration,
     severity_for,
@@ -131,99 +129,6 @@ def _row(
         grade=grade,
         submission_status=submission_status,
     )
-
-
-def test_compute_stats_average_score_over_graded_only() -> None:
-    rows = [_row(grade=80), _row(grade=None), _row(grade=60, assignment_id=2)]
-    stats = compute_stats(rows, now=_NOW)
-    assert stats.average_score == 70.0
-
-
-def test_compute_stats_average_score_none_when_nothing_graded() -> None:
-    rows = [_row(grade=None)]
-    assert compute_stats(rows, now=_NOW).average_score is None
-
-
-def test_compute_stats_pass_rate_requires_every_assignment_graded() -> None:
-    # Student 1 graded on both assignments -> passed. Student 2 graded on only one -> not.
-    rows = [
-        _row(student_id=1, assignment_id=1, grade=50),
-        _row(student_id=1, assignment_id=2, grade=50),
-        _row(student_id=2, assignment_id=1, grade=50),
-        _row(student_id=2, assignment_id=2, grade=None),
-    ]
-    stats = compute_stats(rows, now=_NOW)
-    assert stats.pass_rate_pct == 50.0
-
-
-def test_compute_stats_pass_rate_zero_assignments_is_zero() -> None:
-    assert compute_stats([], now=_NOW).pass_rate_pct == 0.0
-
-
-def test_compute_stats_overdue_counts_ungraded_past_deadline_including_never_submitted() -> None:
-    past = _NOW - timedelta(days=1)
-    future = _NOW + timedelta(days=1)
-    rows = [
-        _row(assignment_id=1, grade=None, deadline=past, submission_status=None),
-        _row(assignment_id=2, grade=None, deadline=future, submission_status=None),
-        _row(assignment_id=3, grade=50, deadline=past),
-        _row(assignment_id=4, grade=None, deadline=None),
-    ]
-    assert compute_stats(rows, now=_NOW).overdue_count == 1
-
-
-def test_compute_stats_pending_review_counts_ungraded_non_terminal_submissions() -> None:
-    rows = [
-        _row(assignment_id=1, grade=None, submission_status=SubmissionStatus.TESTING),
-        _row(assignment_id=2, grade=None, submission_status=SubmissionStatus.COMPLETED),
-        _row(assignment_id=3, grade=None, submission_status=None),
-        _row(
-            assignment_id=4, grade=None, submission_status=SubmissionStatus.AWAITING_TEACHER_REVIEW
-        ),
-    ]
-    assert compute_stats(rows, now=_NOW).pending_review_count == 2
-
-
-def test_build_grid_columns_follow_first_seen_row_order() -> None:
-    rows = [
-        _row(student_id=1, assignment_id=2, grade=None),
-        _row(student_id=1, assignment_id=1, grade=None),
-    ]
-    grid = build_grid(rows)
-    assert [c.assignment_id for c in grid.columns] == [2, 1]
-
-
-def test_build_grid_row_total_sums_graded_cells_only() -> None:
-    rows = [
-        _row(student_id=1, assignment_id=1, grade=80),
-        _row(student_id=1, assignment_id=2, grade=None),
-        _row(student_id=1, assignment_id=3, grade=20),
-    ]
-    grid = build_grid(rows)
-    assert grid.rows[0].total == 100
-
-
-def test_build_grid_row_total_is_none_when_nothing_graded() -> None:
-    rows = [_row(student_id=1, assignment_id=1, grade=None)]
-    grid = build_grid(rows)
-    assert grid.rows[0].total is None
-
-
-def test_build_grid_cell_status_matches_cell_status_rule() -> None:
-    rows = [_row(student_id=1, assignment_id=1, grade=90, min_grade=50)]
-    grid = build_grid(rows)
-    assert grid.rows[0].cells[1].status == "passed"
-    assert grid.rows[0].cells[1].grade == 90
-
-
-def test_build_grid_rows_sorted_by_student_name() -> None:
-    rows = [
-        _row(student_id=2, assignment_id=1),
-        _row(student_id=1, assignment_id=1),
-    ]
-    grid = build_grid(rows)
-    # _row() names students "Student {id}" so lexical order is Student 1, Student 2
-    assert [r.student_id for r in grid.rows] == [1, 2]
 
 
 # ── compute_cached_stats ─────────────────────────────────────────────────────
