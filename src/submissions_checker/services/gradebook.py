@@ -18,6 +18,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from submissions_checker.db.models import (
+    EntityType,
+    Student,
+    StudentAssignment,
+    SubjectsAssignment,
+    SubjectsStudents,
+    Submission,
+)
 from submissions_checker.db.models.enums import SubmissionStatus
 
 _TERMINAL_STATUSES = {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED}
@@ -191,3 +202,76 @@ def build_grid(rows: list[RosterRow]) -> GradebookGrid:
     grid_rows.sort(key=lambda row: row.student_name)
 
     return GradebookGrid(columns=columns, rows=grid_rows)
+
+
+async def fetch_roster_rows(db: AsyncSession, subject_id: int) -> list[RosterRow]:
+    """One row per (enrolled real student, subject assignment) pair.
+
+    Reuses the "latest submission per student_assignment" subquery pattern from
+    ``teacher_portal.teacher_assignment`` (there scoped to one assignment; here
+    scoped to every assignment in the subject at once).
+    """
+    latest_sub_sq = (
+        select(
+            Submission.students_assignment_id,
+            func.max(Submission.created_at).label("max_created_at"),
+        )
+        .group_by(Submission.students_assignment_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(
+            Student.id.label("student_id"),
+            Student.full_name.label("student_name"),
+            SubjectsAssignment.id.label("assignment_id"),
+            SubjectsAssignment.code.label("assignment_code"),
+            SubjectsAssignment.title.label("assignment_title"),
+            SubjectsAssignment.min_grade,
+            SubjectsAssignment.max_grade,
+            SubjectsAssignment.deadline,
+            StudentAssignment.id.label("student_assignment_id"),
+            StudentAssignment.grade,
+            Submission.status.label("submission_status"),
+        )
+        .select_from(SubjectsStudents)
+        .join(Student, Student.id == SubjectsStudents.student_id)
+        .join(SubjectsAssignment, SubjectsAssignment.subject_id == SubjectsStudents.subject_id)
+        .outerjoin(
+            StudentAssignment,
+            and_(
+                StudentAssignment.student_id == SubjectsStudents.student_id,
+                StudentAssignment.subjects_assignment_id == SubjectsAssignment.id,
+            ),
+        )
+        .outerjoin(latest_sub_sq, latest_sub_sq.c.students_assignment_id == StudentAssignment.id)
+        .outerjoin(
+            Submission,
+            and_(
+                Submission.students_assignment_id == StudentAssignment.id,
+                Submission.created_at == latest_sub_sq.c.max_created_at,
+            ),
+        )
+        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
+        .order_by(
+            Student.full_name,
+            SubjectsAssignment.deadline.asc().nullslast(),
+            SubjectsAssignment.id,
+        )
+    )
+    return [
+        RosterRow(
+            student_id=row.student_id,
+            student_name=row.student_name,
+            assignment_id=row.assignment_id,
+            assignment_code=row.assignment_code,
+            assignment_title=row.assignment_title,
+            min_grade=row.min_grade,
+            max_grade=row.max_grade,
+            deadline=row.deadline,
+            student_assignment_id=row.student_assignment_id,
+            grade=row.grade,
+            submission_status=row.submission_status,
+        )
+        for row in result
+    ]
