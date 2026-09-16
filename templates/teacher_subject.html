@@ -137,7 +137,7 @@
             </div>
             <div class="min-w-0">
               <p class="text-sm font-medium text-slate-900 truncate">{{ item.student.full_name }}</p>
-              <p class="text-xs text-slate-400 truncate">{{ item.group_name }} · @{{ item.student.github_username }}</p>
+              <p class="text-xs text-slate-400 truncate">{{ item.group_name or "?" }} · @{{ item.student.github_username }}</p>
             </div>
           </div>
         </li>
