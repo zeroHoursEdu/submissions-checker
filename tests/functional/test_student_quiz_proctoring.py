@@ -12,8 +12,7 @@ security-critical branches in ``api/routes/student_quiz.py``:
   the response hands back no publicly fetchable object-storage URL),
   the ``stored: False`` no-storage branch, 403 when capture disabled, 409 on
   terminal attempts, 415 bad content-type, 413 oversize / empty, 404 unknown.
-* Grading per question type (single / multiple / ordering / true-false /
-  short-answer — note SHORT_ANSWER is recorded but auto-scored 0), pass-threshold
+* Grading per question type (single / multiple / ordering / true-false), pass-threshold
   boundary, and the reduce_time time-penalty path's interaction with timeout.
 * Result-detail rendering of a graded multi-type attempt.
 
@@ -688,23 +687,13 @@ _MULTI_TYPE_SNAP = [
         "is_required": False,
         "config": {"correct": True},
     },
-    {
-        "id": 4,
-        "type": "SHORT_ANSWER",
-        "text": "sa",
-        "points": 3,
-        "is_required": False,
-        "config": {},
-    },
 ]
 
 
 async def test_grading_all_question_types(student_client: AsyncClient, db, student_user) -> None:
     """Exercises _grade_answer for every type in one submit.
 
-    Max auto-scorable = single(1) + multi(2) + order(2) + tf(1) = 6.
-    SHORT_ANSWER is recorded but auto-scored 0; its points still count toward
-    max_score (sum over questions_snapshot), so max_score = 9.
+    Max = single(1) + multi(2) + order(2) + tf(1) = 6.
     """
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
@@ -722,16 +711,14 @@ async def test_grading_all_question_types(student_client: AsyncClient, db, stude
             "answer_1": ["0", "2"],  # multi correct {0,2}
             "answer_ordering_2": "2,0,1",  # ordering correct
             "answer_3": "true",  # true/false correct
-            "answer_4": "  free text  ",  # short answer (auto 0)
         },
         follow_redirects=False,
     )
     assert r.status_code == 303
     await db.refresh(attempt)
     assert attempt.score == 6
-    assert attempt.max_score == 9  # includes the 3 short-answer points
+    assert attempt.max_score == 6
     assert attempt.status == QuizAttemptStatus.COMPLETED
-    # 6/9 = 0.66 ≥ 0.6 → passed.
     assert attempt.is_passed is True
 
     answers = {
@@ -744,10 +731,6 @@ async def test_grading_all_question_types(student_client: AsyncClient, db, stude
     assert answers[1].answer == {"selected": [0, 2]} and answers[1].points_earned == 2
     assert answers[2].answer == {"order": [2, 0, 1]} and answers[2].is_correct is True
     assert answers[3].answer == {"value": True} and answers[3].is_correct is True
-    # SHORT_ANSWER: recorded text, is_correct None (not graded), 0 points.
-    assert answers[4].answer == {"text": "free text"}
-    assert answers[4].is_correct is None
-    assert answers[4].points_earned == 0
 
 
 async def test_grading_wrong_answers_score_zero(

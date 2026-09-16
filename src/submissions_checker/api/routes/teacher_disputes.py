@@ -121,8 +121,6 @@ def _render_answer(q_snap: dict[str, Any], answer: Any) -> str:
     if q_type == "TRUE_FALSE":
         value = payload.get("value")
         return "—" if value is None else ("True" if value else "False")
-    if q_type == "SHORT_ANSWER":
-        return str(payload.get("text") or "—")
     return str(payload) or "—"
 
 

@@ -66,7 +66,6 @@ class QuizQuestionType(enum.StrEnum):
     MULTIPLE_CHOICE = "MULTIPLE_CHOICE"
     ORDERING = "ORDERING"
     TRUE_FALSE = "TRUE_FALSE"
-    SHORT_ANSWER = "SHORT_ANSWER"
 
     def __str__(self) -> str:
         return self.value

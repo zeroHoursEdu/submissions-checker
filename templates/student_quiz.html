@@ -126,15 +126,6 @@
       </label>
     </div>
 
-    <!-- ── SHORT ANSWER ── -->
-    {% elif q.type == "SHORT_ANSWER" %}
-    <div>
-      <textarea name="answer_{{ q_id }}" rows="4"
-                placeholder="{{ vocab.quiz.short_answer_placeholder }}"
-                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder-slate-400
-                       focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-y">{{ existing.get('text', '') if existing else '' }}</textarea>
-      <p class="text-xs text-slate-400 mt-1">{{ vocab.quiz.short_answer_hint }}</p>
-    </div>
     {% endif %}
 
     {% include "_quiz_report_question.html" %}

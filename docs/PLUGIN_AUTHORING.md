@@ -294,7 +294,7 @@ assignments:
 
 | Key | Type | Meaning |
 |---|---|---|
-| `type` | string | `single_choice`, `multiple_choice`, `true_false`, `ordering`. (`short_answer` is stored but **not graded** and still inflates the maximum score — avoid it.) |
+| `type` | string | `single_choice`, `multiple_choice`, `true_false`, `ordering`. Any other type is rejected when the config is applied. |
 | `text` | string | The prompt. |
 | `points` | int | Weight. Default `1`. |
 | `choices` | list | `{text, is_correct}` entries. `single_choice` takes the first `is_correct`; `multiple_choice` requires the exact set. |

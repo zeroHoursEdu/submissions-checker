@@ -366,8 +366,8 @@ def _grade_answer(
 ) -> tuple[dict[str, Any], bool | None, int]:
     """Grade a single answer. Returns (answer_jsonb, is_correct, points_earned).
 
-    ``is_correct`` is ``None`` for SHORT_ANSWER, which no rule can grade and a
-    teacher marks by hand; the column is nullable for exactly that case.
+    ``is_correct`` is ``None`` only for a snapshot type the grader does not know;
+    config-apply rejects such types, so this is a defensive fallback.
     """
     q_type = q_snap["type"]
     q_config = q_snap["config"]
@@ -409,10 +409,6 @@ def _grade_answer(
         student_bool = str(raw_answer).lower() == "true"
         is_correct = student_bool == q_config.get("correct", False)
         return {"value": student_bool}, is_correct, q_points if is_correct else 0
-
-    elif q_type == "SHORT_ANSWER":
-        text_answer = str(raw_answer).strip() if raw_answer else ""
-        return {"text": text_answer}, None, 0
 
     return {"raw": str(raw_answer)}, False, 0
 

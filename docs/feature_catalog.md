@@ -147,7 +147,7 @@ names/details a student sees is controlled by the subject config.
 | Resume after an air raid | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/airraid/resume` |
 
 Question types (`QuizQuestionType`): `SINGLE_CHOICE`, `MULTIPLE_CHOICE`, `ORDERING`,
-`TRUE_FALSE`, `SHORT_ANSWER` (short answers are recorded but not auto-scored). Quiz
+`TRUE_FALSE`. Any other type is rejected when the config is applied. Quiz
 violation flags and webcam thumbnails surface to the teacher on the assignment review board
 (§4).
 

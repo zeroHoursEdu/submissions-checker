@@ -357,3 +357,26 @@ async def test_oversize_zip_is_rejected(teacher_client: AsyncClient, db: AsyncSe
     assert "apply_error" in query
     assert "50 MB limit" in query["apply_error"][0]
     assert await _count_subjects(db) == 0
+
+
+async def test_short_answer_question_is_rejected(
+    teacher_client: AsyncClient, db: AsyncSession
+) -> None:
+    cfg = _base_config()
+    cfg["assignments"]["lab1"]["review_mode"] = "tests_then_quiz"
+    cfg["assignments"]["lab1"]["quiz"] = {
+        "questions": [
+            {
+                "type": "single_choice",
+                "text": "ok?",
+                "choices": [{"text": "y", "is_correct": True}],
+            },
+            {"type": "short_answer", "text": "explain"},
+        ]
+    }
+    resp = await _post(teacher_client, _make_zip(cfg))
+    assert resp.status_code == 303
+    location = urllib.parse.unquote(resp.headers["location"])
+    assert "apply_error=" in location
+    assert "short_answer" in location
+    assert (await db.execute(select(func.count()).select_from(Subject))).scalar_one() == 0

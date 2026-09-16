@@ -102,8 +102,7 @@ def score_attempt(attempt: QuizAttempt) -> tuple[int, int, bool, bool]:
     Returns ``(score, max_score, is_passed, force_failed)``. Mutates nothing.
 
     ``max_score`` comes from the snapshot rather than from the answers, so questions the
-    student never reached still count against them — and so a SHORT_ANSWER question,
-    which no rule can grade and which therefore earns 0, still raises the bar.
+    student never reached still count against them.
 
     An anti-cheat ``_force_fail`` flag never passes, but the score is still computed:
     the teacher reviewing the violation wants to see what the attempt was worth.

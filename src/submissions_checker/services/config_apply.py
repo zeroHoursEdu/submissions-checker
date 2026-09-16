@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _MAX_ZIP_BYTES = 50 * 1024 * 1024  # 50 MB
+_ALLOWED_QUESTION_TYPES = ("single_choice", "multiple_choice", "true_false", "ordering")
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +114,7 @@ class ConfigApplyService:
         subject_code: str = new_cfg.get("subjectCode", "")
         if not subject_code:
             raise ValueError("config.yml must contain a non-empty 'subjectCode' field")
+        self._validate_quiz_questions(new_cfg)
 
         sha256 = hashlib.sha256(zip_bytes).hexdigest()
 
@@ -145,6 +147,24 @@ class ConfigApplyService:
     # ------------------------------------------------------------------
     # Helpers: pre-flight checks
     # ------------------------------------------------------------------
+
+    def _validate_quiz_questions(self, new_cfg: dict[str, Any]) -> None:
+        """Reject question types the grader cannot score.
+
+        `short_answer` used to be accepted, stored, and silently scored 0 while
+        still counting toward max_score, so a quiz with one could never reach
+        100 %. Refusing it at upload is the honest behaviour.
+        """
+        for code, a_cfg in (new_cfg.get("assignments") or {}).items():
+            questions = ((a_cfg or {}).get("quiz") or {}).get("questions") or []
+            for idx, q in enumerate(questions, start=1):
+                q_type = str((q or {}).get("type", "")).lower()
+                if q_type not in _ALLOWED_QUESTION_TYPES:
+                    allowed = ", ".join(_ALLOWED_QUESTION_TYPES)
+                    raise ValueError(
+                        f"assignment '{code}' quiz question #{idx}: type '{q_type}' is not "
+                        f"supported (allowed: {allowed})"
+                    )
 
     async def _check_ownership(
         self,

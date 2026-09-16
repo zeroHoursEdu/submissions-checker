@@ -81,17 +81,6 @@ def test_configured_threshold_overrides_the_default() -> None:
     assert score_attempt(attempt)[2] is True
 
 
-def test_short_answer_points_count_toward_max_but_earn_nothing() -> None:
-    """An ungradable answer still raises the bar — the column is nullable for that case."""
-    attempt = _attempt(
-        answers=[_answer(0, 4), _answer(1, None, is_correct=None)],
-        question_points=[4, 4],
-    )
-    score, max_score, is_passed, _ = score_attempt(attempt)
-    assert (score, max_score) == (4, 8)
-    assert is_passed is False  # 0.5 < 0.6
-
-
 def test_empty_quiz_cannot_be_passed() -> None:
     attempt = _attempt(answers=[], question_points=[])
     assert score_attempt(attempt) == (0, 0, False, False)
