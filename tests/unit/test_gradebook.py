@@ -13,9 +13,13 @@ from datetime import UTC, datetime, timedelta
 
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.services.gradebook import (
+    GridSourceRow,
+    IntegrityRow,
     RosterRow,
     build_grid,
+    build_student_grid,
     cell_status,
+    compute_cached_stats,
     compute_stats,
     duration_anomalous,
     median_duration,
@@ -220,3 +224,146 @@ def test_build_grid_rows_sorted_by_student_name() -> None:
     grid = build_grid(rows)
     # _row() names students "Student {id}" so lexical order is Student 1, Student 2
     assert [r.student_id for r in grid.rows] == [1, 2]
+
+
+# ── compute_cached_stats ─────────────────────────────────────────────────────
+
+
+def _integrity_row(*, flagged: bool) -> IntegrityRow:
+    return IntegrityRow(
+        student_id=1,
+        student_name="S",
+        assignment_id=1,
+        assignment_title="A",
+        tab_switch=0,
+        window_blur=0,
+        force_fail=False,
+        other_events=0,
+        duration_seconds=100,
+        median_seconds=100,
+        duration_anomalous=False,
+        severity="high" if flagged else None,
+        flagged=flagged,
+    )
+
+
+def test_compute_cached_stats_average_mark_is_sum_over_sum_as_percent() -> None:
+    rows = [
+        _row(assignment_id=1, grade=40, max_grade=50),  # 80%
+        _row(assignment_id=2, grade=10, max_grade=50),  # 20%
+    ]
+    stats = compute_cached_stats(rows, [], now=_NOW)
+    # (40+10) / (50+50) * 100 = 50.0, NOT the plain mean of 80% and 20%
+    assert stats.average_mark_pct == 50.0
+
+
+def test_compute_cached_stats_average_mark_excludes_ungraded_pairs() -> None:
+    rows = [_row(assignment_id=1, grade=40, max_grade=50), _row(assignment_id=2, grade=None)]
+    stats = compute_cached_stats(rows, [], now=_NOW)
+    assert stats.average_mark_pct == 80.0
+
+
+def test_compute_cached_stats_average_mark_none_when_nothing_graded() -> None:
+    rows = [_row(assignment_id=1, grade=None)]
+    assert compute_cached_stats(rows, [], now=_NOW).average_mark_pct is None
+
+
+def test_compute_cached_stats_pass_pct_is_per_work_not_per_student() -> None:
+    rows = [
+        _row(student_id=1, assignment_id=1, grade=80, min_grade=50),
+        _row(student_id=2, assignment_id=1, grade=30, min_grade=50),
+    ]
+    assert compute_cached_stats(rows, [], now=_NOW).pass_pct == 50.0
+
+
+def test_compute_cached_stats_pass_pct_counts_ungraded_as_not_passed() -> None:
+    rows = [
+        _row(student_id=1, assignment_id=1, grade=80, min_grade=50),
+        _row(student_id=1, assignment_id=2, grade=None),
+    ]
+    assert compute_cached_stats(rows, [], now=_NOW).pass_pct == 50.0
+
+
+def test_compute_cached_stats_pass_pct_zero_rows_is_zero() -> None:
+    assert compute_cached_stats([], [], now=_NOW).pass_pct == 0.0
+
+
+def test_compute_cached_stats_pending_review_matches_existing_rule() -> None:
+    rows = [
+        _row(assignment_id=1, grade=None, submission_status=SubmissionStatus.TESTING),
+        _row(assignment_id=2, grade=None, submission_status=SubmissionStatus.COMPLETED),
+    ]
+    assert compute_cached_stats(rows, [], now=_NOW).pending_review_count == 1
+
+
+def test_compute_cached_stats_cheating_pct_over_flagged_attempts() -> None:
+    integrity = [_integrity_row(flagged=True), _integrity_row(flagged=False)]
+    assert compute_cached_stats([], integrity, now=_NOW).cheating_pct == 50.0
+
+
+def test_compute_cached_stats_cheating_pct_none_when_no_attempts() -> None:
+    assert compute_cached_stats([], [], now=_NOW).cheating_pct is None
+
+
+# ── build_student_grid ───────────────────────────────────────────────────────
+
+
+def _grid_row(
+    *,
+    student_id: int = 1,
+    student_name: str = "Student 1",
+    group_name: str = "IT-21",
+    assignment_id: int = 1,
+    assignment_title: str = "Lab 1",
+    min_grade: int = 0,
+    grade: int | None = None,
+    submission_status: SubmissionStatus | None = None,
+    quiz_score: float | None = None,
+    review_score: float | None = None,
+) -> GridSourceRow:
+    return GridSourceRow(
+        student_id=student_id,
+        student_name=student_name,
+        group_name=group_name,
+        assignment_id=assignment_id,
+        assignment_title=assignment_title,
+        min_grade=min_grade,
+        grade=grade,
+        submission_status=submission_status,
+        quiz_score=quiz_score,
+        review_score=review_score,
+    )
+
+
+def test_build_student_grid_columns_in_first_seen_order() -> None:
+    rows = [_grid_row(assignment_id=2), _grid_row(assignment_id=1)]
+    grid = build_student_grid(rows)
+    assert [c.assignment_id for c in grid.columns] == [2, 1]
+
+
+def test_build_student_grid_cell_carries_quiz_and_review_scores() -> None:
+    rows = [_grid_row(grade=90, min_grade=50, quiz_score=88.0, review_score=95.0)]
+    grid = build_student_grid(rows)
+    cell = grid.rows[0].cells[1]
+    assert cell.quiz_score == 88.0
+    assert cell.review_score == 95.0
+    assert cell.status == "passed"
+
+
+def test_build_student_grid_total_sums_final_grade_not_sub_marks() -> None:
+    rows = [
+        _grid_row(assignment_id=1, grade=80, quiz_score=10.0, review_score=10.0),
+        _grid_row(assignment_id=2, grade=20, quiz_score=90.0, review_score=90.0),
+    ]
+    grid = build_student_grid(rows)
+    assert grid.rows[0].total == 100
+
+
+def test_build_student_grid_carries_group_name_and_sorts_by_student_name() -> None:
+    rows = [
+        _grid_row(student_id=2, student_name="Zed", group_name="IT-22"),
+        _grid_row(student_id=1, student_name="Anna", group_name="IT-21"),
+    ]
+    grid = build_student_grid(rows)
+    assert [r.student_name for r in grid.rows] == ["Anna", "Zed"]
+    assert grid.rows[0].group_name == "IT-21"

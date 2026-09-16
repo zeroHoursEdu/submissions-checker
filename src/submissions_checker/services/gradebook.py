@@ -31,6 +31,7 @@ from submissions_checker.db.models import (
     Submission,
 )
 from submissions_checker.db.models.enums import SubmissionStatus
+from submissions_checker.db.models.group import Group
 
 _TERMINAL_STATUSES = {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED}
 
@@ -379,3 +380,200 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
         )
     integrity_rows.sort(key=lambda r: (r.student_name, r.assignment_title))
     return integrity_rows
+
+
+@dataclass(frozen=True)
+class CachedSubjectStats:
+    pending_review_count: int
+    average_mark_pct: float | None
+    pass_pct: float
+    cheating_pct: float | None
+
+
+def compute_cached_stats(
+    roster_rows: list[RosterRow], integrity_rows: list[IntegrityRow], *, now: datetime
+) -> CachedSubjectStats:
+    """The four Панель stat-card numbers. Computed by the scheduled job
+    (workers.scheduled.subject_stats_refresh), never live per request.
+    """
+    graded = [(r.grade, r.max_grade) for r in roster_rows if r.grade is not None]
+    graded_max_sum = sum(m for _, m in graded)
+    average_mark_pct = (
+        round(100 * sum(g for g, _ in graded) / graded_max_sum, 1) if graded_max_sum else None
+    )
+
+    total_pairs = len(roster_rows)
+    passed_pairs = sum(1 for r in roster_rows if r.grade is not None and r.grade >= r.min_grade)
+    pass_pct = round(100 * passed_pairs / total_pairs, 1) if total_pairs else 0.0
+
+    pending_review_count = sum(
+        1
+        for r in roster_rows
+        if r.grade is None
+        and r.submission_status is not None
+        and r.submission_status not in _TERMINAL_STATUSES
+    )
+
+    total_attempts = len(integrity_rows)
+    flagged_attempts = sum(1 for r in integrity_rows if r.flagged)
+    cheating_pct = round(100 * flagged_attempts / total_attempts, 1) if total_attempts else None
+
+    return CachedSubjectStats(
+        pending_review_count=pending_review_count,
+        average_mark_pct=average_mark_pct,
+        pass_pct=pass_pct,
+        cheating_pct=cheating_pct,
+    )
+
+
+@dataclass(frozen=True)
+class GridSourceRow:
+    student_id: int
+    student_name: str
+    group_name: str
+    assignment_id: int
+    assignment_title: str
+    min_grade: int
+    grade: int | None
+    submission_status: SubmissionStatus | None
+    quiz_score: float | None
+    review_score: float | None
+
+
+@dataclass(frozen=True)
+class GridCell:
+    status: CellStatus
+    grade: int | None
+    quiz_score: float | None
+    review_score: float | None
+
+
+@dataclass(frozen=True)
+class GridColumn:
+    assignment_id: int
+    title: str
+
+
+@dataclass(frozen=True)
+class GridRow:
+    student_id: int
+    student_name: str
+    group_name: str
+    cells: dict[int, GridCell]
+    total: int | None
+
+
+@dataclass(frozen=True)
+class StudentGrid:
+    columns: list[GridColumn]
+    rows: list[GridRow]
+
+
+def build_student_grid(rows: list[GridSourceRow]) -> StudentGrid:
+    columns: list[GridColumn] = []
+    seen_assignments: set[int] = set()
+    for r in rows:
+        if r.assignment_id not in seen_assignments:
+            seen_assignments.add(r.assignment_id)
+            columns.append(GridColumn(r.assignment_id, r.assignment_title))
+
+    cells_by_student: dict[int, dict[int, GridCell]] = {}
+    meta_by_student: dict[int, tuple[str, str]] = {}
+    for r in rows:
+        cells_by_student.setdefault(r.student_id, {})[r.assignment_id] = GridCell(
+            status=cell_status(r.grade, r.min_grade, r.submission_status),
+            grade=r.grade,
+            quiz_score=r.quiz_score,
+            review_score=r.review_score,
+        )
+        meta_by_student[r.student_id] = (r.student_name, r.group_name)
+
+    grid_rows = []
+    for student_id, cells in cells_by_student.items():
+        student_name, group_name = meta_by_student[student_id]
+        grades = [c.grade for c in cells.values() if c.grade is not None]
+        total = sum(grades) if grades else None
+        grid_rows.append(GridRow(student_id, student_name, group_name, cells, total))
+    grid_rows.sort(key=lambda row: row.student_name)
+
+    return StudentGrid(columns=columns, rows=grid_rows)
+
+
+async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceRow]:
+    """One row per (enrolled real student, subject assignment) pair, with the
+    student's group name and their latest submission's quiz/review component
+    scores (Submission.grade_breakdown's quiz_score/quality_score — see
+    services.grading.GradeBreakdown) for the Студенти tab's grid.
+
+    Same "latest submission per student_assignment" pattern as fetch_roster_rows,
+    duplicated rather than shared because this query needs two extra joins
+    (Group, and the grade_breakdown column) that fetch_roster_rows' caller (the
+    scheduled job) has no use for.
+    """
+    latest_sub_sq = (
+        select(
+            Submission.students_assignment_id,
+            func.max(Submission.created_at).label("max_created_at"),
+        )
+        .group_by(Submission.students_assignment_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(
+            Student.id.label("student_id"),
+            Student.full_name.label("student_name"),
+            Group.name.label("group_name"),
+            SubjectsAssignment.id.label("assignment_id"),
+            SubjectsAssignment.title.label("assignment_title"),
+            SubjectsAssignment.min_grade,
+            StudentAssignment.grade,
+            Submission.status.label("submission_status"),
+            Submission.grade_breakdown,
+        )
+        .select_from(SubjectsStudents)
+        .join(Student, Student.id == SubjectsStudents.student_id)
+        .join(Group, Group.id == Student.group_id)
+        .join(SubjectsAssignment, SubjectsAssignment.subject_id == SubjectsStudents.subject_id)
+        .outerjoin(
+            StudentAssignment,
+            and_(
+                StudentAssignment.student_id == SubjectsStudents.student_id,
+                StudentAssignment.subjects_assignment_id == SubjectsAssignment.id,
+            ),
+        )
+        .outerjoin(
+            latest_sub_sq, latest_sub_sq.c.students_assignment_id == StudentAssignment.id
+        )
+        .outerjoin(
+            Submission,
+            and_(
+                Submission.students_assignment_id == StudentAssignment.id,
+                Submission.created_at == latest_sub_sq.c.max_created_at,
+            ),
+        )
+        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
+        .order_by(
+            Student.full_name,
+            SubjectsAssignment.deadline.asc().nullslast(),
+            SubjectsAssignment.id,
+        )
+    )
+    rows = []
+    for row in result:
+        breakdown = row.grade_breakdown or {}
+        rows.append(
+            GridSourceRow(
+                student_id=row.student_id,
+                student_name=row.student_name,
+                group_name=row.group_name,
+                assignment_id=row.assignment_id,
+                assignment_title=row.assignment_title,
+                min_grade=row.min_grade,
+                grade=row.grade,
+                submission_status=row.submission_status,
+                quiz_score=breakdown.get("quiz_score"),
+                review_score=breakdown.get("quality_score"),
+            )
+        )
+    return rows
