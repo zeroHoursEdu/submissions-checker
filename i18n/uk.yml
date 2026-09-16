@@ -275,7 +275,6 @@ teacher:
   feedback_no_active_semester: Запити відгуку можна надсилати лише під час активного семестру (вер–січ або лют–чер).
   edit: Редагувати
   export_csv: Експорт CSV
-  enrolled_students: Записані студенти
   # Enrolment of existing students into a subject from an email,variant CSV.
   enroll_title: Записати студентів на предмет
   enroll_hint: Студенти мають бути вже зареєстровані. Цей файл лише записує їх на предмет і не надсилає листів.
@@ -290,7 +289,6 @@ teacher:
   enroll_reason_unknown: такого email немає серед зареєстрованих студентів
   enroll_reason_empty: порожня комірка email
   enroll_rejected_overflow: "…та ще стільки рядків:"
-  no_students_enrolled: Студентів не записано
   assignments: Завдання
   add: Додати
   no_assignments_yet: Завдань ще немає
@@ -487,30 +485,28 @@ teacher:
   add_option: "+ Додати варіант"
   add_item: "+ Додати елемент"
   no_quiz_settings: Спочатку налаштуйте тест для початку додавання запитань.
-  tab_overview: Огляд
+  tab_panel: Панель
   tab_students: Студенти
   tab_assignments: Завдання
-  tab_grades: Оцінки
-  gb_stat_avg_score: Середній бал
-  gb_stat_pass_rate: "% зданих"
-  gb_stat_overdue: Прострочені
-  gb_stat_pending: На перевірці
-  gb_grid_title: Відомість оцінок
-  gb_col_total: Разом
-  gb_no_data: Немає даних для відображення.
-  integrity_title: Доброчесність тестів
-  integrity_col_student: Студент
-  integrity_col_assignment: Завдання
-  integrity_col_tab_switch: Перемикання вкладок
-  integrity_col_window_blur: Втрата фокусу вікна
-  integrity_col_other_events: Інші події
-  integrity_col_duration: Тривалість
-  integrity_col_severity: Рівень
-  integrity_severity_high: Високий
-  integrity_severity_medium: Середній
-  integrity_flagged_only: Показати лише позначені
-  integrity_no_data: Немає спроб тестів для цього предмета.
-  integrity_median_suffix: медіана
+  tab_operations: Операції
+  panel_stat_average_mark: Середній бал
+  panel_stat_pass_pct: "% зданих"
+  panel_stat_cheating_pct: "% списувань"
+  panel_stat_pending: На перевірці
+  panel_not_computed: Дані ще не пораховано — оновлюються кожні кілька хвилин.
+  pending_review_badge: на перевірці
+  grid_title: Відомість оцінок
+  grid_col_student: Студент
+  grid_col_group: Група
+  grid_col_total: Разом
+  grid_subcol_quiz: Тест
+  grid_subcol_review: Огляд
+  grid_no_data: Немає даних для відображення.
+  students_search_label: Записати студента за email
+  students_search_placeholder: Введіть щонайменше 3 символи email
+  students_search_no_results: Нічого не знайдено
+  students_search_variant_label: Варіант
+  students_search_enroll_button: Записати
 
 admin:
   dashboard_title: Панель адміністратора

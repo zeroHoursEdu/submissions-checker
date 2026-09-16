@@ -12,71 +12,157 @@
 {% block content %}
 <div data-default-tab="{{ default_tab }}">
 
-<div class="flex items-start justify-between mb-6">
-  <div>
-    <h1 class="text-2xl font-bold text-slate-900">{{ subject.name }}</h1>
-    {% if subject.description %}
-    <p class="text-slate-500 text-sm mt-1">{{ subject.description }}</p>
-    {% endif %}
-  </div>
-  <div class="flex gap-2 shrink-0 flex-wrap">
-    <a href="/teacher/subjects/{{ subject.id }}/feedback"
-       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm hover:bg-indigo-100 transition-colors">
-      {{ vocab.teacher.view_feedback }}
-    </a>
-    {% if not current_semester %}
-    <span title="{{ vocab.teacher.no_active_semester_hint }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-sm cursor-not-allowed">
-      {{ vocab.teacher.request_feedback }}
-    </span>
-    {% elif feedback_request %}
-    <span title="{{ vocab.teacher.feedback_already_sent }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-sm cursor-not-allowed">
-      {{ vocab.teacher.feedback_sent_badge }}
-    </span>
-    {% else %}
-    <form method="POST" action="/teacher/subjects/{{ subject.id }}/feedback/request">
-      <button type="submit"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-300 bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition-colors">
-        {{ vocab.teacher.request_feedback }}
-      </button>
-    </form>
-    {% endif %}
-  </div>
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-slate-900">{{ subject.name }}</h1>
+  {% if subject.description %}
+  <p class="text-slate-500 text-sm mt-1">{{ subject.description }}</p>
+  {% endif %}
 </div>
-
-{% if feedback_sent %}
-<div class="mb-4 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
-  {{ vocab.teacher.feedback_sent_msg }}
-</div>
-{% elif feedback_error == "already_sent" %}
-<div class="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-  {{ vocab.teacher.feedback_already_sent }}
-</div>
-{% elif feedback_error == "no_active_semester" %}
-<div class="mb-4 px-4 py-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm">
-  {{ vocab.teacher.feedback_no_active_semester }}
-</div>
-{% endif %}
 
 <div class="flex gap-1 border-b border-slate-200 mb-6" role="tablist">
-  <button type="button" data-tab-target="overview" role="tab"
+  <button type="button" data-tab-target="panel" role="tab"
           class="tab-trigger px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-900">
-    {{ vocab.teacher.tab_overview }}
-  </button>
-  <button type="button" data-tab-target="students" role="tab"
-          class="tab-trigger px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-900">
-    {{ vocab.teacher.tab_students }}
+    {{ vocab.teacher.tab_panel }}
   </button>
   <button type="button" data-tab-target="assignments" role="tab"
           class="tab-trigger px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-900">
     {{ vocab.teacher.tab_assignments }}
   </button>
-  <button type="button" data-tab-target="grades" role="tab"
+  <button type="button" data-tab-target="students" role="tab"
           class="tab-trigger px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-900">
-    {{ vocab.teacher.tab_grades }}
+    {{ vocab.teacher.tab_students }}
+  </button>
+  <button type="button" data-tab-target="operations" role="tab"
+          class="tab-trigger px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-slate-900">
+    {{ vocab.teacher.tab_operations }}
   </button>
 </div>
 
-<div id="tab-panel-overview" class="tab-panel" {% if default_tab != "overview" %}hidden{% endif %}>
+<div id="tab-panel-panel" class="tab-panel" {% if default_tab != "panel" %}hidden{% endif %}>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-slate-900">{% if cached_stats and cached_stats.average_mark_pct is not none %}{{ cached_stats.average_mark_pct }}{% else %}—{% endif %}</div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.panel_stat_average_mark }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-green-600">{% if cached_stats %}{{ cached_stats.pass_pct }}%{% else %}—{% endif %}</div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.panel_stat_pass_pct }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-red-600">{% if cached_stats and cached_stats.cheating_pct is not none %}{{ cached_stats.cheating_pct }}%{% else %}—{% endif %}</div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.panel_stat_cheating_pct }}</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
+      <div class="text-xl font-bold text-amber-600">{% if cached_stats %}{{ cached_stats.pending_review_count }}{% else %}—{% endif %}</div>
+      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.panel_stat_pending }}</div>
+    </div>
+  </div>
+  {% if not cached_stats %}
+  <p class="text-xs text-slate-400 mt-3">{{ vocab.teacher.panel_not_computed }}</p>
+  {% endif %}
+</div>
+
+<div id="tab-panel-assignments" class="tab-panel" {% if default_tab != "assignments" %}hidden{% endif %}>
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.assignments }}</h2>
+    </div>
+
+    {% if assignments %}
+    <ul class="divide-y divide-slate-100">
+      {% for a in assignments %}
+      {% set pending = task_pending_counts.get(a.id, 0) %}
+      <li>
+        <a href="/teacher/subjects/{{ subject.id }}/assignments/{{ a.id }}"
+           class="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition-colors group">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-900 group-hover:text-indigo-700 transition-colors truncate">{{ a.title }}</p>
+            <p class="text-xs text-slate-500 mt-0.5">
+              {% if a.deadline %}
+                {{ vocab.teacher.deadline_label }} {{ a.deadline.strftime("%b %d, %Y") }}
+              {% else %}
+                {{ vocab.teacher.no_deadline }}
+              {% endif %}
+              &nbsp;·&nbsp; {{ a.min_grade }}–{{ a.max_grade }} pts
+            </p>
+          </div>
+          {% if pending %}<span class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{{ pending }} {{ vocab.teacher.pending_review_badge }}</span>{% endif %}
+          <svg class="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+          </svg>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="px-5 py-8 text-center text-slate-400 text-sm">{{ vocab.teacher.no_assignments_yet }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div id="tab-panel-students" class="tab-panel" {% if default_tab != "students" %}hidden{% endif %}>
+  {% if student_grid.rows %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-100">
+      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.grid_title }}</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="text-sm border-collapse">
+        <thead>
+          <tr class="bg-slate-50">
+            <th rowspan="2" class="sticky left-0 z-10 bg-slate-50 px-4 py-2 text-left font-medium text-slate-600 border-b border-slate-200 min-w-[160px]">{{ vocab.teacher.grid_col_student }}</th>
+            <th rowspan="2" class="bg-slate-50 px-4 py-2 text-left font-medium text-slate-600 border-b border-slate-200 whitespace-nowrap">{{ vocab.teacher.grid_col_group }}</th>
+            {% for col in student_grid.columns %}
+            <th colspan="2" class="px-4 py-2 text-center font-medium text-slate-600 border-b border-l border-slate-200 whitespace-nowrap">{{ col.title }}</th>
+            {% endfor %}
+            <th rowspan="2" class="sticky right-0 z-10 bg-slate-50 px-4 py-2 text-center font-medium text-slate-600 border-b border-l border-slate-200">{{ vocab.teacher.grid_col_total }}</th>
+          </tr>
+          <tr class="bg-slate-50">
+            {% for col in student_grid.columns %}
+            <th class="px-3 py-1 text-center text-xs font-medium text-slate-500 border-b border-l border-slate-200">{{ vocab.teacher.grid_subcol_quiz }}</th>
+            <th class="px-3 py-1 text-center text-xs font-medium text-slate-500 border-b border-slate-200">{{ vocab.teacher.grid_subcol_review }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in student_grid.rows %}
+          <tr class="border-b border-slate-100">
+            <td class="sticky left-0 z-10 bg-white px-4 py-2 font-medium text-slate-900 whitespace-nowrap">{{ row.student_name }}</td>
+            <td class="px-4 py-2 text-slate-600 whitespace-nowrap">{{ row.group_name }}</td>
+            {% for col in student_grid.columns %}
+            {% set cell = row.cells.get(col.assignment_id) %}
+            <td class="px-3 py-2 text-center border-l border-slate-100 {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700{% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700{% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700{% else %}text-slate-300{% endif %}">{% if cell and cell.quiz_score is not none %}{{ cell.quiz_score }}{% else %}—{% endif %}</td>
+            <td class="px-3 py-2 text-center {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700{% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700{% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700{% else %}text-slate-300{% endif %}">{% if cell and cell.review_score is not none %}{{ cell.review_score }}{% else %}—{% endif %}</td>
+            {% endfor %}
+            <td class="sticky right-0 z-10 bg-white px-4 py-2 text-center font-semibold text-slate-900 border-l border-slate-200">{{ row.total if row.total is not none else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-8 text-center text-slate-400 text-sm">
+    {{ vocab.teacher.grid_no_data }}
+  </div>
+  {% endif %}
+</div>
+
+<div id="tab-panel-operations" class="tab-panel" {% if default_tab != "operations" %}hidden{% endif %}>
+  {% if feedback_sent %}
+  <div class="mb-4 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
+    {{ vocab.teacher.feedback_sent_msg }}
+  </div>
+  {% elif feedback_error == "already_sent" %}
+  <div class="mb-4 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+    {{ vocab.teacher.feedback_already_sent }}
+  </div>
+  {% elif feedback_error == "no_active_semester" %}
+  <div class="mb-4 px-4 py-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm">
+    {{ vocab.teacher.feedback_no_active_semester }}
+  </div>
+  {% endif %}
+
   {% if enroll_result %}
   <div class="mb-4 px-4 py-3 rounded-lg border text-sm {% if enroll_result.rejected %}bg-amber-50 border-amber-200 text-amber-800{% else %}bg-emerald-50 border-emerald-200 text-emerald-800{% endif %}">
     <p>
@@ -139,6 +225,32 @@
     </div>
   </div>
 
+  {% set variant_check = namespace(required=false) %}
+  {% for a in assignments %}
+    {% if (a.config or {}).get("variants_required") %}{% set variant_check.required = true %}{% endif %}
+  {% endfor %}
+  {% set any_variant_required = variant_check.required %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6" data-student-search>
+    <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.teacher.students_search_label }}</h2>
+    <div class="relative max-w-sm">
+      <input type="text" data-search-input placeholder="{{ vocab.teacher.students_search_placeholder }}"
+             class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2" autocomplete="off" />
+      <ul data-search-results class="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg divide-y divide-slate-100 hidden"></ul>
+    </div>
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/students/enroll-by-search"
+          data-search-enroll-form class="mt-3 hidden">
+      <input type="hidden" name="student_id" data-search-student-id />
+      <p class="text-sm text-slate-600 mb-2" data-search-selected-name></p>
+      {% if any_variant_required %}
+      <label class="block text-xs font-medium text-slate-500 mb-1">{{ vocab.teacher.students_search_variant_label }}</label>
+      <input type="text" name="variant" required class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 mb-3" />
+      {% endif %}
+      <button type="submit" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+        {{ vocab.teacher.students_search_enroll_button }}
+      </button>
+    </form>
+  </div>
+
   {% if current_user.user_id == subject.owner_id %}
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
@@ -197,207 +309,28 @@
     </div>
   </div>
   {% endif %}
-</div>
 
-<div id="tab-panel-students" class="tab-panel" {% if default_tab != "students" %}hidden{% endif %}>
-  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.enrolled_students }}</h2>
-      <span class="text-xs text-slate-400 font-medium">{{ students | length }}</span>
-    </div>
-
-    {% if students %}
-    <ul class="divide-y divide-slate-100">
-      {% for item in students %}
-      <li class="px-5 py-3.5">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-semibold text-sm flex items-center justify-center shrink-0">
-            {{ item.student.full_name[0] }}
-          </div>
-          <div class="min-w-0">
-            <p class="text-sm font-medium text-slate-900 truncate">{{ item.student.full_name }}</p>
-            <p class="text-xs text-slate-400 truncate">{{ item.group_name or "?" }} · @{{ item.student.github_username }}</p>
-          </div>
-        </div>
-      </li>
-      {% endfor %}
-    </ul>
+  <div class="mt-6">
+    {% if not current_semester %}
+    <span title="{{ vocab.teacher.no_active_semester_hint }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-sm cursor-not-allowed">
+      {{ vocab.teacher.request_feedback }}
+    </span>
+    {% elif feedback_request %}
+    <span title="{{ vocab.teacher.feedback_already_sent }}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-400 text-sm cursor-not-allowed">
+      {{ vocab.teacher.feedback_sent_badge }}
+    </span>
     {% else %}
-    <div class="px-5 py-8 text-center text-slate-400 text-sm">{{ vocab.teacher.no_students_enrolled }}</div>
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/feedback/request">
+      <button type="submit"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-300 bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition-colors">
+        {{ vocab.teacher.request_feedback }}
+      </button>
+    </form>
     {% endif %}
-  </div>
-</div>
-
-<div id="tab-panel-assignments" class="tab-panel" {% if default_tab != "assignments" %}hidden{% endif %}>
-  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.assignments }}</h2>
-    </div>
-
-    {% if assignments %}
-    <ul class="divide-y divide-slate-100">
-      {% for a in assignments %}
-      <li>
-        <a href="/teacher/subjects/{{ subject.id }}/assignments/{{ a.id }}"
-           class="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition-colors group">
-          <div class="min-w-0 flex-1">
-            <p class="text-sm font-medium text-slate-900 group-hover:text-indigo-700 transition-colors truncate">{{ a.title }}</p>
-            <p class="text-xs text-slate-400 mt-0.5">
-              {% if a.deadline %}
-                {{ vocab.teacher.deadline_label }} {{ a.deadline.strftime("%b %d, %Y") }}
-              {% else %}
-                {{ vocab.teacher.no_deadline }}
-              {% endif %}
-              &nbsp;·&nbsp; {{ a.min_grade }}–{{ a.max_grade }} pts
-            </p>
-          </div>
-          <svg class="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-          </svg>
-        </a>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <div class="px-5 py-8 text-center text-slate-400 text-sm">{{ vocab.teacher.no_assignments_yet }}</div>
-    {% endif %}
-  </div>
-</div>
-
-<div id="tab-panel-grades" class="tab-panel" {% if default_tab != "grades" %}hidden{% endif %}>
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-      <div class="text-xl font-bold text-slate-900">
-        {{ gradebook_stats.average_score if gradebook_stats.average_score is not none else "—" }}
-      </div>
-      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_avg_score }}</div>
-    </div>
-    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-      <div class="text-xl font-bold text-green-600">{{ gradebook_stats.pass_rate_pct }}%</div>
-      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_pass_rate }}</div>
-    </div>
-    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-      <div class="text-xl font-bold text-red-600">{{ gradebook_stats.overdue_count }}</div>
-      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_overdue }}</div>
-    </div>
-    <div class="bg-white rounded-lg border border-slate-200 px-4 py-3">
-      <div class="text-xl font-bold text-amber-600">{{ gradebook_stats.pending_review_count }}</div>
-      <div class="text-xs text-slate-400 mt-0.5">{{ vocab.teacher.gb_stat_pending }}</div>
-    </div>
-  </div>
-
-  {% if gradebook_grid.rows %}
-  <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
-    <div class="px-5 py-4 border-b border-slate-100">
-      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.gb_grid_title }}</h2>
-    </div>
-    <div class="overflow-x-auto">
-      <table class="text-sm border-collapse">
-        <thead>
-          <tr class="bg-slate-50">
-            <th class="sticky left-0 z-10 bg-slate-50 px-4 py-2 text-left font-medium text-slate-600 border-b border-slate-200 min-w-[180px]">
-              {{ vocab.teacher.enrolled_students }}
-            </th>
-            {% for col in gradebook_grid.columns %}
-            <th class="px-4 py-2 text-center font-medium text-slate-600 border-b border-slate-200 whitespace-nowrap">
-              {{ col.title }}
-            </th>
-            {% endfor %}
-            <th class="sticky right-0 z-10 bg-slate-50 px-4 py-2 text-center font-medium text-slate-600 border-b border-slate-200">
-              {{ vocab.teacher.gb_col_total }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in gradebook_grid.rows %}
-          <tr class="border-b border-slate-100">
-            <td class="sticky left-0 z-10 bg-white px-4 py-2 font-medium text-slate-900 whitespace-nowrap">
-              {{ row.student_name }}
-            </td>
-            {% for col in gradebook_grid.columns %}
-            {% set cell = row.cells.get(col.assignment_id) %}
-            {% set violation = integrity_by_cell.get((row.student_id, col.assignment_id)) %}
-            <td id="cell-{{ row.student_id }}-{{ col.assignment_id }}"
-                class="px-4 py-2 text-center relative
-                  {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700
-                  {% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700
-                  {% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700
-                  {% else %}text-slate-300{% endif %}">{% if cell and cell.grade is not none %}{{ cell.grade }}{% else %}—{% endif %}{% if violation and (violation.tab_switch or violation.window_blur or violation.force_fail or violation.other_events) %}
-              <span title="tab_switch: {{ violation.tab_switch }}, window_blur: {{ violation.window_blur }}{% if violation.other_events %}, other: {{ violation.other_events }}{% endif %}{% if violation.force_fail %}, force_fail{% endif %}"
-                    class="violation-dot absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-red-500 cursor-pointer"
-                    data-scroll-to="integrity-row-{{ row.student_id }}-{{ col.assignment_id }}"></span>
-              {% endif %}</td>
-            {% endfor %}
-            <td class="sticky right-0 z-10 bg-white px-4 py-2 text-center font-semibold text-slate-900">
-              {{ row.total if row.total is not none else "—" }}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  {% else %}
-  <div class="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-8 text-center text-slate-400 text-sm">
-    {{ vocab.teacher.gb_no_data }}
-  </div>
-  {% endif %}
-
-  <div class="bg-white rounded-xl border border-slate-200 shadow-sm mt-6">
-    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-3">
-      <h2 class="font-semibold text-slate-900">{{ vocab.teacher.integrity_title }}</h2>
-      <label class="inline-flex items-center gap-2 text-sm text-slate-600">
-        <input type="checkbox" data-flagged-only-toggle class="rounded border-slate-300">
-        {{ vocab.teacher.integrity_flagged_only }}
-      </label>
-    </div>
-    {% if integrity_rows %}
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="bg-slate-50 border-b border-slate-200">
-            <th class="px-4 py-2 text-left font-medium text-slate-600">{{ vocab.teacher.integrity_col_student }}</th>
-            <th class="px-4 py-2 text-left font-medium text-slate-600">{{ vocab.teacher.integrity_col_assignment }}</th>
-            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_tab_switch }}</th>
-            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_window_blur }}</th>
-            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_other_events }}</th>
-            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_duration }}</th>
-            <th class="px-4 py-2 text-center font-medium text-slate-600">{{ vocab.teacher.integrity_col_severity }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in integrity_rows %}
-          <tr id="integrity-row-{{ row.student_id }}-{{ row.assignment_id }}"
-              data-flagged="{{ 'true' if row.flagged else 'false' }}"
-              class="border-b border-slate-100">
-            <td class="px-4 py-2 text-slate-900">{{ row.student_name }}</td>
-            <td class="px-4 py-2 text-slate-600">{{ row.assignment_title }}</td>
-            <td class="px-4 py-2 text-center">{{ row.tab_switch }}</td>
-            <td class="px-4 py-2 text-center">{{ row.window_blur }}</td>
-            <td class="px-4 py-2 text-center">{{ row.other_events }}</td>
-            <td class="px-4 py-2 text-center {% if row.duration_anomalous %}text-red-600 font-medium{% else %}text-slate-600{% endif %}">
-              {% if row.duration_seconds is not none %}
-                {{ row.duration_seconds }}s
-                {% if row.median_seconds is not none %}/ {{ row.median_seconds }}s {{ vocab.teacher.integrity_median_suffix }}{% endif %}
-              {% else %}—{% endif %}
-            </td>
-            <td class="px-4 py-2 text-center">
-              {% if row.severity == "high" %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{{ vocab.teacher.integrity_severity_high }}</span>
-              {% elif row.severity == "medium" %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{{ vocab.teacher.integrity_severity_medium }}</span>
-              {% else %}
-              <span class="text-slate-300">—</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="px-5 py-8 text-center text-slate-400 text-sm">{{ vocab.teacher.integrity_no_data }}</div>
-    {% endif %}
+    <a href="/teacher/subjects/{{ subject.id }}/feedback"
+       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm hover:bg-indigo-100 transition-colors ml-2">
+      {{ vocab.teacher.view_feedback }}
+    </a>
   </div>
 </div>
 
@@ -428,29 +361,55 @@
     });
   });
 
-  activate(root.dataset.defaultTab || "students");
+  activate(root.dataset.defaultTab || "panel");
 
-  var flaggedToggle = root.querySelector("[data-flagged-only-toggle]");
-  if (flaggedToggle) {
-    flaggedToggle.addEventListener("change", function () {
-      root.querySelectorAll("tr[data-flagged]").forEach(function (tr) {
-        tr.hidden = flaggedToggle.checked && tr.dataset.flagged !== "true";
-      });
+  var searchBox = root.querySelector("[data-student-search]");
+  if (searchBox) {
+    var input = searchBox.querySelector("[data-search-input]");
+    var results = searchBox.querySelector("[data-search-results]");
+    var form = searchBox.querySelector("[data-search-enroll-form]");
+    var studentIdField = searchBox.querySelector("[data-search-student-id]");
+    var selectedName = searchBox.querySelector("[data-search-selected-name]");
+    var subjectId = "{{ subject.id }}";
+    var debounceTimer = null;
+
+    input.addEventListener("keyup", function () {
+      var q = input.value.trim();
+      clearTimeout(debounceTimer);
+      if (q.length < 3) {
+        results.classList.add("hidden");
+        results.innerHTML = "";
+        return;
+      }
+      debounceTimer = setTimeout(function () {
+        fetch("/teacher/subjects/" + subjectId + "/students/search?q=" + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            results.innerHTML = "";
+            if (!data.length) {
+              var empty = document.createElement("li");
+              empty.className = "px-3 py-2 text-sm text-slate-400";
+              empty.textContent = "{{ vocab.teacher.students_search_no_results }}";
+              results.appendChild(empty);
+            } else {
+              data.forEach(function (s) {
+                var li = document.createElement("li");
+                li.className = "px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer";
+                li.textContent = s.full_name + " — " + s.email;
+                li.addEventListener("click", function () {
+                  studentIdField.value = s.id;
+                  selectedName.textContent = s.full_name + " (" + s.email + ")";
+                  form.classList.remove("hidden");
+                  results.classList.add("hidden");
+                });
+                results.appendChild(li);
+              });
+            }
+            results.classList.remove("hidden");
+          });
+      }, 300);
     });
   }
-
-  root.querySelectorAll(".violation-dot").forEach(function (dot) {
-    dot.addEventListener("click", function (event) {
-      event.stopPropagation();
-      activate("grades");
-      var target = document.getElementById(dot.dataset.scrollTo);
-      if (target) {
-        target.scrollIntoView({ behavior: "smooth", block: "center" });
-        target.classList.add("bg-yellow-50");
-        setTimeout(function () { target.classList.remove("bg-yellow-50"); }, 1500);
-      }
-    });
-  });
 })();
 </script>
 {% endblock %}

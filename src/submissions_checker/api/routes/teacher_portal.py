@@ -6,7 +6,7 @@ import csv
 import io
 import secrets
 import urllib.parse
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ from submissions_checker.db.models import (
     Student,
     StudentAssignment,
     Subject,
+    SubjectGradebookStats,
     SubjectsAssignment,
     SubjectsStudents,
     SubjectTestStudent,
@@ -56,10 +57,8 @@ from submissions_checker.db.models.group import Group
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
 from submissions_checker.services.gradebook import (
-    build_grid,
-    compute_stats,
-    fetch_integrity_rows,
-    fetch_roster_rows,
+    build_student_grid,
+    fetch_grid_rows,
 )
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
@@ -293,15 +292,6 @@ async def teacher_subject(
 ) -> HTMLResponse:
     subject = await require_subject_access(db, subject_id, current_user)
 
-    students_result = await db.execute(
-        select(Student, Group.name.label("group_name"))
-        .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
-        .join(Group, Group.id == Student.group_id)
-        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
-        .order_by(Group.name, Student.full_name)
-    )
-    students = [{"student": row.Student, "group_name": row.group_name} for row in students_result]
-
     assignments_result = await db.execute(
         select(SubjectsAssignment)
         .where(SubjectsAssignment.subject_id == subject_id)
@@ -359,13 +349,26 @@ async def teacher_subject(
             "rejected_overflow": max(rejected_total - len(rejected_rows), 0),
         }
 
-    roster_rows = await fetch_roster_rows(db, subject_id)
-    gradebook_stats = compute_stats(roster_rows, now=datetime.now(UTC))
-    gradebook_grid = build_grid(roster_rows)
-    integrity_rows = await fetch_integrity_rows(db, subject_id)
-    integrity_by_cell = {(r.student_id, r.assignment_id): r for r in integrity_rows}
+    cached_stats = await db.get(SubjectGradebookStats, subject_id)
+    grid_rows = await fetch_grid_rows(db, subject_id)
+    student_grid = build_student_grid(grid_rows)
 
-    default_tab = "overview" if (enroll_result or test_student_flash) else "students"
+    task_pending_counts: dict[int, int] = {}
+    for row in grid_rows:
+        if (
+            row.grade is None
+            and row.submission_status is not None
+            and row.submission_status not in (SubmissionStatus.COMPLETED, SubmissionStatus.FAILED)
+        ):
+            task_pending_counts[row.assignment_id] = (
+                task_pending_counts.get(row.assignment_id, 0) + 1
+            )
+
+    default_tab = (
+        "operations"
+        if (enroll_result or test_student_flash or feedback_sent or feedback_error)
+        else "panel"
+    )
 
     return render(
         request,
@@ -373,7 +376,6 @@ async def teacher_subject(
         {
             "current_user": current_user,
             "subject": subject,
-            "students": students,
             "assignments": assignments,
             "current_semester": current_semester,
             "feedback_request": feedback_request,
@@ -382,10 +384,9 @@ async def teacher_subject(
             "test_student_info": test_student_info,
             "test_student_flash": test_student_flash,
             "enroll_result": enroll_result,
-            "gradebook_stats": gradebook_stats,
-            "gradebook_grid": gradebook_grid,
-            "integrity_rows": integrity_rows,
-            "integrity_by_cell": integrity_by_cell,
+            "cached_stats": cached_stats,
+            "student_grid": student_grid,
+            "task_pending_counts": task_pending_counts,
             "default_tab": default_tab,
         },
     )

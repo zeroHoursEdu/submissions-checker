@@ -29,6 +29,7 @@ from submissions_checker.db.models import (
     SubmissionStatus,
 )
 from submissions_checker.db.models.enums import QuizAttemptStatus, UserRole
+from submissions_checker.db.models.subject_gradebook_stats import SubjectGradebookStats
 from submissions_checker.services.gradebook import (
     fetch_grid_rows,
     fetch_integrity_rows,
@@ -240,12 +241,17 @@ async def test_fetch_integrity_rows_computes_severity_and_duration(
 
 
 async def test_fetch_integrity_rows_counts_other_event_types(
-    client: AsyncClient, db: AsyncSession, teacher, make_student
+    db: AsyncSession, teacher, make_student
 ) -> None:
     """tab_switch/window_blur aren't the only anti-cheat event types (see
     docs/anti-cheat.md): copy_attempt, keyboard_shortcut, right_click, resize,
-    fullscreen_exit must still surface as a count and still flag the row/dot,
-    even though severity_for stays spec-locked to tab_switch/window_blur/_force_fail."""
+    fullscreen_exit must still surface as a count and still flag the row,
+    even though severity_for stays spec-locked to tab_switch/window_blur/_force_fail.
+
+    Only fetch_integrity_rows() itself is asserted on here — the subject-tabs
+    rework dropped the per-attempt integrity table/grid dot from the rendered
+    page (an aggregate cheating % stat card replaced it), but fetch_integrity_rows
+    is still exactly what the subject_stats_refresh job uses for that %."""
     subject = await _make_subject(db, owner_id=teacher.id)
     a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
     student = await make_student(full_name="Other Events Student")
@@ -269,12 +275,6 @@ async def test_fetch_integrity_rows_counts_other_event_types(
     assert row.window_blur == 0
     assert row.other_events == 6
     assert row.flagged is True
-
-    authenticate(client, teacher)
-    resp = await client.get(f"/teacher/subjects/{subject.id}")
-
-    assert resp.status_code == 200
-    assert f'data-scroll-to="integrity-row-{student.id}-{a1.id}"' in resp.text
 
 
 async def test_fetch_integrity_rows_excludes_unfinished_attempts(
@@ -398,7 +398,7 @@ async def test_teacher_subject_page_includes_gradebook_context(
     assert "Context Student" in resp.text
 
 
-async def test_teacher_subject_default_tab_is_overview_after_enroll_flash(
+async def test_teacher_subject_default_tab_is_operations_after_enroll_flash(
     client: AsyncClient, db: AsyncSession, teacher
 ) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
@@ -406,10 +406,10 @@ async def test_teacher_subject_default_tab_is_overview_after_enroll_flash(
 
     resp = await client.get(f"/teacher/subjects/{subject.id}?enrolled=1")
     assert resp.status_code == 200
-    assert 'data-default-tab="overview"' in resp.text
+    assert 'data-default-tab="operations"' in resp.text
 
 
-async def test_teacher_subject_default_tab_is_students_normally(
+async def test_teacher_subject_default_tab_is_panel_normally(
     client: AsyncClient, db: AsyncSession, teacher
 ) -> None:
     subject = await _make_subject(db, owner_id=teacher.id)
@@ -417,101 +417,7 @@ async def test_teacher_subject_default_tab_is_students_normally(
 
     resp = await client.get(f"/teacher/subjects/{subject.id}")
     assert resp.status_code == 200
-    assert 'data-default-tab="students"' in resp.text
-
-
-async def test_teacher_subject_has_four_tabs(
-    client: AsyncClient, db: AsyncSession, teacher
-) -> None:
-    subject = await _make_subject(db, owner_id=teacher.id)
-    authenticate(client, teacher)
-
-    resp = await client.get(f"/teacher/subjects/{subject.id}")
-    assert resp.status_code == 200
-    for target in ["overview", "students", "assignments", "grades"]:
-        assert f'data-tab-target="{target}"' in resp.text
-        assert f'id="tab-panel-{target}"' in resp.text
-
-
-async def test_grades_tab_renders_stats_and_grid(
-    client: AsyncClient, db: AsyncSession, teacher, make_student
-) -> None:
-    subject = await _make_subject(db, owner_id=teacher.id)
-    a1 = await _make_assignment(db, subject.id, title="ЛР1", code="lab1", min_grade=50)
-    student = await make_student(full_name="Grid Student")
-    await _enroll(db, subject.id, student.id)
-    await _make_student_assignment(db, student.id, a1.id, grade=90)
-
-    authenticate(client, teacher)
-    resp = await client.get(f"/teacher/subjects/{subject.id}")
-
-    assert resp.status_code == 200
-    assert "ЛР1" in resp.text
-    assert "Grid Student" in resp.text
-    assert ">90<" in resp.text  # the grade appears as a cell value
-    assert "90.0" in resp.text  # average score stat card
-    assert "100.0%" in resp.text  # pass rate stat card — the one student passed the one assignment
-
-
-async def test_integrity_table_shows_severity_and_flag_filter(
-    client: AsyncClient, db: AsyncSession, teacher, make_student
-) -> None:
-    subject = await _make_subject(db, owner_id=teacher.id)
-    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
-    student = await make_student(full_name="Flagged Student")
-    await _enroll(db, subject.id, student.id)
-    sa = await _make_student_assignment(db, student.id, a1.id)
-    sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
-    start = datetime(2026, 9, 1, tzinfo=UTC)
-    await _make_quiz_attempt(
-        db,
-        sub.id,
-        started_at=start,
-        submitted_at=start + timedelta(seconds=100),
-        violations={"tab_switch": 3},
-    )
-
-    authenticate(client, teacher)
-    resp = await client.get(f"/teacher/subjects/{subject.id}")
-
-    assert resp.status_code == 200
-    assert "Flagged Student" in resp.text
-    assert f'id="integrity-row-{student.id}-{a1.id}"' in resp.text
-    assert f'id="cell-{student.id}-{a1.id}"' in resp.text
-    assert f'data-scroll-to="integrity-row-{student.id}-{a1.id}"' in resp.text
-    assert "data-flagged-only-toggle" in resp.text
-
-
-async def test_grid_cell_has_no_violation_dot_for_a_clean_quiz_attempt(
-    client: AsyncClient, db: AsyncSession, teacher, make_student
-) -> None:
-    """A finalized attempt with empty violations still gets an integrity row
-    (it's the full roster, per test_integrity_table_shows_severity_and_flag_filter),
-    but a teacher scanning the grid shouldn't see a warning dot on a clean cell."""
-    subject = await _make_subject(db, owner_id=teacher.id)
-    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
-    student = await make_student(full_name="Clean Student")
-    await _enroll(db, subject.id, student.id)
-    sa = await _make_student_assignment(db, student.id, a1.id)
-    sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
-    start = datetime(2026, 9, 1, tzinfo=UTC)
-    await _make_quiz_attempt(
-        db,
-        sub.id,
-        started_at=start,
-        submitted_at=start + timedelta(seconds=600),
-        violations={},
-    )
-
-    authenticate(client, teacher)
-    resp = await client.get(f"/teacher/subjects/{subject.id}")
-
-    assert resp.status_code == 200
-    assert f'id="integrity-row-{student.id}-{a1.id}"' in resp.text
-    # "violation-dot" as a bare substring also appears in the tab-switcher <script>'s
-    # querySelectorAll(".violation-dot") selector regardless of any cell rendering one —
-    # assert on the specific data-scroll-to attribute a rendered dot span would carry.
-    assert f'data-scroll-to="integrity-row-{student.id}-{a1.id}"' not in resp.text
+    assert 'data-default-tab="panel"' in resp.text
 
 
 # ── fetch_grid_rows ──────────────────────────────────────────────────────────
@@ -641,3 +547,115 @@ async def test_enroll_by_search_requires_variant_when_subject_needs_one(
         data={"student_id": str(student.id)},
     )
     assert resp.status_code == 422
+
+
+# ── reworked tabs: Панель / Завдання / Студенти / Операції ─────────────────
+
+
+async def test_teacher_subject_has_four_reworked_tabs(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert resp.status_code == 200
+    for target in ["panel", "assignments", "students", "operations"]:
+        assert f'data-tab-target="{target}"' in resp.text
+        assert f'id="tab-panel-{target}"' in resp.text
+
+
+async def test_panel_tab_shows_placeholder_when_stats_not_yet_computed(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert resp.status_code == 200
+    assert "—" in resp.text
+
+
+async def test_panel_tab_shows_cached_stats_when_present(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    db.add(
+        SubjectGradebookStats(
+            subject_id=subject.id,
+            pending_review_count=3,
+            average_mark_pct=77.5,
+            pass_pct=60.0,
+            cheating_pct=12.5,
+            computed_at=datetime.now(UTC),
+        )
+    )
+    await db.commit()
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert "77.5" in resp.text
+    assert "60.0%" in resp.text
+    assert "12.5%" in resp.text
+    assert ">3<" in resp.text
+
+
+async def test_assignments_tab_shows_pending_review_count_per_task(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Lab X", code="labx")
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id)
+    await _make_submission(db, sa.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert "Lab X" in resp.text
+    # The badge renders "<count> <label>" (e.g. "1 на перевірці"), not a bare
+    # number — assert on the count immediately followed by a space, distinct
+    # from the count appearing bare elsewhere in the page.
+    assert ">1 " in resp.text
+
+
+async def test_students_tab_shows_grid_with_quiz_and_review_columns(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Lab Y", code="laby", min_grade=50)
+    student = await make_student(full_name="Grid Tab Student")
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id, grade=88)
+    sub = Submission(
+        students_assignment_id=sa.id,
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+        source_metadata={},
+        status=SubmissionStatus.COMPLETED,
+        grade_breakdown={"quiz_score": 70.0, "quality_score": 95.0},
+    )
+    db.add(sub)
+    await db.commit()
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert "Grid Tab Student" in resp.text
+    assert "Lab Y" in resp.text
+    assert "70.0" in resp.text
+    assert "95.0" in resp.text
+    assert "violation-dot" not in resp.text
+
+
+async def test_operations_tab_has_search_enroll_and_feedback_button(
+    client: AsyncClient, db: AsyncSession, teacher
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert "data-student-search" in resp.text
+    # The view_feedback link's href is stable across all three feedback-button
+    # states (no-semester / already-sent / send-form) — asserting on it, rather
+    # than on button text that varies by state, confirms the button moved into
+    # this tab without depending on which state fired for this fixture.
+    assert f'href="/teacher/subjects/{subject.id}/feedback"' in resp.text
