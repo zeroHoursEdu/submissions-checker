@@ -317,3 +317,14 @@ async def test_teacher_subject_default_tab_is_students_normally(
     resp = await client.get(f"/teacher/subjects/{subject.id}")
     assert resp.status_code == 200
     assert 'data-default-tab="students"' in resp.text
+
+
+async def test_teacher_subject_has_four_tabs(client: AsyncClient, db: AsyncSession, teacher) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert resp.status_code == 200
+    for target in ["overview", "students", "assignments", "grades"]:
+        assert f'data-tab-target="{target}"' in resp.text
+        assert f'id="tab-panel-{target}"' in resp.text

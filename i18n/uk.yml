@@ -487,6 +487,10 @@ teacher:
   add_option: "+ Додати варіант"
   add_item: "+ Додати елемент"
   no_quiz_settings: Спочатку налаштуйте тест для початку додавання запитань.
+  tab_overview: Огляд
+  tab_students: Студенти
+  tab_assignments: Завдання
+  tab_grades: Оцінки
 
 admin:
   dashboard_title: Панель адміністратора
