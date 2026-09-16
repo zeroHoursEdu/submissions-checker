@@ -26,12 +26,11 @@ from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import StudentAssignment, SubjectsAssignment, Submission
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.services.ai.provider import AIProviderError, get_ai_provider
+from submissions_checker.services.ai_verdict import is_flagged
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
 logger = get_logger(__name__)
-
-_DEFAULT_THRESHOLD = 0.5
 
 # JSON schema the provider must satisfy (enforced natively by Anthropic; used as a
 # parse contract for OpenAI). Structured-output rules: additionalProperties:false
@@ -113,22 +112,6 @@ async def collect_lab_data(path: str) -> tuple[str, str]:
     return await asyncio.to_thread(_walk)
 
 
-def _is_flagged(verdict: dict[str, Any], ai_review_cfg: dict[str, Any]) -> bool:
-    """True if cheating or AI-generated confidence meets the configured threshold."""
-    cheating = verdict.get("cheating") or {}
-    ai_generated = verdict.get("ai_generated") or {}
-    cheat_thr = float(ai_review_cfg.get("cheating_threshold", _DEFAULT_THRESHOLD))
-    aigen_thr = float(ai_review_cfg.get("ai_generated_threshold", _DEFAULT_THRESHOLD))
-    cheat_hit = (
-        bool(cheating.get("is_cheating")) and float(cheating.get("confidence", 0)) >= cheat_thr
-    )
-    aigen_hit = (
-        bool(ai_generated.get("is_ai_generated"))
-        and float(ai_generated.get("confidence", 0)) >= aigen_thr
-    )
-    return cheat_hit or aigen_hit
-
-
 def _enter_reviewing(submission: Submission) -> None:
     """Move the submission into AI_REVIEWING, tolerating outbox retries.
 
@@ -197,7 +180,7 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> N
     submission.ai_review = verdict
 
     if next_step == "quiz":
-        if _is_flagged(verdict, ai_review_cfg):
+        if is_flagged(verdict, ai_review_cfg):
             transition(submission, "ai_review_done_teacher")
             await enqueue_teacher_review_notification(db, submission.id)
         else:
