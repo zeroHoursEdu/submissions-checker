@@ -34,6 +34,7 @@ from submissions_checker.db.models.semester import Semester
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
+from submissions_checker.db.models.subject_gradebook_stats import SubjectGradebookStats
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subject_test_student import SubjectTestStudent
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
@@ -74,6 +75,7 @@ __all__ = [
     "Student",
     "StudentAssignment",
     "Subject",
+    "SubjectGradebookStats",
     "SubjectPluginConfig",
     "SubjectTestStudent",
     "SubjectsAssignment",
