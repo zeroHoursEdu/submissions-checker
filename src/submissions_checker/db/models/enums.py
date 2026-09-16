@@ -4,14 +4,7 @@ import enum
 
 
 class SubmissionStatus(enum.StrEnum):
-    # Legacy values (kept for backwards compat with existing data)
     PENDING = "PENDING"
-    PROCESSING = "PROCESSING"
-    REVIEWING = "REVIEWING"
-    CHECKING = "CHECKING"
-    CHECK_FAILED = "CHECK_FAILED"
-    WAITING_FOR_TEACHER_REVIEW = "WAITING_FOR_TEACHER_REVIEW"
-    # Current precise statuses
     VALIDATING = "VALIDATING"
     VALIDATION_FAILED = "VALIDATION_FAILED"
     TESTING = "TESTING"
@@ -29,11 +22,6 @@ class SubmissionStatus(enum.StrEnum):
 
 
 class SubmissionSourceType(enum.StrEnum):
-    # DEPRECATED: the GitHub PR / GitLab MR ingest paths were retired. These members
-    # are retained to avoid a destructive PostgreSQL enum migration on historical rows;
-    # no code produces them. ZIP_UPLOAD is the only supported ingest source.
-    GITHUB_PR = "GITHUB_PR"
-    GITLAB_MR = "GITLAB_MR"
     ZIP_UPLOAD = "ZIP_UPLOAD"
 
     def __str__(self) -> str:
@@ -50,12 +38,6 @@ class OutboxMessageState(enum.StrEnum):
 
 
 class OutboxEventType(enum.StrEnum):
-    # DEPRECATED: PULL/REVIEW/NOTIFY drove the retired GitHub PR ingest pipeline.
-    # Retained to avoid a destructive PostgreSQL enum migration; no code dispatches
-    # them and the outbox processor will error on any stray legacy row.
-    PULL = "PULL"
-    REVIEW = "REVIEW"
-    NOTIFY = "NOTIFY"
     SEND_CREDENTIALS = "SEND_CREDENTIALS"
     SUBMISSION_REVIEWED = "SUBMISSION_REVIEWED"
     QUIZ_RESULT = "QUIZ_RESULT"

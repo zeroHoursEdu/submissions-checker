@@ -11,8 +11,6 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     # ── New precise flow ──────────────────────────────────────────────────────
     SubmissionStatus.PENDING: {
         "start_validation": SubmissionStatus.VALIDATING,
-        # Legacy: kept so existing code paths don't crash during migration
-        "start_check": SubmissionStatus.CHECKING,
     },
     SubmissionStatus.VALIDATING: {
         "validation_passed": SubmissionStatus.TESTING,
@@ -55,18 +53,6 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     SubmissionStatus.FAILED: {
         "dispute_regrade_passed": SubmissionStatus.COMPLETED,
         "dispute_regrade_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
-    },
-    # ── Legacy flow (kept for backward compat with existing data) ─────────────
-    SubmissionStatus.CHECKING: {
-        "check_passed_quiz": SubmissionStatus.QUIZ_SENT,
-        "check_passed_teacher_review": SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
-        "check_passed_none": SubmissionStatus.COMPLETED,
-        "check_failed": SubmissionStatus.CHECK_FAILED,
-    },
-    SubmissionStatus.WAITING_FOR_TEACHER_REVIEW: {
-        "teacher_approve_quiz": SubmissionStatus.QUIZ_SENT,
-        "teacher_approve_done": SubmissionStatus.COMPLETED,
-        "teacher_reject": SubmissionStatus.CHECK_FAILED,
     },
 }
 

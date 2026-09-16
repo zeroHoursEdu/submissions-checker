@@ -26,7 +26,6 @@ class _Sub:
 LEGAL = [
     # New precise flow
     (S.PENDING, "start_validation", S.VALIDATING),
-    (S.PENDING, "start_check", S.CHECKING),  # legacy alias kept on PENDING
     (S.VALIDATING, "validation_passed", S.TESTING),
     (S.VALIDATING, "validation_failed", S.VALIDATION_FAILED),
     (S.TESTING, "test_failed", S.TEST_FAILED),
@@ -47,14 +46,6 @@ LEGAL = [
     # dispute, the attempt was re-scored and now passes.
     (S.FAILED, "dispute_regrade_passed", S.COMPLETED),
     (S.FAILED, "dispute_regrade_passed_teacher", S.AWAITING_TEACHER_REVIEW),
-    # Legacy flow
-    (S.CHECKING, "check_passed_quiz", S.QUIZ_SENT),
-    (S.CHECKING, "check_passed_teacher_review", S.WAITING_FOR_TEACHER_REVIEW),
-    (S.CHECKING, "check_passed_none", S.COMPLETED),
-    (S.CHECKING, "check_failed", S.CHECK_FAILED),
-    (S.WAITING_FOR_TEACHER_REVIEW, "teacher_approve_quiz", S.QUIZ_SENT),
-    (S.WAITING_FOR_TEACHER_REVIEW, "teacher_approve_done", S.COMPLETED),
-    (S.WAITING_FOR_TEACHER_REVIEW, "teacher_reject", S.CHECK_FAILED),
 ]
 
 
@@ -84,8 +75,7 @@ ILLEGAL = [
     (S.AWAITING_TEACHER_REVIEW, "dispute_regrade_passed"),
     (S.VALIDATION_FAILED, "validation_passed"),
     (S.TEST_FAILED, "test_passed_ai"),
-    (S.AWAITING_TEACHER_REVIEW, "teacher_approve_done"),  # legacy event on new state
-    (S.CHECKING, "teacher_approve"),  # new event on legacy state
+    (S.AWAITING_TEACHER_REVIEW, "teacher_approve_done"),  # retired legacy event
     (S.PENDING, "totally_unknown_event"),
 ]
 
@@ -114,7 +104,24 @@ def test_error_message_includes_event_and_status() -> None:
 
 
 def test_status_with_no_outgoing_edges_raises():
-    # PROCESSING/REVIEWING exist in the enum but are not in the transition table.
-    sub = _Sub(S.PROCESSING)
+    # COMPLETED is terminal: it exists in the enum but has no row in the transition table.
+    sub = _Sub(S.COMPLETED)
     with pytest.raises(InvalidTransitionError):
         transition(sub, "start_validation")
+
+
+def test_legacy_statuses_are_gone() -> None:
+    for name in (
+        "PROCESSING",
+        "REVIEWING",
+        "CHECKING",
+        "CHECK_FAILED",
+        "WAITING_FOR_TEACHER_REVIEW",
+    ):
+        assert not hasattr(S, name), name
+
+
+def test_start_check_alias_is_gone() -> None:
+    sub = _Sub(S.PENDING)
+    with pytest.raises(InvalidTransitionError):
+        transition(sub, "start_check")

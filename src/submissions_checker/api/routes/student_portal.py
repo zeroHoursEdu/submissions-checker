@@ -63,10 +63,8 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 TRANSIENT_STATUSES = frozenset(
     {
         SubmissionStatus.PENDING,
-        SubmissionStatus.PROCESSING,
         SubmissionStatus.VALIDATING,
         SubmissionStatus.TESTING,
-        SubmissionStatus.CHECKING,
         SubmissionStatus.AWAITING_AI_REVIEW,
         SubmissionStatus.AI_REVIEWING,
     }

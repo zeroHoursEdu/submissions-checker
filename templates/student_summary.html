@@ -106,7 +106,7 @@
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">{{ vocab.common.status_failed }}</span>
             {% elif row.submission_status == "QUIZ_SENT" %}
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">{{ vocab.common.status_quiz_pending }}</span>
-            {% elif row.submission_status == "WAITING_FOR_TEACHER_REVIEW" %}
+            {% elif row.submission_status == "AWAITING_TEACHER_REVIEW" %}
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">{{ vocab.common.status_in_review }}</span>
             {% elif row.submission_status %}
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">{{ row.submission_status }}</span>

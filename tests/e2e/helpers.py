@@ -25,7 +25,7 @@ def db_conn() -> psycopg2.extensions.connection:
 
 
 _STATUS_ALIASES = {
-    "FAILED": {"FAILED", "TEST_FAILED", "CHECK_FAILED", "VALIDATION_FAILED"},
+    "FAILED": {"FAILED", "TEST_FAILED", "VALIDATION_FAILED"},
     "PASSED": {"PASSED", "COMPLETED"},
     "QUIZ_SENT": {"QUIZ_SENT"},
 }

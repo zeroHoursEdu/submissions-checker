@@ -125,53 +125,6 @@ async def test_outbox_processor_marks_message_error_on_failure(
 
 
 @pytest.mark.asyncio
-async def test_outbox_processor_drops_retired_event_type_without_retry(
-    db_session: AsyncSession, monkeypatch
-) -> None:
-    """A retired/legacy event type (docs/known_bugs.md #8) is marked ERROR and its
-    retry budget is pre-exhausted on the first attempt, instead of retrying
-    outbox_max_retries times against the same undispatchable event before going
-    silent.
-
-    This exercises the real dispatch routing table (no dispatch monkeypatch): the
-    deprecated PULL event has no handler and must be dropped immediately.
-    """
-    from submissions_checker.core.config import get_settings
-
-    message = OutboxMessage(
-        event_type=OutboxEventType.PULL,
-        payload={},
-    )
-    db_session.add(message)
-    await db_session.commit()
-    await db_session.refresh(message)
-
-    _patch_processor_session(monkeypatch, db_session)
-
-    await outbox_processor.process_outbox_messages()
-
-    await db_session.refresh(message)
-    assert message.state == OutboxMessageState.ERROR
-    assert message.retry_count >= get_settings().outbox_max_retries
-    assert "Retired event type" in (message.error_message or "")
-
-    # Excluded from the next poll's retry_count < outbox_max_retries filter.
-    pending = (
-        (
-            await db_session.execute(
-                select(OutboxMessage).where(
-                    OutboxMessage.state.in_([OutboxMessageState.PENDING, OutboxMessageState.ERROR]),
-                    OutboxMessage.retry_count < get_settings().outbox_max_retries,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert message not in pending
-
-
-@pytest.mark.asyncio
 async def test_dispatch_still_errors_on_a_truly_unhandled_event_type() -> None:
     """The generic unknown-type branch (distinct from the retired-type branch)
     still raises for an event type that is neither dispatched nor retired."""

@@ -31,30 +31,30 @@
     <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
     Quiz sent
   </span>
-{% elif status == "REVIEWING" %}
+{% elif status in ["AWAITING_AI_REVIEW", "AI_REVIEWING"] %}
   <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-700">
     <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
     Under review
   </span>
-{% elif status == "CHECKING" %}
+{% elif status in ["VALIDATING", "TESTING"] %}
   <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-700">
     <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
     Checking your submission…
   </span>
-{% elif status == "CHECK_FAILED" %}
+{% elif status in ["VALIDATION_FAILED", "TEST_FAILED"] %}
   <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700">
     <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/></svg>
     Check failed
   </span>
-{% elif status == "WAITING_FOR_TEACHER_REVIEW" %}
+{% elif status == "AWAITING_TEACHER_REVIEW" %}
   <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-700">
     <span class="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
     Waiting for teacher review
   </span>
-{% elif status in ["PENDING", "PROCESSING"] %}
+{% elif status == "PENDING" %}
   <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-700">
     <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-    {% if status == "PROCESSING" %}Processing{% else %}Submitted{% endif %}
+    Submitted
   </span>
 {% else %}
   <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-slate-100 text-slate-500">
@@ -204,7 +204,7 @@
     {% endif %}
   </div>
 
-  {% if assignment.check_reason and assignment.submission_status == "CHECK_FAILED" %}
+  {% if assignment.check_reason and assignment.submission_status in ["VALIDATION_FAILED", "TEST_FAILED"] %}
   <div class="mt-3 flex items-start gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
     <svg class="w-4 h-4 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
       <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/>

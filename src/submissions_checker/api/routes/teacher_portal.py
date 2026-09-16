@@ -938,11 +938,7 @@ async def teacher_review_submission(
         )
     )
     submission = result.scalar_one_or_none()
-    _teacher_review_statuses = {
-        SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
-        SubmissionStatus.AWAITING_TEACHER_REVIEW,
-    }
-    if submission is None or submission.status not in _teacher_review_statuses:
+    if submission is None or submission.status != SubmissionStatus.AWAITING_TEACHER_REVIEW:
         raise HTTPException(status_code=404)
 
     sa = submission.students_assignment
@@ -1031,11 +1027,7 @@ async def teacher_review_submission_action(
         )
     )
     submission = result.scalar_one_or_none()
-    _teacher_review_statuses = {
-        SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
-        SubmissionStatus.AWAITING_TEACHER_REVIEW,
-    }
-    if submission is None or submission.status not in _teacher_review_statuses:
+    if submission is None or submission.status != SubmissionStatus.AWAITING_TEACHER_REVIEW:
         raise HTTPException(status_code=404)
 
     sa = submission.students_assignment
@@ -1065,22 +1057,18 @@ async def teacher_review_submission_action(
             )
             if already_passed is not None:
                 has_quiz = False
-        if submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW:
-            transition(submission, "teacher_send_quiz" if has_quiz else "teacher_approve")
-        else:
-            transition(submission, "teacher_approve_quiz" if has_quiz else "teacher_approve_done")
+        event = "teacher_send_quiz" if has_quiz else "teacher_approve"
+        transition(submission, event)
     elif action == "reject":
+        event = "teacher_reject"
         submission.test_results = {"check_reason": clean_reason or "Rejected by teacher"}
-        if submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW:
-            transition(submission, "teacher_reject")
-        else:
-            transition(submission, "teacher_reject")
+        transition(submission, event)
     else:
         raise HTTPException(status_code=400, detail="Invalid action")
 
     # A teacher approval that completes the submission (no quiz) finalizes the grade now;
     # approvals that route to a quiz finalize on quiz completion instead.
-    if submission.status == SubmissionStatus.COMPLETED:
+    if event == "teacher_approve":
         await finalize_grade(db, submission)
 
     # Queue email notification to student

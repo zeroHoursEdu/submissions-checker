@@ -398,28 +398,6 @@ async def test_review_invalid_action_is_400(client: AsyncClient, db, teacher, ma
     assert submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
 
 
-async def test_legacy_waiting_status_approve_completes(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
-    # Legacy review status path: WAITING_FOR_TEACHER_REVIEW + approve (no quiz)
-    # → teacher_approve_done → COMPLETED.
-    subject = await _make_subject(db, owner_id=teacher.id)
-    sa = await _make_assignment(db, subject.id)
-    student = await make_student()
-    submission = await _make_submission(
-        db, sa.id, student.id, status=SubmissionStatus.WAITING_FOR_TEACHER_REVIEW
-    )
-    authenticate(client, teacher)
-    resp = await client.post(
-        f"/teacher/submissions/{submission.id}/review",
-        data={"action": "approve"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-    await db.refresh(submission)
-    assert submission.status == SubmissionStatus.COMPLETED
-
-
 # ── 4. Enroll / unenroll mutate subjects_students ────────────────────────────
 
 

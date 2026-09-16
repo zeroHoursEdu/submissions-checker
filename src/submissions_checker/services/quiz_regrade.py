@@ -157,10 +157,7 @@ async def _advance_submission(db: AsyncSession, attempt: QuizAttempt) -> None:
         # Already passed on some attempt; the quiz component may still have risen.
         await finalize_grade(db, submission)
         return
-    elif status in (
-        SubmissionStatus.AWAITING_TEACHER_REVIEW,
-        SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
-    ):
+    elif status == SubmissionStatus.AWAITING_TEACHER_REVIEW:
         # The teacher's approval will call finalize_grade; writing a grade now pre-empts it.
         return
     else:

@@ -27,11 +27,6 @@ logger = get_logger(__name__)
 # Using a large prime number to avoid collision with other locks
 OUTBOX_PROCESSOR_LOCK_ID = 7919  # Prime number for lock identification
 
-# Retired event types from the removed GitHub PR ingest flow. No code path dispatches
-# them; any stray row is permanently undispatchable, so it's failed immediately rather
-# than retried outbox_max_retries times against the same terminal outcome.
-_RETIRED_EVENT_TYPES = (OutboxEventType.PULL, OutboxEventType.REVIEW, OutboxEventType.NOTIFY)
-
 
 async def process_outbox_messages() -> None:
     """
@@ -152,7 +147,7 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     This function executes tasks synchronously (awaiting completion) within the
     database transaction, ensuring that task side effects (creating Submission
-    records, creating REVIEW messages) are committed atomically with the PULL
+    records, enqueueing follow-up messages) are committed atomically with the
     message state change.
 
     Args:
@@ -196,17 +191,6 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     elif message.event_type == OutboxEventType.QUIZ_DISPUTE_RESOLVED:
         await execute_quiz_dispute_resolved_task(db, message.payload)
-
-    elif message.event_type in _RETIRED_EVENT_TYPES:
-        logger.error(
-            "outbox_retired_event_type_dropped",
-            message_id=message.id,
-            event_type=message.event_type.value,
-        )
-        # Pre-exhaust the retry budget so this row is excluded from the next poll's
-        # retry_count < outbox_max_retries filter — it fails once, not N times.
-        message.retry_count = max(message.retry_count, get_settings().outbox_max_retries)
-        raise ValueError(f"Retired event type, dropped without retry: {message.event_type}")
 
     else:
         logger.error(

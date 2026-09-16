@@ -20,27 +20,27 @@
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
     <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>{{ vocab.common.status_failed }}
   </span>
-{% elif status in ["REVIEWING", "QUIZ_SENT"] %}
+{% elif status in ["AWAITING_AI_REVIEW", "AI_REVIEWING", "QUIZ_SENT"] %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
     <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
     {% if status == "QUIZ_SENT" %}{{ vocab.common.status_quiz_sent }}{% else %}{{ vocab.common.status_under_review }}{% endif %}
   </span>
-{% elif status == "CHECKING" %}
+{% elif status in ["VALIDATING", "TESTING"] %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
     <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>{{ vocab.common.status_checking }}
   </span>
-{% elif status == "CHECK_FAILED" %}
+{% elif status in ["VALIDATION_FAILED", "TEST_FAILED"] %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
     <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>{{ vocab.common.status_check_failed }}
   </span>
-{% elif status == "WAITING_FOR_TEACHER_REVIEW" %}
+{% elif status == "AWAITING_TEACHER_REVIEW" %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
     <span class="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>{{ vocab.common.status_awaiting_review }}
   </span>
-{% elif status in ["PENDING", "PROCESSING"] %}
+{% elif status == "PENDING" %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
     <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-    {% if status == "PROCESSING" %}{{ vocab.common.status_processing }}{% else %}{{ vocab.common.status_submitted }}{% endif %}
+    {{ vocab.common.status_submitted }}
   </span>
 {% else %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500">
@@ -102,7 +102,7 @@
         <td class="px-5 py-3.5 font-medium text-slate-900">{{ row.full_name }}</td>
         <td class="px-4 py-3.5">
           {{ status_badge(row.submission_status) }}
-          {% if row.submission_status == "WAITING_FOR_TEACHER_REVIEW" and row.submission_id %}
+          {% if row.submission_status == "AWAITING_TEACHER_REVIEW" and row.submission_id %}
           <a href="/teacher/submissions/{{ row.submission_id }}/review"
              class="ml-1.5 inline-flex items-center text-xs font-medium text-purple-600 hover:text-purple-800 transition-colors">
             {{ vocab.teacher.review_action }}

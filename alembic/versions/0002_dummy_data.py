@@ -50,23 +50,22 @@ def upgrade() -> None:
         ("Mykola Shevchenko","mykola@example.com",  "mykola-shevchenko"),
     ]
     student_ids: dict[str, int] = {}
-    for full_name, email, github in students_raw:
+    for full_name, email, key in students_raw:
         sid = conn.execute(
             text(
-                "INSERT INTO students (group_id, github_username, email, full_name) "
-                "VALUES (:gid, :github, :email, :name) RETURNING id"
+                "INSERT INTO students (group_id, email, full_name) "
+                "VALUES (:gid, :email, :name) RETURNING id"
             ),
-            {"gid": group_id, "github": github, "email": email, "name": full_name},
+            {"gid": group_id, "email": email, "name": full_name},
         ).scalar_one()
-        student_ids[github] = sid
+        student_ids[key] = sid
 
     # ── Subjects ─────────────────────────────────────────────────────────────
     python_id = conn.execute(
         text(
-            "INSERT INTO subjects (name, description, github_repo) "
+            "INSERT INTO subjects (name, description) "
             "VALUES ('Python Programming', "
-            "        'Introduction to Python — data types, functions, OOP', "
-            "        'https://github.com/example/python-labs') "
+            "        'Introduction to Python — data types, functions, OOP') "
             "RETURNING id"
         )
     ).scalar_one()
@@ -263,12 +262,12 @@ def upgrade() -> None:
 
     # ── Submissions (varied statuses for UI variety) ──────────────────────────
     submissions = [
-        # Ivan – Lab 2 Python: submitted via GitHub PR, currently under review
-        (sa_ids[(ivan, py_asgn_ids[1])], "GITHUB_PR", "REVIEWING"),
+        # Ivan – Lab 2 Python: awaiting teacher review
+        (sa_ids[(ivan, py_asgn_ids[1])], "ZIP_UPLOAD", "AWAITING_TEACHER_REVIEW"),
         # Olena – Lab 2 DB: uploaded ZIP, waiting to be processed
         (sa_ids[(olena, db_asgn_ids[1])], "ZIP_UPLOAD", "PENDING"),
-        # Mykola – Lab 1 DB: submitted via GitHub PR, failed
-        (sa_ids[(mykola, db_asgn_ids[0])], "GITHUB_PR", "FAILED"),
+        # Mykola – Lab 1 DB: failed
+        (sa_ids[(mykola, db_asgn_ids[0])], "ZIP_UPLOAD", "FAILED"),
     ]
     for sa_id, src, status in submissions:
         conn.execute(

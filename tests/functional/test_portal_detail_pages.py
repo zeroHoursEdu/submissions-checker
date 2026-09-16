@@ -7,7 +7,7 @@ Targets reachable branches that the existing portal suites only lightly touch:
   flags) — owner 200 with seeded data reflected, cross-teacher 403, missing 404.
 * ``teacher_portal.teacher_students`` (the registration overview list).
 * ``teacher_portal.teacher_review_submission`` GET render + the quiz-approve
-  branches of the POST action (``teacher_send_quiz`` / ``teacher_approve_quiz``).
+  branches of the POST action (``teacher_send_quiz`` / ``teacher_approve``).
 * ``student_portal.assignment_detail`` quiz-metadata branches (latest attempt
   present → ``quiz_attempt_id``; no attempt but plugin config → ``max_attempts``)
   and ``check_reason`` surfacing.
@@ -441,61 +441,6 @@ async def test_review_approve_with_quiz_sends_quiz_from_awaiting(
     assert sub.status == SubmissionStatus.QUIZ_SENT
 
 
-async def test_review_approve_with_quiz_from_legacy_waiting_sends_quiz(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
-    # WAITING_FOR_TEACHER_REVIEW + approve + quiz → teacher_approve_quiz →
-    # QUIZ_SENT (covers the legacy-status has_quiz branch, lines 876-877).
-    subject = await _make_subject(db, owner_id=teacher.id)
-    sa = await _make_assignment(db, subject.id, code="quizlab")
-    student = await make_student(email="q2@example.com")
-    student_sa = await _make_student_assignment(db, student.id, sa.id)
-    cfg = await _make_plugin_config(
-        db,
-        subject.id,
-        {"assignments": {"quizlab": {"quiz": {"questions": [{"id": 0, "type": "single_choice"}]}}}},
-    )
-    sub = await _make_submission(
-        db,
-        student_sa.id,
-        status=SubmissionStatus.WAITING_FOR_TEACHER_REVIEW,
-        plugin_config_id=cfg.id,
-    )
-    authenticate(client, teacher)
-    resp = await client.post(
-        f"/teacher/submissions/{sub.id}/review",
-        data={"action": "approve"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-    await db.refresh(sub)
-    assert sub.status == SubmissionStatus.QUIZ_SENT
-
-
-async def test_review_reject_from_legacy_waiting_fails(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
-    # WAITING_FOR_TEACHER_REVIEW + reject → teacher_reject → CHECK_FAILED
-    # (covers the legacy-status reject branch, lines 882-883).
-    subject = await _make_subject(db, owner_id=teacher.id)
-    sa = await _make_assignment(db, subject.id, code="rev1")
-    student = await make_student(email="q3@example.com")
-    student_sa = await _make_student_assignment(db, student.id, sa.id)
-    sub = await _make_submission(
-        db, student_sa.id, status=SubmissionStatus.WAITING_FOR_TEACHER_REVIEW
-    )
-    authenticate(client, teacher)
-    resp = await client.post(
-        f"/teacher/submissions/{sub.id}/review",
-        data={"action": "reject", "reason": "no good"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-    await db.refresh(sub)
-    assert sub.status == SubmissionStatus.CHECK_FAILED
-    assert sub.test_results == {"check_reason": "no good"}
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # student_portal.assignment_detail quiz-metadata branches  248-271
 # ─────────────────────────────────────────────────────────────────────────────
@@ -623,7 +568,7 @@ async def test_student_summary_classifies_overdue_and_upcoming(
 async def test_student_assignment_detail_check_reason_surfaced(
     student_client: AsyncClient, db, student_user
 ) -> None:
-    # A CHECK_FAILED submission whose test_results carries check_reason → the
+    # A TEST_FAILED submission whose test_results carries check_reason → the
     # detail page reads it (line 270-271) and the template surfaces it.
     sid = student_user.student_id
     subject = await _make_subject(db, owner_id=None, name="ReasonSubj")
@@ -633,7 +578,7 @@ async def test_student_assignment_detail_check_reason_surfaced(
     await _make_submission(
         db,
         student_sa.id,
-        status=SubmissionStatus.CHECK_FAILED,
+        status=SubmissionStatus.TEST_FAILED,
         test_results={"check_reason": "compilation error"},
         created_at=datetime.now(UTC),
     )

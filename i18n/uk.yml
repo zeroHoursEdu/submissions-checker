@@ -20,7 +20,6 @@ common:
   status_in_review: На перевірці
   status_not_submitted: Не здано
   status_submitted: Здано
-  status_processing: Обробляється
   status_checking: Перевіряється…
   status_check_failed: Помилка перевірки
   status_awaiting_review: Очікує перевірки

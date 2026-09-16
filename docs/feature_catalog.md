@@ -22,8 +22,8 @@ detail.
   on every subject-scoped page (object-level authz bypass).
 - **No self-registration.** Admins create teachers; teachers create students; students
   never self-enroll. There is no public sign-up.
-- **ZIP only.** Submissions are ZIP uploads. The GitHub-PR / GitLab-MR ingest is **retired**
-  — its enum members remain only to avoid a destructive DB migration; no code produces them.
+- **ZIP only.** Submissions are ZIP uploads; the GitHub-PR / GitLab-MR ingest was retired
+  and its enum values dropped in migration 0027.
 
 ---
 
@@ -116,9 +116,6 @@ AWAITING_TEACHER_REVIEW ──teacher_approve──▶ COMPLETED
                         ──teacher_reject──▶ FAILED
                         ──teacher_send_quiz──▶ QUIZ_SENT
 ```
-
-A legacy flow (`CHECKING`, `WAITING_FOR_TEACHER_REVIEW`, `CHECK_FAILED`, …) is retained for
-backward compatibility with existing data but is not produced by new submissions.
 
 ### Review modes (set per assignment in the config)
 

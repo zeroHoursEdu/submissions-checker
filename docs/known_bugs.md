@@ -152,6 +152,9 @@ before landing permanently in ERROR.
 `outbox_retired_event_type_dropped` and pre-exhausts the retry budget, so they fail once
 instead of retrying to exhaustion (`fix-known-bugs-batch`).
 
+**Closed (2026-09-17):** the retired event types were dropped from the enum in migration
+0027; the branch no longer exists.
+
 ---
 
 ## 9. 🟡 Quiz-result email notifications fail against the configured Brevo key
