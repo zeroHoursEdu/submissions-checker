@@ -381,3 +381,35 @@ async def test_integrity_table_shows_severity_and_flag_filter(
     assert f'id="cell-{student.id}-{a1.id}"' in resp.text
     assert "violation-dot" in resp.text
     assert "data-flagged-only-toggle" in resp.text
+
+
+async def test_grid_cell_has_no_violation_dot_for_a_clean_quiz_attempt(
+    client: AsyncClient, db: AsyncSession, teacher, make_student
+) -> None:
+    """A finalized attempt with empty violations still gets an integrity row
+    (it's the full roster, per test_integrity_table_shows_severity_and_flag_filter),
+    but a teacher scanning the grid shouldn't see a warning dot on a clean cell."""
+    subject = await _make_subject(db, owner_id=teacher.id)
+    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
+    student = await make_student(full_name="Clean Student")
+    await _enroll(db, subject.id, student.id)
+    sa = await _make_student_assignment(db, student.id, a1.id)
+    sub = await _make_submission(db, sa.id, status=SubmissionStatus.COMPLETED)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    await _make_quiz_attempt(
+        db,
+        sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=600),
+        violations={},
+    )
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+
+    assert resp.status_code == 200
+    assert f'id="integrity-row-{student.id}-{a1.id}"' in resp.text
+    # "violation-dot" as a bare substring also appears in the tab-switcher <script>'s
+    # querySelectorAll(".violation-dot") selector regardless of any cell rendering one —
+    # assert on the specific data-scroll-to attribute a rendered dot span would carry.
+    assert f'data-scroll-to="integrity-row-{student.id}-{a1.id}"' not in resp.text
