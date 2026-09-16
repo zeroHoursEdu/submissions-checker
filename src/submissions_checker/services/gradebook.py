@@ -163,3 +163,31 @@ def compute_stats(rows: list[RosterRow], *, now: datetime) -> GradebookStats:
         overdue_count=overdue_count,
         pending_review_count=pending_review_count,
     )
+
+
+def build_grid(rows: list[RosterRow]) -> GradebookGrid:
+    columns: list[GradebookColumn] = []
+    seen_assignments: set[int] = set()
+    for r in rows:
+        if r.assignment_id not in seen_assignments:
+            seen_assignments.add(r.assignment_id)
+            columns.append(GradebookColumn(r.assignment_id, r.assignment_title, r.max_grade))
+
+    cells_by_student: dict[int, dict[int, GradebookCell]] = {}
+    names_by_student: dict[int, str] = {}
+    for r in rows:
+        cells_by_student.setdefault(r.student_id, {})[r.assignment_id] = GradebookCell(
+            r.student_assignment_id,
+            r.grade,
+            cell_status(r.grade, r.min_grade, r.submission_status),
+        )
+        names_by_student[r.student_id] = r.student_name
+
+    grid_rows = []
+    for student_id, cells in cells_by_student.items():
+        grades = [c.grade for c in cells.values() if c.grade is not None]
+        total = sum(grades) if grades else None
+        grid_rows.append(GradebookRow(student_id, names_by_student[student_id], cells, total))
+    grid_rows.sort(key=lambda row: row.student_name)
+
+    return GradebookGrid(columns=columns, rows=grid_rows)

@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.services.gradebook import (
     RosterRow,
+    build_grid,
     cell_status,
     compute_stats,
     duration_anomalous,
@@ -175,3 +176,45 @@ def test_compute_stats_pending_review_counts_ungraded_non_terminal_submissions()
         _row(assignment_id=4, grade=None, submission_status=SubmissionStatus.AWAITING_TEACHER_REVIEW),
     ]
     assert compute_stats(rows, now=_NOW).pending_review_count == 2
+
+
+def test_build_grid_columns_follow_first_seen_row_order() -> None:
+    rows = [
+        _row(student_id=1, assignment_id=2, grade=None),
+        _row(student_id=1, assignment_id=1, grade=None),
+    ]
+    grid = build_grid(rows)
+    assert [c.assignment_id for c in grid.columns] == [2, 1]
+
+
+def test_build_grid_row_total_sums_graded_cells_only() -> None:
+    rows = [
+        _row(student_id=1, assignment_id=1, grade=80),
+        _row(student_id=1, assignment_id=2, grade=None),
+        _row(student_id=1, assignment_id=3, grade=20),
+    ]
+    grid = build_grid(rows)
+    assert grid.rows[0].total == 100
+
+
+def test_build_grid_row_total_is_none_when_nothing_graded() -> None:
+    rows = [_row(student_id=1, assignment_id=1, grade=None)]
+    grid = build_grid(rows)
+    assert grid.rows[0].total is None
+
+
+def test_build_grid_cell_status_matches_cell_status_rule() -> None:
+    rows = [_row(student_id=1, assignment_id=1, grade=90, min_grade=50)]
+    grid = build_grid(rows)
+    assert grid.rows[0].cells[1].status == "passed"
+    assert grid.rows[0].cells[1].grade == 90
+
+
+def test_build_grid_rows_sorted_by_student_name() -> None:
+    rows = [
+        _row(student_id=2, assignment_id=1),
+        _row(student_id=1, assignment_id=1),
+    ]
+    grid = build_grid(rows)
+    # _row() names students "Student {id}" so lexical order is Student 1, Student 2
+    assert [r.student_id for r in grid.rows] == [1, 2]
