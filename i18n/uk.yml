@@ -67,6 +67,7 @@ auth:
   error_mismatch: Паролі не збігаються.
   error_too_short: Пароль має містити щонайменше 8 символів.
   error_same_as_current: Новий пароль має відрізнятися від поточного.
+  error_too_many_attempts: Забагато спроб. Спробуйте ще раз за 15 хвилин.
 
 student:
   summary_title: Моє зведення

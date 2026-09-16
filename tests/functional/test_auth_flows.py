@@ -418,3 +418,55 @@ async def test_change_password_rejects_bad_input_with_422(
     assert resp.status_code == 422
     await db.refresh(user)
     assert bcrypt.checkpw(PASSWORD.encode(), user.password_hash.encode())
+
+
+# ── Throttling ────────────────────────────────────────────────────────────────
+
+
+async def test_login_is_throttled_after_repeated_failures(
+    client: AsyncClient, make_user, monkeypatch
+) -> None:
+    from submissions_checker.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_login_limiter", rate_limit.SlidingWindowLimiter(10, 900))
+    await make_user(role=UserRole.TEACHER, username="erin", password=PASSWORD)
+    for _ in range(10):
+        r = await client.post("/auth/login", data={"username": "erin", "password": "nope"})
+        assert r.status_code == 401
+    r = await client.post("/auth/login", data={"username": "erin", "password": "nope"})
+    assert r.status_code == 429
+    # Even the right password is refused while blocked.
+    r = await client.post("/auth/login", data={"username": "erin", "password": PASSWORD})
+    assert r.status_code == 429
+
+
+async def test_successful_login_resets_the_counter(
+    client: AsyncClient, make_user, monkeypatch
+) -> None:
+    from submissions_checker.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_login_limiter", rate_limit.SlidingWindowLimiter(3, 900))
+    await make_user(role=UserRole.TEACHER, username="fay", password=PASSWORD)
+    for _ in range(2):
+        await client.post("/auth/login", data={"username": "fay", "password": "nope"})
+    ok = await client.post(
+        "/auth/login", data={"username": "fay", "password": PASSWORD}, follow_redirects=False
+    )
+    assert ok.status_code == 303
+    client.cookies.clear()
+    for _ in range(2):
+        r = await client.post("/auth/login", data={"username": "fay", "password": "nope"})
+        assert r.status_code == 401
+
+
+async def test_forgot_password_is_throttled_per_client(client: AsyncClient, monkeypatch) -> None:
+    from submissions_checker.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_login_limiter", rate_limit.SlidingWindowLimiter(2, 900))
+    for _ in range(2):
+        assert (
+            await client.post("/auth/forgot-password", data={"username": "nobody"})
+        ).status_code == 200
+    assert (
+        await client.post("/auth/forgot-password", data={"username": "nobody"})
+    ).status_code == 429

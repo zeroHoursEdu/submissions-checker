@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     secret_key: str = Field(..., min_length=32)
     debug: bool = False
 
+    # Credential-endpoint throttling (per process, per client IP + username).
+    login_max_attempts: int = 10
+    login_window_seconds: int = 900
+
     # API
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 

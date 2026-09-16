@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -13,6 +14,7 @@ from submissions_checker.api.dependencies import CurrentUser, DBSession
 from submissions_checker.core import metrics
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.i18n import get_vocab
+from submissions_checker.core.rate_limit import client_ip, get_login_limiter
 from submissions_checker.core.security import (
     COOKIE_NAME,
     JWT_EXPIRY_HOURS,
@@ -34,6 +36,10 @@ from submissions_checker.services.notifications.templates import password_reset_
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _MIN_PASSWORD_LEN = 8
+
+
+def _auth_vocab(request: Request) -> dict[str, Any]:
+    return get_vocab(request.cookies.get("lang")).get("auth", {})  # type: ignore[no-any-return]
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
@@ -75,12 +81,23 @@ async def login(
     username: str = Form(...),
     password: str = Form(...),
 ) -> Response:
+    limiter = get_login_limiter()
+    throttle_key = f"{client_ip(request)}|{username.strip().lower()}"
+    if limiter.is_blocked(throttle_key):
+        return render(
+            request,
+            "login.html",
+            {"current_user": None, "error": _auth_vocab(request).get("error_too_many_attempts")},
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
     result = await db.execute(
         select(User).where(User.username == username, User.is_active.is_(True))
     )
     user = result.scalar_one_or_none()
 
     if user is None or not verify_password(password, user.password_hash):
+        limiter.record_failure(throttle_key)
         return render(
             request,
             "login.html",
@@ -88,6 +105,7 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    limiter.reset(throttle_key)
     db.add(UserLogin(user_id=user.id))
     await db.commit()
     metrics.logins_total.labels(role=user.role.value).inc()
@@ -119,6 +137,22 @@ async def forgot_password(
     db: DBSession,
     username: str = Form(...),
 ) -> HTMLResponse:
+    # Every request costs budget: each one may send an email.
+    limiter = get_login_limiter()
+    throttle_key = f"forgot|{client_ip(request)}"
+    if limiter.is_blocked(throttle_key):
+        return render(
+            request,
+            "forgot_password.html",
+            {
+                "current_user": None,
+                "sent": False,
+                "error": _auth_vocab(request).get("error_too_many_attempts"),
+            },
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    limiter.record_failure(throttle_key)
+
     settings = get_settings()
     result = await db.execute(
         select(User).where(User.username == username.strip(), User.is_active.is_(True))
