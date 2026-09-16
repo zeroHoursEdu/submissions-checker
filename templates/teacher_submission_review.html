@@ -75,6 +75,46 @@
       </dl>
     </div>
 
+    {% if ai_summary %}
+    <div id="ai-verdict" class="bg-white rounded-xl border {% if ai_summary.flagged %}border-red-300{% else %}border-slate-200{% endif %} shadow-sm p-5">
+      <h2 class="font-semibold text-slate-900 mb-1 flex items-center gap-2">
+        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+        </svg>
+        {{ vocab.teacher.ai_review_title }}
+        {% if ai_summary.flagged %}
+        <span class="ml-auto inline-flex items-center text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">{{ vocab.teacher.ai_flagged }}</span>
+        {% else %}
+        <span class="ml-auto inline-flex items-center text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">{{ vocab.teacher.ai_clean }}</span>
+        {% endif %}
+      </h2>
+      <p class="text-xs text-slate-400 mb-4">{{ ai_summary.provider or "—" }} · {{ ai_summary.model or "—" }}{% if ai_summary.code_mark is not none %} · {{ vocab.teacher.ai_code_mark }} {{ ai_summary.code_mark }}/100{% endif %}</p>
+
+      <dl class="space-y-3 text-sm">
+        <div data-ai-flag="cheating" class="rounded-lg px-3 py-2 {% if ai_summary.cheating %}bg-red-50{% else %}bg-slate-50{% endif %}">
+          <dt class="flex items-center justify-between font-medium {% if ai_summary.cheating %}text-red-700{% else %}text-slate-700{% endif %}">
+            <span>{{ vocab.teacher.ai_cheating }}</span>
+            <span class="text-xs font-normal">{{ (ai_summary.cheating_confidence * 100) | round | int }}%</span>
+          </dt>
+          {% if ai_summary.cheating_reason %}<dd class="text-slate-600 mt-1">{{ ai_summary.cheating_reason }}</dd>{% endif %}
+        </div>
+        <div data-ai-flag="ai_generated" class="rounded-lg px-3 py-2 {% if ai_summary.ai_generated %}bg-red-50{% else %}bg-slate-50{% endif %}">
+          <dt class="flex items-center justify-between font-medium {% if ai_summary.ai_generated %}text-red-700{% else %}text-slate-700{% endif %}">
+            <span>{{ vocab.teacher.ai_generated }}</span>
+            <span class="text-xs font-normal">{{ (ai_summary.ai_generated_confidence * 100) | round | int }}%</span>
+          </dt>
+          {% if ai_summary.ai_generated_reason %}<dd class="text-slate-600 mt-1">{{ ai_summary.ai_generated_reason }}</dd>{% endif %}
+        </div>
+        {% if ai_summary.comment %}
+        <div>
+          <dt class="text-slate-400 text-xs uppercase tracking-wide mb-1">{{ vocab.teacher.ai_comment }}</dt>
+          <dd class="text-slate-700 whitespace-pre-wrap">{{ ai_summary.comment }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+    </div>
+    {% endif %}
+
   </div>
 
   <div class="lg:col-span-1">

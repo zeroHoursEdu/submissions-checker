@@ -861,3 +861,50 @@ async def test_enrol_accepts_header_with_odd_capitalisation(
         select(StudentAssignment).where(StudentAssignment.student_id == student.id)
     )
     assert row.variant == "7"
+
+
+# ── AI verdict on the review page ────────────────────────────────────────────
+
+
+async def test_review_page_shows_ai_verdict(client: AsyncClient, db, teacher, make_student) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    sa.config = {"ai_review": {"cheating_threshold": 0.5}}
+    await db.commit()
+    student = await make_student()
+    submission = await _make_submission(
+        db, sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    submission.ai_review = {
+        "cheating": {"is_cheating": True, "confidence": 0.91, "reason": "matches a public gist"},
+        "ai_generated": {"is_ai_generated": False, "confidence": 0.1, "reason": "n/a"},
+        "code_mark": 40,
+        "comment": "Rework the naming.",
+        "provider": "openai",
+        "model": "gpt-test",
+    }
+    await db.commit()
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/submissions/{submission.id}/review")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "matches a public gist" in body
+    assert "Rework the naming." in body
+    assert "91%" in body
+    assert "gpt-test" in body
+    assert 'data-ai-flag="cheating"' in body
+
+
+async def test_review_page_without_ai_verdict_has_no_section(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    student = await make_student()
+    submission = await _make_submission(
+        db, sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/submissions/{submission.id}/review")
+    assert resp.status_code == 200
+    assert 'id="ai-verdict"' not in resp.text

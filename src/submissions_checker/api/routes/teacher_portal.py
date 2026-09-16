@@ -54,6 +54,7 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.group import Group
+from submissions_checker.services.ai_verdict import summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
 from submissions_checker.services.gradebook import (
@@ -948,6 +949,10 @@ async def teacher_review_submission(
     if current_user.role != UserRole.ADMIN and subject.owner_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Not authorized for this subject")
 
+    ai_summary = summarize(
+        submission.ai_review, (subjects_assignment.config or {}).get("ai_review")
+    )
+
     return render(
         request,
         "teacher_submission_review.html",
@@ -957,6 +962,7 @@ async def teacher_review_submission(
             "student": sa.student,
             "assignment": subjects_assignment,
             "subject": subjects_assignment.subject,
+            "ai_summary": ai_summary,
         },
     )
 
