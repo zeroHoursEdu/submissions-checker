@@ -160,7 +160,6 @@ class _FakeSubject:
     def __init__(self, **kw) -> None:
         self.name = kw.get("name")
         self.description = kw.get("description")
-        self.github_repo = kw.get("github_repo")
         self.grid_picture_url = kw.get("grid_picture_url")
         self.main_picture_url = kw.get("main_picture_url")
 

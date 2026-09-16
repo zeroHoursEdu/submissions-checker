@@ -25,7 +25,6 @@ class Student(Base, TimestampMixin):
     group_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("groups.id", ondelete="RESTRICT"), nullable=False
     )
-    github_username: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[EntityType] = mapped_column(

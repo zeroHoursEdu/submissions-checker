@@ -262,7 +262,6 @@ class ConfigApplyService:
         meta_map = {
             "name": ("name", new_cfg.get("name", new_cfg.get("subjectCode", ""))),
             "description": ("description", new_cfg.get("description") or None),
-            "github_repo": ("github_repo", new_cfg.get("githubRepo") or None),
         }
         for field_name, (attr, new_val) in meta_map.items():
             current_val = getattr(subject, attr, None) if subject else None
@@ -444,7 +443,6 @@ class ConfigApplyService:
                 code=subject_code,
                 name=new_cfg.get("name", subject_code),
                 description=new_cfg.get("description") or None,
-                github_repo=new_cfg.get("githubRepo") or None,
                 owner_id=owner_id,
                 status=SubjectStatus.ACTIVE,
             )
@@ -561,7 +559,6 @@ class ConfigApplyService:
         field_to_cfg: dict[str, Any] = {
             "name": new_cfg.get("name", subject_code),
             "description": new_cfg.get("description") or None,
-            "github_repo": new_cfg.get("githubRepo") or None,
         }
         for f in plan.subject_fields_changed:
             if f in field_to_cfg:

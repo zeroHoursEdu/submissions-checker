@@ -89,7 +89,6 @@
     <thead>
       <tr class="bg-slate-50 border-b border-slate-200">
         <th class="text-left px-5 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_student }}</th>
-        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden sm:table-cell">{{ vocab.teacher.col_github }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_status }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_grade }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden md:table-cell">{{ vocab.teacher.col_submitted }}</th>
@@ -101,9 +100,6 @@
       {% for row in rows %}
       <tr class="hover:bg-slate-50 transition-colors">
         <td class="px-5 py-3.5 font-medium text-slate-900">{{ row.full_name }}</td>
-        <td class="px-4 py-3.5 text-slate-500 hidden sm:table-cell">
-          <span class="font-mono text-xs">@{{ row.github_username }}</span>
-        </td>
         <td class="px-4 py-3.5">
           {{ status_badge(row.submission_status) }}
           {% if row.submission_status == "WAITING_FOR_TEACHER_REVIEW" and row.submission_id %}

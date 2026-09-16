@@ -427,7 +427,6 @@ async def teacher_assignment(
     rows_result = await db.execute(
         select(
             Student.full_name,
-            Student.github_username,
             StudentAssignment.id.label("student_assignment_id"),
             StudentAssignment.grade,
             Submission.id.label("submission_id"),
@@ -1362,7 +1361,6 @@ async def add_student(
     last_name: str = Form(...),
     email: str = Form(...),
     group_name: str = Form(...),
-    github_username: str = Form(""),
 ) -> HTMLResponse | RedirectResponse:
     email = email.strip().lower()
     group_name = group_name.strip()
@@ -1394,7 +1392,6 @@ async def add_student(
         group_id=group.id,
         full_name=full_name,
         email=email,
-        github_username=github_username.strip() or None,
     )
     db.add(student)
     await db.flush()

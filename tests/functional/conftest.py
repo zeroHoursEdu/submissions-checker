@@ -180,7 +180,6 @@ def make_student(db: AsyncSession, make_group: GroupFactory) -> StudentFactory:
         group: Group | None = None,
         email: str | None = None,
         full_name: str = "Test Student",
-        github_username: str | None = None,
     ) -> Student:
         counter["n"] += 1
         if group is None:
@@ -189,7 +188,6 @@ def make_student(db: AsyncSession, make_group: GroupFactory) -> StudentFactory:
             group_id=group.id,
             email=email or f"student{counter['n']}@example.com",
             full_name=full_name,
-            github_username=github_username,
         )
         db.add(student)
         await db.commit()

@@ -52,7 +52,6 @@ def _base_config() -> dict[str, Any]:
         "subjectCode": "demo101",
         "name": "Demo 101",
         "description": "A demo subject",
-        "githubRepo": "org/demo",
         "assignments": {
             "lab1": {
                 "title": "Lab 1",

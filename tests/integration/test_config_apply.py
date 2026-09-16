@@ -85,7 +85,6 @@ def _base_config() -> dict[str, Any]:
         "subjectCode": "demo101",
         "name": "Demo 101",
         "description": "A demo subject",
-        "githubRepo": "org/demo",
         "assignments": {
             "lab1": {
                 "title": "Lab 1",
@@ -126,7 +125,6 @@ async def test_fresh_apply_creates_subject_assignment_and_config(
     ).scalar_one()
     assert subject.name == "Demo 101"
     assert subject.description == "A demo subject"
-    assert subject.github_repo == "org/demo"
     assert subject.owner_id == owner.id
     assert subject.status == SubjectStatus.ACTIVE
 

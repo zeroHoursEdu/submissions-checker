@@ -302,7 +302,6 @@ teacher:
   stat_submitted: Здано
   stat_graded: Оцінено
   col_student: Студент
-  col_github: GitHub
   col_status: Статус
   col_grade: Оцінка
   col_submitted: Здано
@@ -333,7 +332,6 @@ teacher:
   subject_form_heading_create: Створити предмет
   subject_name_label: "Назва предмету *"
   subject_description_label: Опис
-  subject_github_label: URL репозиторію GitHub
   subject_save: Зберегти зміни
   subject_create: Створити предмет
   subject_delete: Видалити предмет
@@ -401,7 +399,6 @@ teacher:
   last_name_label: "Прізвище *"
   email_label: "Email *"
   group_label: "Група *"
-  github_username_label: Логін GitHub (необов'язково)
   add_student_button: Додати студента
   feedback_view_title: Відгуки студентів
   feedback_no_campaign: Кампанія зворотного зв'язку ще не розпочата для цього предмету.

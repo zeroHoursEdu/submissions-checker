@@ -1059,7 +1059,6 @@ async def test_add_student_creates_student_user_and_outbox(
             "last_name": "Turing",
             "email": "ALAN@example.com",  # uppercased → lowered
             "group_name": "IT-42",
-            "github_username": "aturing",
         },
         follow_redirects=False,
     )
@@ -1070,7 +1069,6 @@ async def test_add_student_creates_student_user_and_outbox(
         await db.execute(select(Student).where(Student.email == "alan@example.com"))
     ).scalar_one()
     assert student.full_name == "Alan Turing"
-    assert student.github_username == "aturing"
     # Group auto-created.
     group = (await db.execute(select(Group).where(Group.name == "IT-42"))).scalar_one()
     assert student.group_id == group.id
@@ -1111,3 +1109,10 @@ async def test_add_student_duplicate_email_is_422(
         == 1
     )
     assert (await db.scalar(select(func.count()).select_from(OutboxMessage))) == 0
+
+
+async def test_add_student_form_has_no_github_field(teacher_client: AsyncClient) -> None:
+    """The GitHub handle field was retired with the PR ingest; the form must not render it."""
+    resp = await teacher_client.get("/teacher/students/add")
+    assert resp.status_code == 200
+    assert 'name="github_username"' not in resp.text

@@ -4,18 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from submissions_checker.db.models.enums import SubmissionStatus
-
-
-class StudentListItem(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    full_name: str
-    github_username: str
-    group_name: str
 
 
 class ContentFile(BaseModel):

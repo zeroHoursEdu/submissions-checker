@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -138,28 +138,3 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
     async with AsyncSession(test_engine, expire_on_commit=False) as session:
         yield session
         await session.rollback()
-
-
-@pytest.fixture
-def mock_github_webhook_payload() -> dict[str, Any]:
-    """
-    Mock GitHub webhook payload for testing.
-
-    Returns:
-        Sample pull request webhook payload
-    """
-    return {
-        "action": "opened",
-        "number": 123,
-        "pull_request": {
-            "number": 123,
-            "title": "Test PR",
-            "head": {"sha": "abc123", "ref": "feature-branch"},
-            "base": {"ref": "main"},
-        },
-        "repository": {
-            "full_name": "test-org/test-repo",
-            "clone_url": "https://github.com/test-org/test-repo.git",
-        },
-        "sender": {"login": "test-user"},
-    }
