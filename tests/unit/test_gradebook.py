@@ -9,9 +9,13 @@ tests/functional/test_gradebook.py, matching how services.grading splits
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.services.gradebook import (
+    RosterRow,
     cell_status,
+    compute_stats,
     duration_anomalous,
     median_duration,
     severity_for,
@@ -95,10 +99,6 @@ def test_median_duration_even_count_rounds() -> None:
 def test_median_duration_empty_list_is_none() -> None:
     assert median_duration([]) is None
 
-
-from datetime import UTC, datetime, timedelta
-
-from submissions_checker.services.gradebook import RosterRow, compute_stats
 
 _NOW = datetime(2026, 9, 16, tzinfo=UTC)
 
