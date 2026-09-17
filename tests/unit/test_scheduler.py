@@ -45,6 +45,7 @@ def test_init_scheduler_registers_jobs_with_intervals(monkeypatch) -> None:
         teacher_digest_flush_interval=45,
         metrics_refresh_interval=60,
         subject_stats_refresh_interval=300,
+        deadline_reminders_enabled=True,
         deadline_reminder_interval=3600,
     )
     monkeypatch.setattr("submissions_checker.core.config.get_settings", lambda: fake_settings)
@@ -91,6 +92,7 @@ def test_init_scheduler_is_idempotent(monkeypatch) -> None:
             teacher_digest_flush_interval=30,
             metrics_refresh_interval=60,
             subject_stats_refresh_interval=300,
+            deadline_reminders_enabled=False,
             deadline_reminder_interval=3600,
         ),
     )
@@ -147,3 +149,18 @@ async def test_shutdown_scheduler_noop_when_not_running() -> None:
     await scheduler_module.shutdown_scheduler()
 
     sched.shutdown.assert_not_called()
+
+
+def test_deadline_reminders_job_is_opt_in(monkeypatch) -> None:
+    sched = _fake_scheduler()
+    _install_fake_scheduler(monkeypatch, sched)
+    fake_settings = MagicMock(
+        teacher_digest_flush_interval=45,
+        metrics_refresh_interval=60,
+        subject_stats_refresh_interval=300,
+        deadline_reminders_enabled=False,
+        deadline_reminder_interval=3600,
+    )
+    monkeypatch.setattr("submissions_checker.core.config.get_settings", lambda: fake_settings)
+    scheduler_module.init_scheduler()
+    assert "deadline_reminders" not in {c.kwargs["id"] for c in sched.add_job.call_args_list}

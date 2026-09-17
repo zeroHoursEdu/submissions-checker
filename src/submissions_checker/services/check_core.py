@@ -246,10 +246,17 @@ def resolve_check_plan(
         variant_check = variant_overrides.get("check_command") or sandbox_cfg.get("check_command")
 
     if common_check and variant_check and common_check == variant_check:
-        return ConfigError(
-            f"common and variant '{variant}' resolve to the same check_command ({common_check}); "
-            "the script would run twice. Contact your teacher."
+        # Config apply refuses this for new uploads; a config already stored before
+        # that guard existed must keep checking, so here it is only logged. Running
+        # the script once is the correct behaviour, so drop the duplicate.
+        logger.warning(
+            "check_plan_identical_common_and_variant_check",
+            subject=subject,
+            assignment=assignment_code,
+            variant=variant,
+            check_command=common_check,
         )
+        variant_check = None
 
     if plugin_assignment.get("variants_required") and not variant:
         return ConfigError(

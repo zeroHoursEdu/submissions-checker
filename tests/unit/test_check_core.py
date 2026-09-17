@@ -249,7 +249,7 @@ async def test_check_submission_reports_config_error() -> None:
     assert outcome.status == "config_error"
 
 
-def test_resolve_rejects_identical_common_and_variant_scripts() -> None:
+def test_resolve_dedups_identical_common_and_variant_scripts() -> None:
     cfg = {
         "assignments": {
             "lab6": {
@@ -258,6 +258,7 @@ def test_resolve_rejects_identical_common_and_variant_scripts() -> None:
             }
         }
     }
-    err = check_core.resolve_check_plan(cfg, "lab6", "3")
-    assert isinstance(err, check_core.ConfigError)
-    assert "same check_command" in err.reason
+    plan = check_core.resolve_check_plan(cfg, "lab6", "3")
+    assert isinstance(plan, check_core.CheckPlan)
+    assert plan.common_check == "assignments/lab6/check.py"
+    assert plan.variant_check is None

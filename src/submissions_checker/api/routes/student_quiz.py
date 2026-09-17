@@ -270,6 +270,11 @@ def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
     return burned
 
 
+_SUPPORTED_QUESTION_TYPES = frozenset(
+    {"SINGLE_CHOICE", "MULTIPLE_CHOICE", "ORDERING", "TRUE_FALSE"}
+)
+
+
 def _build_question_config(q_type: str, q: dict[str, Any]) -> dict[str, Any]:
     if q_type in ("SINGLE_CHOICE", "MULTIPLE_CHOICE"):
         # Support both formats:
@@ -309,7 +314,14 @@ def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any
     shuffle_q = bool(quiz_cfg.get("shuffle_questions", True))
     shuffle_opts = bool(quiz_cfg.get("shuffle_options", True))
 
-    indexed = list(enumerate(questions_raw))
+    # Config apply refuses unknown types now, but a config stored earlier may still
+    # carry one (short_answer); drawing it would show a question with no input that
+    # still counts toward max_score. Ids stay the config index, so skipping is safe.
+    indexed = [
+        (i, q)
+        for i, q in enumerate(questions_raw)
+        if str(q.get("type", "")).upper() in _SUPPORTED_QUESTION_TYPES
+    ]
     required = [(i, q) for i, q in indexed if q.get("required")]
     optional = [(i, q) for i, q in indexed if not q.get("required")]
 

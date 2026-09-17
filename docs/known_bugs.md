@@ -272,8 +272,9 @@ is a real signal that this is an easy, natural mistake to make when writing a `c
 whose variants all point at the same script — worth prioritizing the platform-level guard
 suggested above rather than relying on manual review to keep catching it.
 
-**Fixed (2026-09-17):** config apply and `resolve_check_plan` both reject an identical
-common/variant `check_command`, naming the assignment and variant.
+**Fixed (2026-09-17):** config apply rejects an identical common/variant `check_command`,
+naming the assignment and variant; `resolve_check_plan` drops the duplicate (with a warning)
+so previously stored configs keep checking correctly.
 
 ---
 

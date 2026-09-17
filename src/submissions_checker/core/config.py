@@ -102,6 +102,10 @@ class Settings(BaseSettings):
 
     # Deadline reminders: students with no submission get one email when an
     # assignment's deadline is within this many days; the job runs on this interval.
+    # Off by default: the first run on an existing deployment would email every
+    # student with an unsubmitted assignment due this week, so an operator turns it
+    # on deliberately.
+    deadline_reminders_enabled: bool = False
     deadline_reminder_days_before: int = 2
     deadline_reminder_interval: int = 3600
 

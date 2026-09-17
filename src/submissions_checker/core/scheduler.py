@@ -104,20 +104,23 @@ def _register_jobs() -> None:
         settings.subject_stats_refresh_interval,
     )
 
-    # Deadline reminders — enqueue DEADLINE_REMINDER emails for unsubmitted work
-    scheduler.add_job(
-        run_deadline_reminders,
-        trigger=IntervalTrigger(seconds=settings.deadline_reminder_interval),
-        id="deadline_reminders",
-        name="Enqueue deadline reminders",
-        replace_existing=True,
-        max_instances=1,
-    )
-
-    logger.info(
-        "Registered deadline reminders job (interval: %ss)",
-        settings.deadline_reminder_interval,
-    )
+    # Deadline reminders — enqueue DEADLINE_REMINDER emails for unsubmitted work.
+    # Opt-in (DEADLINE_REMINDERS_ENABLED=true): see the setting's comment.
+    if settings.deadline_reminders_enabled:
+        scheduler.add_job(
+            run_deadline_reminders,
+            trigger=IntervalTrigger(seconds=settings.deadline_reminder_interval),
+            id="deadline_reminders",
+            name="Enqueue deadline reminders",
+            replace_existing=True,
+            max_instances=1,
+        )
+        logger.info(
+            "Registered deadline reminders job (interval: %ss)",
+            settings.deadline_reminder_interval,
+        )
+    else:
+        logger.info("deadline_reminders_disabled")
 
 
 async def start_scheduler() -> None:

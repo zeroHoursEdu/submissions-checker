@@ -252,7 +252,7 @@ questions they have seen. Per-question (stepper) mode bounds that to one questio
 | Unread count (for the badge) | Any account | `GET /notifications/unread-count` |
 | Email preferences (per-case EMAIL on/off: `SUBMISSION_CHECKED`, `FEEDBACK_REQUEST`, `DEADLINE_REMINDER`) | STUDENT | `GET /portal/notification-preferences`, `POST /portal/notification-preferences/{case}/{method}/toggle` |
 | Coalesced teacher review digest (background job batches a teacher's pending review notices into one email) | TEACHER/ADMIN (automatic) | — (no route; `teacher_notification_queue` + background job) |
-| Deadline reminder email (scheduled job; assignments due within `DEADLINE_REMINDER_DAYS_BEFORE`, students with no submission, opt-out via `DEADLINE_REMINDER` preference) | STUDENT (automatic) | — (`workers/scheduled/deadline_reminders.py`) |
+| Deadline reminder email (scheduled job, **opt-in via `DEADLINE_REMINDERS_ENABLED=true`**; assignments due within `DEADLINE_REMINDER_DAYS_BEFORE`, students with no submission, opt-out via `DEADLINE_REMINDER` preference) | STUDENT (automatic) | — (`workers/scheduled/deadline_reminders.py`) |
 
 ## 8. Admin
 

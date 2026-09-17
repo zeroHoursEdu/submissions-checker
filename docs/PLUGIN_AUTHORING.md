@@ -374,8 +374,9 @@ Variants allow different problem instances per student (preventing copy-paste).
 
 ---
 
-A variant whose `check_command` equals the common one is rejected at upload (and again at
-check time): both would run and the score denominator would double.
+A variant whose `check_command` equals the common one is rejected at upload: both would run
+and the score denominator would double. A config stored before this rule existed is not
+broken by it — at check time the duplicate is dropped and a warning is logged.
 
 ## Adding a New Subject
 

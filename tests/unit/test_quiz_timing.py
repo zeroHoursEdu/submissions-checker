@@ -445,3 +445,23 @@ def test_closing_a_pause_that_is_not_open_does_nothing() -> None:
     student_quiz._close_open_pause(attempt)
     assert attempt.paused_at is None
     assert attempt.paused_seconds == 42
+
+
+# ── _build_questions_from_config: unsupported types stored before the upload guard ──
+
+
+def test_stored_unsupported_question_types_are_skipped_at_draw() -> None:
+    """A config stored before short_answer was refused at upload must not produce an
+    unanswerable, point-bearing question; ids of the remaining ones stay stable."""
+    snap = student_quiz._build_questions_from_config(
+        {
+            "shuffle_questions": False,
+            "questions": [
+                {"type": "true_false", "text": "a", "correct": True},
+                {"type": "short_answer", "text": "explain", "points": 5},
+                {"type": "single_choice", "text": "b", "options": ["x", "y"], "correct": 1},
+            ],
+        }
+    )
+    assert [q["type"] for q in snap] == ["TRUE_FALSE", "SINGLE_CHOICE"]
+    assert [q["id"] for q in snap] == [0, 2]
