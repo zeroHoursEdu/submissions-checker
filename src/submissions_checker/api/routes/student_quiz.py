@@ -446,10 +446,11 @@ async def _draw_for_member(
     """The member's slice of the squad's shared draw (first attempt) or a fresh draw of
     the same size (retry). The shared draw is written once, under a row lock, by
     whichever member opens the quiz first."""
-    locked = (
-        await db.execute(select(Submission).where(Submission.id == submission.id).with_for_update())
-    ).scalar_one()
-    meta = dict(locked.source_metadata or {})
+    # A plain locked select() re-selects a row already in the identity map: SQLAlchemy
+    # keeps the pre-lock attribute values instead of reading what the lock just acquired.
+    # refresh(..., with_for_update=True) forces the reload.
+    await db.refresh(submission, attribute_names=["source_metadata"], with_for_update=True)
+    meta = dict(submission.source_metadata or {})
     member_order = sorted(m.student_id for m in squad.members)
     draw = meta.get("squad_quiz_draw")
     if not draw:
@@ -457,8 +458,15 @@ async def _draw_for_member(
         slices = split_draw(_snapshot_questions(quiz_cfg, ids), len(member_order))
         draw = {"question_ids": ids, "slices": slices, "member_order": member_order}
         meta["squad_quiz_draw"] = draw
-        locked.source_metadata = meta  # reassign: JSONB change tracking
+        submission.source_metadata = meta  # reassign: JSONB change tracking
         await db.flush()
+    if student_id not in draw["member_order"]:
+        # The squad was edited (teacher re-assign, member removed) after this draw was
+        # written — the member_order snapshot no longer includes this student.
+        raise HTTPException(
+            status_code=409,
+            detail="Squad changed after the quiz draw; ask your teacher to reset the draw.",
+        )
     idx = draw["member_order"].index(student_id)
     my_ids: list[int] = list(draw["slices"][idx])
     draw_cfg = quiz_cfg
@@ -608,7 +616,14 @@ async def _grade_and_finalize(
             # The submission may be shared by a squad, so a passing attempt is not enough on
             # its own — `flush` first so `quiz_complete` sees this attempt's `is_passed` write.
             await db.flush()
-            if await squads.quiz_complete(db, submission):
+            # Serialise finalisation on the submission row: two squad-mates passing at the
+            # same instant must not both observe QUIZ_SENT and both transition. Whichever
+            # gets the lock first finishes; the loser's refreshed status is authoritative,
+            # not the (possibly stale) status read at the top of this function.
+            await db.refresh(submission, attribute_names=["status"], with_for_update=True)
+            if submission.status == SubmissionStatus.QUIZ_SENT and await squads.quiz_complete(
+                db, submission
+            ):
                 # `quiz_then_teacher` hands the attached work to the teacher instead of
                 # completing here; the grade is still computed from the quiz, but only once
                 # they approve.

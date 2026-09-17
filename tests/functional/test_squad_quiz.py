@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
+from submissions_checker.api.routes import student_quiz
 from submissions_checker.db.models import QuizAttempt, StudentAssignment, Submission
-from submissions_checker.db.models.enums import SubmissionStatus
+from submissions_checker.db.models.enums import QuizAttemptStatus, SubmissionStatus
+from submissions_checker.db.models.quiz_template import QuizAnswer
+from submissions_checker.services import squads
 from tests.functional.test_squad_submission import _arrange, _client, _lock_pair, _zip
 
 pytestmark = pytest.mark.asyncio
@@ -80,6 +86,178 @@ async def test_pair_gets_disjoint_halves_and_a_unified_grade(
     assert ga.grade == gb.grade == 8
     assert sub.grade_breakdown["squad"]["unified"] is True
     assert len(sub.grade_breakdown["squad"]["members"]) == 2
+
+
+async def test_draw_lock_sees_a_squad_mates_committed_draw(
+    db, make_user, make_student, teacher, functional_sessionmaker
+) -> None:
+    """C1: _draw_for_member's locked read must see a squad-mate's already-committed
+    draw even when this session's submission object was loaded before that commit
+    landed — a plain re-select of an already-identity-mapped row keeps the pre-lock
+    attribute values, which would silently generate (and persist) a second,
+    inconsistent draw instead of reusing the shared one."""
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    await _lock_pair(db, subject, teacher, (ua, ub))
+    async with _client(ua) as ca:
+        await ca.post(
+            f"/portal/subjects/{subject.id}/assignments/{sa_a.id}/submit",
+            files={"file": ("r.zip", _zip(), "application/zip")},
+            follow_redirects=False,
+        )
+
+    # Loaded here — exactly like start_or_resume_quiz loads `latest_sub` before
+    # calling _draw_for_member — so this session's identity map now holds a copy
+    # with no draw written yet.
+    sub = (await db.execute(select(Submission))).scalar_one()
+    assert sub.source_metadata.get("squad_quiz_draw") is None
+    squad = await squads.squad_for_submission(db, sub)
+
+    # A squad-mate's own request, in its own session, draws first and commits —
+    # `member_order` deliberately NOT sorted, since a freshly generated draw always
+    # writes `sorted(...)`; an unsorted order here can only mean "already written".
+    async with functional_sessionmaker() as other_session:
+        other_sub = await other_session.get(Submission, sub.id)
+        other_sub.source_metadata = {
+            **(other_sub.source_metadata or {}),
+            "squad_quiz_draw": {
+                "question_ids": [0, 1, 2, 3],
+                "slices": [[0, 1], [2, 3]],
+                "member_order": [ub.student_id, ua.student_id],
+            },
+        }
+        await other_session.commit()
+
+    quiz_cfg = {
+        "questions": [
+            {
+                "type": "single_choice",
+                "text": f"q{i}",
+                "points": 1,
+                "options": ["w", "r"],
+                "correct": 1,
+            }
+            for i in range(4)
+        ],
+        "shuffle_questions": False,
+        "shuffle_options": False,
+        "pass_threshold_pct": 0.5,
+    }
+    await student_quiz._draw_for_member(db, sub, squad, quiz_cfg, ua.student_id, retry=False)
+
+    assert sub.source_metadata["squad_quiz_draw"]["member_order"] == [
+        ub.student_id,
+        ua.student_id,
+    ]
+
+
+async def test_draw_member_missing_from_stale_draw_raises_409_not_valueerror(
+    db, make_user, make_student, teacher
+) -> None:
+    """M15: if the squad changed after the shared draw was written (teacher
+    re-assign, member removed), a member no longer in that draw's member_order must
+    get a clean 409, not an unhandled ValueError from list.index()."""
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    await _lock_pair(db, subject, teacher, (ua, ub))
+    async with _client(ua) as ca:
+        await ca.post(
+            f"/portal/subjects/{subject.id}/assignments/{sa_a.id}/submit",
+            files={"file": ("r.zip", _zip(), "application/zip")},
+            follow_redirects=False,
+        )
+    sub = (await db.execute(select(Submission))).scalar_one()
+    sub.source_metadata = {
+        **(sub.source_metadata or {}),
+        "squad_quiz_draw": {
+            "question_ids": [0, 1, 2, 3],
+            "slices": [[0, 1], [2, 3]],
+            "member_order": [ub.student_id],  # ua.student_id is missing
+        },
+    }
+    await db.commit()
+    squad = await squads.squad_for_submission(db, sub)
+
+    quiz_cfg = {
+        "questions": [
+            {
+                "type": "single_choice",
+                "text": f"q{i}",
+                "points": 1,
+                "options": ["w", "r"],
+                "correct": 1,
+            }
+            for i in range(4)
+        ],
+        "shuffle_questions": False,
+        "shuffle_options": False,
+        "pass_threshold_pct": 0.5,
+    }
+    with pytest.raises(HTTPException) as exc:
+        await student_quiz._draw_for_member(db, sub, squad, quiz_cfg, ua.student_id, retry=False)
+    assert exc.value.status_code == 409
+
+
+async def test_late_finalize_does_not_clobber_a_squad_mates_committed_transition(
+    db, make_user, make_student, teacher, functional_sessionmaker
+) -> None:
+    """I2: the outer "still at QUIZ_SENT" guard in _grade_and_finalize reads whatever
+    status this session's submission object already had in memory — if a squad-mate's
+    own request already transitioned and committed the submission elsewhere, that
+    in-memory value is stale. Without a locked refresh right before acting on it, a
+    late-finishing attempt's transition would silently clobber the committed state."""
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    await _lock_pair(db, subject, teacher, (ua, ub))
+    async with _client(ua) as ca:
+        await ca.post(
+            f"/portal/subjects/{subject.id}/assignments/{sa_a.id}/submit",
+            files={"file": ("r.zip", _zip(), "application/zip")},
+            follow_redirects=False,
+        )
+
+    # Loaded here — before the "concurrent" write below — exactly like attempt.submission
+    # is loaded early inside a real request.
+    sub = (await db.execute(select(Submission))).scalar_one()
+    assert sub.status == SubmissionStatus.QUIZ_SENT
+
+    now = datetime.now(UTC)
+    # A already passed, at the DB level — quiz_complete() will say True once B passes too.
+    db.add(
+        QuizAttempt(
+            submission_id=sub.id,
+            student_id=ua.student_id,
+            questions_snapshot=[],
+            config_snapshot={},
+            started_at=now,
+            status=QuizAttemptStatus.COMPLETED,
+            is_passed=True,
+            score=1,
+            max_score=1,
+        )
+    )
+    attempt_b = QuizAttempt(
+        submission=sub,
+        student_id=ub.student_id,
+        questions_snapshot=[{"id": 0, "points": 1}],
+        config_snapshot={"review_mode": "quiz_then_teacher", "pass_threshold_pct": 0.5},
+        started_at=now,
+        status=QuizAttemptStatus.IN_PROGRESS,
+    )
+    attempt_b.answers.append(QuizAnswer(question_id=0, answer={}, points_earned=1))
+    db.add(attempt_b)
+    await db.flush()
+
+    # A squad-mate's own request, in its own session, already finished and moved the
+    # submission on — committed after this session's `sub` was loaded above, so `sub`
+    # in this session's identity map still shows QUIZ_SENT.
+    async with functional_sessionmaker() as other:
+        other_sub = await other.get(Submission, sub.id)
+        other_sub.status = SubmissionStatus.COMPLETED
+        await other.commit()
+
+    # B's attempt finishes "late": is_passed and quiz_complete() both come out True.
+    await student_quiz._grade_and_finalize(attempt_b, db, status=QuizAttemptStatus.COMPLETED)
+
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.COMPLETED  # not clobbered to AWAITING_TEACHER_REVIEW
 
 
 async def test_failing_member_retries_only_their_half(db, make_user, make_student, teacher) -> None:
