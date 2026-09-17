@@ -479,6 +479,7 @@ async def teacher_assignment(
 
     rows_result = await db.execute(
         select(
+            Student.id.label("student_id"),
             Student.full_name,
             StudentAssignment.id.label("student_assignment_id"),
             StudentAssignment.grade,
@@ -513,6 +514,20 @@ async def teacher_assignment(
     )
     rows = [row._asdict() for row in rows_result]
 
+    shares = await squads.shared_submissions(db, subject_id, subjects_assignment_id=sa_id)
+    for r in rows:
+        share = shares.get((r["student_id"], sa_id))
+        r["squad_name"] = squads.display_name(share.squad) if share else None
+        if share and r["submission_id"] is None:
+            s = share.submission
+            r.update(
+                submission_id=s.id,
+                submission_status=s.status,
+                submitted_at=s.created_at,
+                source_metadata=s.source_metadata,
+                ai_review=s.ai_review,
+            )
+
     # In-flight submissions older than 30 minutes are assumed stuck (worker died mid-task)
     # and get the re-run control alongside the failed ones.
     stale_cutoff = datetime.now(UTC) - timedelta(minutes=30)
@@ -533,13 +548,20 @@ async def teacher_assignment(
         if summary is not None and summary.flagged and r["student_assignment_id"]:
             ai_flags[r["student_assignment_id"]] = summary
 
-    # Load violation flags: for each student_assignment, find if any attempt has violations
+    # Load violation flags: for each student_assignment, find if any attempt has violations.
+    # A squad-mate's QuizAttempt hangs off the shared submission (whose students_assignment_id
+    # is the uploader's), so it's keyed by QuizAttempt.student_id when that is set, falling
+    # back to the submission's own students_assignment_id for pre-squad attempts.
     sa_id_list = [r["student_assignment_id"] for r in rows if r["student_assignment_id"]]
+    sa_by_student = {
+        r["student_id"]: r["student_assignment_id"] for r in rows if r["student_assignment_id"]
+    }
     violation_flags: dict[int, dict[str, Any]] = {}
     if sa_id_list:
         viol_result = await db.execute(
             select(
                 Submission.students_assignment_id,
+                QuizAttempt.student_id,
                 QuizAttempt.violations,
             )
             .join(Submission, Submission.id == QuizAttempt.submission_id)
@@ -553,16 +575,18 @@ async def teacher_assignment(
             .order_by(QuizAttempt.started_at.desc())
         )
         for vr in viol_result:
-            sa_id_val = vr.students_assignment_id
+            sa_id_val = sa_by_student.get(vr.student_id, vr.students_assignment_id)
             if sa_id_val not in violation_flags:
                 violation_flags[sa_id_val] = vr.violations or {}
 
-    # Load proctoring snapshot thumbnails grouped by student_assignment.
+    # Load proctoring snapshot thumbnails grouped by student_assignment (same squad-mate
+    # keying as violation_flags above).
     snapshot_flags: dict[int, list[dict[str, Any]]] = {}
     if sa_id_list:
         snap_result = await db.execute(
             select(
                 Submission.students_assignment_id,
+                QuizAttempt.student_id,
                 QuizAttemptSnapshot.id,
                 QuizAttemptSnapshot.event_type,
                 QuizAttemptSnapshot.captured_at,
@@ -573,9 +597,10 @@ async def teacher_assignment(
             .order_by(QuizAttemptSnapshot.captured_at.desc())
         )
         for sr in snap_result:
+            sa_id_val = sa_by_student.get(sr.student_id, sr.students_assignment_id)
             # Address the application's authenticated endpoint, never object storage —
             # an evidence link must not outlive the viewer's authorization.
-            snapshot_flags.setdefault(sr.students_assignment_id, []).append(
+            snapshot_flags.setdefault(sa_id_val, []).append(
                 {"event_type": sr.event_type, "url": f"/teacher/proctoring/snapshots/{sr.id}"}
             )
 
@@ -1200,6 +1225,9 @@ async def teacher_review_submission(
         submission.ai_review, (subjects_assignment.config or {}).get("ai_review")
     )
 
+    squad = await squads.squad_for_submission(db, submission)
+    names = {m.student_id: m.student.full_name for m in squad.members} if squad else {}
+
     # Every quiz attempt on this submission with its violation counts and evidence frames,
     # newest attempt first, frames in capture order. URLs address the authenticated
     # snapshot endpoint, never object storage.
@@ -1218,6 +1246,7 @@ async def teacher_review_submission(
                 "started_at": attempt.started_at,
                 "status": attempt.status,
                 "is_passed": attempt.is_passed,
+                "student_name": names.get(attempt.student_id) if attempt.student_id else None,
                 "violations": {
                     k: v
                     for k, v in violations.items()
@@ -1247,6 +1276,8 @@ async def teacher_review_submission(
             "subject": subjects_assignment.subject,
             "ai_summary": ai_summary,
             "proctoring": proctoring,
+            "squad_name": squads.display_name(squad) if squad else None,
+            "squad_members": sorted(names.values()),
         },
     )
 

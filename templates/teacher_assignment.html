@@ -131,7 +131,9 @@
           <input type="checkbox" name="submission_ids" value="{{ row.submission_id or '' }}" class="rounded border-slate-300"
                  {% if not row.submission_id %}disabled{% endif %}>
         </td>
-        <td class="px-5 py-3.5 font-medium text-slate-900">{{ row.full_name }}</td>
+        <td class="px-5 py-3.5 font-medium text-slate-900">{{ row.full_name }}
+          {% if row.squad_name %} {% with squad_name=row.squad_name, squad_members=[] %}{% include "_squad_badge.html" %}{% endwith %}{% endif %}
+        </td>
         <td class="px-4 py-3.5">
           {{ status_badge(row.submission_status) }}
           {% if row.submission_status == "AWAITING_TEACHER_REVIEW" and row.submission_id %}

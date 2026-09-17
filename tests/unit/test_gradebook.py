@@ -272,3 +272,23 @@ def test_build_student_grid_carries_group_name_and_sorts_by_student_name() -> No
     grid = build_student_grid(rows)
     assert [r.student_name for r in grid.rows] == ["Anna", "Zed"]
     assert grid.rows[0].group_name == "IT-21"
+
+
+def test_waiting_partner_cell_and_squad_name_survive_grid_build() -> None:
+    row = GridSourceRow(
+        student_id=1,
+        student_name="A",
+        group_name="G",
+        assignment_id=10,
+        assignment_title="L1",
+        min_grade=0,
+        grade=None,
+        submission_status=SubmissionStatus.QUIZ_SENT,
+        quiz_score=None,
+        review_score=None,
+        squad_name="Alpha",
+        waiting_partner=True,
+    )
+    grid = build_student_grid([row])
+    assert grid.rows[0].squad_name == "Alpha"
+    assert grid.rows[0].cells[10].status == "waiting_partner"

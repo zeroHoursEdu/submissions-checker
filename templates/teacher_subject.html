@@ -127,12 +127,14 @@
         <tbody>
           {% for row in student_grid.rows %}
           <tr class="border-b border-slate-100">
-            <td class="sticky left-0 z-10 bg-white px-4 py-2 font-medium text-slate-900 whitespace-nowrap">{{ row.student_name }}</td>
+            <td class="sticky left-0 z-10 bg-white px-4 py-2 font-medium text-slate-900 whitespace-nowrap">{{ row.student_name }}
+              {% if row.squad_name %} {% with squad_name=row.squad_name, squad_members=[] %}{% include "_squad_badge.html" %}{% endwith %}{% endif %}
+            </td>
             <td class="px-4 py-2 text-slate-600 whitespace-nowrap">{{ row.group_name }}</td>
             {% for col in student_grid.columns %}
             {% set cell = row.cells.get(col.assignment_id) %}
-            <td class="px-3 py-2 text-center border-l border-slate-100 {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700{% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700{% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700{% else %}text-slate-300{% endif %}">{% if cell and cell.quiz_score is not none %}{{ cell.quiz_score }}{% else %}—{% endif %}</td>
-            <td class="px-3 py-2 text-center {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700{% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700{% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700{% else %}text-slate-300{% endif %}">{% if cell and cell.review_score is not none %}{{ cell.review_score }}{% else %}—{% endif %}</td>
+            <td class="px-3 py-2 text-center border-l border-slate-100 {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700{% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700{% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700{% elif cell and cell.status == 'waiting_partner' %}bg-amber-50 text-amber-700{% else %}text-slate-300{% endif %}">{% if cell and cell.status == 'waiting_partner' %}<span title="{{ vocab.squad.waiting_partner.format(names='…') }}">⏳</span>{% elif cell and cell.quiz_score is not none %}{{ cell.quiz_score }}{% else %}—{% endif %}</td>
+            <td class="px-3 py-2 text-center {% if cell and cell.status == 'passed' %}bg-green-50 text-green-700{% elif cell and cell.status == 'failed' %}bg-red-50 text-red-700{% elif cell and cell.status == 'pending' %}bg-amber-50 text-amber-700{% elif cell and cell.status == 'waiting_partner' %}bg-amber-50 text-amber-700{% else %}text-slate-300{% endif %}">{% if cell and cell.review_score is not none %}{{ cell.review_score }}{% else %}—{% endif %}</td>
             {% endfor %}
             <td class="sticky right-0 z-10 bg-white px-4 py-2 text-center font-semibold text-slate-900 border-l border-slate-200">{{ row.total if row.total is not none else "—" }}</td>
           </tr>

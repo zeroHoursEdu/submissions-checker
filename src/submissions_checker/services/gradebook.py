@@ -39,7 +39,7 @@ from submissions_checker.db.models.group import Group
 
 _TERMINAL_STATUSES = {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED}
 
-CellStatus = Literal["passed", "failed", "pending", "not_submitted"]
+CellStatus = Literal["passed", "failed", "pending", "waiting_partner", "not_submitted"]
 Severity = Literal["high", "medium"]
 
 
@@ -348,6 +348,8 @@ class GridSourceRow:
     submission_status: SubmissionStatus | None
     quiz_score: float | None
     review_score: float | None
+    squad_name: str | None = None
+    waiting_partner: bool = False
 
 
 @dataclass(frozen=True)
@@ -371,6 +373,7 @@ class GridRow:
     group_name: str
     cells: dict[int, GridCell]
     total: int | None
+    squad_name: str | None
 
 
 @dataclass(frozen=True)
@@ -389,21 +392,38 @@ def build_student_grid(rows: list[GridSourceRow]) -> StudentGrid:
 
     cells_by_student: dict[int, dict[int, GridCell]] = {}
     meta_by_student: dict[int, tuple[str, str]] = {}
+    squad_by_student: dict[int, str | None] = {}
     for r in rows:
+        status = (
+            "waiting_partner"
+            if r.waiting_partner
+            else cell_status(r.grade, r.min_grade, r.submission_status)
+        )
         cells_by_student.setdefault(r.student_id, {})[r.assignment_id] = GridCell(
-            status=cell_status(r.grade, r.min_grade, r.submission_status),
+            status=status,
             grade=r.grade,
             quiz_score=r.quiz_score,
             review_score=r.review_score,
         )
         meta_by_student[r.student_id] = (r.student_name, r.group_name)
+        if r.squad_name is not None:
+            squad_by_student[r.student_id] = r.squad_name
 
     grid_rows = []
     for student_id, cells in cells_by_student.items():
         student_name, group_name = meta_by_student[student_id]
         grades = [c.grade for c in cells.values() if c.grade is not None]
         total = sum(grades) if grades else None
-        grid_rows.append(GridRow(student_id, student_name, group_name, cells, total))
+        grid_rows.append(
+            GridRow(
+                student_id,
+                student_name,
+                group_name,
+                cells,
+                total,
+                squad_by_student.get(student_id),
+            )
+        )
     grid_rows.sort(key=lambda row: row.student_name)
 
     return StudentGrid(columns=columns, rows=grid_rows)
@@ -467,9 +487,29 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
             SubjectsAssignment.id,
         )
     )
+    from submissions_checker.services import squads  # local: avoids a module-level cycle
+
+    shares = await squads.shared_submissions(db, subject_id)
+
     rows = []
     for row in result:
+        share = shares.get((row.student_id, row.assignment_id))
+        status = row.submission_status
         breakdown = row.grade_breakdown or {}
+        squad_name = None
+        waiting = False
+        if share is not None:
+            squad_name = squads.display_name(share.squad)
+            if status is None:
+                status = share.submission.status
+                breakdown = share.submission.grade_breakdown or {}
+            waiting = (
+                status == SubmissionStatus.QUIZ_SENT and row.student_id in share.passed_student_ids
+            )
+        quiz_score = breakdown.get("quiz_score")
+        for m in (breakdown.get("squad") or {}).get("members") or []:
+            if m.get("student_id") == row.student_id:
+                quiz_score = m.get("quiz_pct")
         rows.append(
             GridSourceRow(
                 student_id=row.student_id,
@@ -479,9 +519,11 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
                 assignment_title=row.assignment_title,
                 min_grade=row.min_grade,
                 grade=row.grade,
-                submission_status=row.submission_status,
-                quiz_score=breakdown.get("quiz_score"),
+                submission_status=status,
+                quiz_score=quiz_score,
                 review_score=breakdown.get("quality_score"),
+                squad_name=squad_name,
+                waiting_partner=waiting,
             )
         )
     return rows
