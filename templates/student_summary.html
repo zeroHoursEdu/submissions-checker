@@ -121,6 +121,7 @@
             {% else %}
               <span class="text-slate-300">—</span>
             {% endif %}
+            {% if row.squad_name %}{% with squad_name=row.squad_name, squad_members=[] %}{% include "_squad_badge.html" %}{% endwith %}{% endif %}
           </td>
         </tr>
         {% endfor %}

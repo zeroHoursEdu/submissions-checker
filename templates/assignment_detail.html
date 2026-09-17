@@ -95,10 +95,35 @@
     <div class="bg-green-50 border border-green-200 rounded-xl px-5 py-3 text-center">
       <div class="text-3xl font-bold text-green-700">{{ assignment.grade }}</div>
       <div class="text-xs text-green-600 mt-0.5">out of {{ assignment.max_grade }}</div>
+      {% if assignment.squad %}
+      <div class="mt-1">{% with squad_name=assignment.squad.name, squad_members=(assignment.squad.members | map(attribute="full_name") | list) %}{% include "_squad_badge.html" %}{% endwith %}</div>
+      {% endif %}
     </div>
     {% endif %}
   </div>
 </div>
+
+{% if assignment.squad %}
+<div class="bg-white rounded-xl border border-violet-200 shadow-sm p-5 mb-5" data-squad-panel>
+  <h2 class="font-semibold text-slate-900 mb-3 flex items-center gap-2">👥 {{ assignment.squad.name }}</h2>
+  <ul class="text-sm divide-y divide-slate-100">
+    {% for m in assignment.squad.members %}
+    <li class="py-1.5 flex items-center gap-3 flex-wrap">
+      <span class="font-medium text-slate-800">{{ m.full_name }}</span>
+      {% if m.submitted %}<span class="text-xs text-slate-500">· {{ vocab.squad.member_submitted }}</span>{% endif %}
+      {% if m.passed %}<span class="text-xs text-green-700">✓ {{ vocab.squad.member_passed }}</span>
+      {% elif m.attempts_used %}<span class="text-xs text-amber-700">{{ vocab.squad.member_attempts.format(n=m.attempts_used) }}</span>
+      {% else %}<span class="text-xs text-slate-400">{{ vocab.squad.member_not_started }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if assignment.grade is none and assignment.submission_status == "QUIZ_SENT" %}
+  <p class="mt-3 text-xs text-slate-500">{{ vocab.squad.grade_pending }}</p>
+  {% elif assignment.grade is not none %}
+  <p class="mt-3 text-xs text-slate-500">{{ vocab.squad.grade_unified }}</p>
+  {% endif %}
+</div>
+{% endif %}
 
 <!-- AI review comment (shown only when the subject enables it) -->
 {% if assignment.ai_comment %}
@@ -217,15 +242,22 @@
 
   {% if assignment.submission_status == "QUIZ_SENT" and attempts_left > 0 %}
   <div class="mt-4 pt-4 border-t border-slate-100">
+    {% if assignment.squad and assignment.squad.my_passed %}
+    <p class="text-sm text-slate-500">{{ vocab.squad.grade_pending }}</p>
+    {% else %}
     <a href="/portal/subjects/{{ subject_id }}/assignments/{{ assignment.student_assignment_id }}/quiz"
        class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
       </svg>
-      {% if assignment.quiz_attempts_used == 0 %}Start Quiz
+      {% if assignment.squad %}
+        {% if assignment.squad.my_slice and assignment.squad.total_questions %}{{ vocab.squad.quiz_button_part.format(k=assignment.squad.my_slice, total=assignment.squad.total_questions) }}
+        {% else %}Пройти свою частину тесту{% endif %}
+      {% elif assignment.quiz_attempts_used == 0 %}Start Quiz
       {% elif assignment.quiz_max_attempts %}Retry Quiz ({{ attempts_left }} left)
       {% else %}Retry Quiz{% endif %}
     </a>
+    {% endif %}
   </div>
 
   {% elif assignment.submission_status == "FAILED" and assignment.quiz_max_attempts and assignment.quiz_attempts_used >= assignment.quiz_max_attempts %}

@@ -164,8 +164,11 @@
             {% else %}
               <span class="text-slate-300">—</span>
             {% endif %}
+            {% if a.squad_name %}{% with squad_name=a.squad_name, squad_members=squad_members %}{% include "_squad_badge.html" %}{% endwith %}{% endif %}
           </td>
-          <td class="px-4 py-3.5">{{ status_badge(a.submission_status) }}</td>
+          <td class="px-4 py-3.5">{{ status_badge(a.submission_status) }}
+            {% if a.waiting_for %}<span class="ml-1 text-xs text-amber-700">{{ vocab.squad.waiting_partner.format(names=a.waiting_for | join(", ")) }}</span>{% endif %}
+          </td>
           <td class="px-4 py-3.5 text-slate-300">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />

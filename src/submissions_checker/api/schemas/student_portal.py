@@ -24,6 +24,23 @@ class SubjectCard(BaseModel):
     grid_picture_url: str | None = None
 
 
+class SquadMemberState(BaseModel):
+    student_id: int
+    full_name: str
+    submitted: bool
+    passed: bool
+    attempts_used: int
+
+
+class SquadPanel(BaseModel):
+    name: str
+    members: list[SquadMemberState]
+    complete: bool
+    my_passed: bool
+    my_slice: int | None = None
+    total_questions: int | None = None
+
+
 class AssignmentRow(BaseModel):
     student_assignment_id: int
     title: str
@@ -32,6 +49,8 @@ class AssignmentRow(BaseModel):
     min_grade: int
     max_grade: int
     submission_status: SubmissionStatus | None
+    squad_name: str | None = None
+    waiting_for: list[str] = []
 
 
 class AssignmentDetail(BaseModel):
@@ -54,3 +73,4 @@ class AssignmentDetail(BaseModel):
     # Populated only when the assignment config enables the corresponding toggle.
     ai_comment: str | None = None
     grade_breakdown: dict | None = None  # type: ignore[type-arg]
+    squad: SquadPanel | None = None

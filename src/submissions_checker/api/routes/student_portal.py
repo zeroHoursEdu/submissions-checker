@@ -9,7 +9,7 @@ from pathlib import Path
 import aiofiles
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import and_, func, nullslast, select
+from sqlalchemy import and_, func, nullslast, or_, select
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.dependencies import AppSettings, DBSession, StudentId, StudentUser
@@ -17,6 +17,8 @@ from submissions_checker.api.schemas.student_portal import (
     AssignmentDetail,
     AssignmentRow,
     ContentFile,
+    SquadMemberState,
+    SquadPanel,
     SubjectCard,
 )
 from submissions_checker.core import metrics
@@ -218,9 +220,25 @@ async def assignments_list(
     )
     student_assignments = sa_result.scalars().all()
 
+    squad_max = subject.squad_max_size
+    locked_squad = await squads.active_squad(db, subject_id, student_id) if squad_max else None
+
     assignment_rows = []
     for sa in student_assignments:
-        latest_sub = max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None
+        latest_sub = (
+            await squads.latest_submission(db, sa)
+            if locked_squad
+            else (max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None)
+        )
+        waiting_for: list[str] = []
+        squad_name = None
+        if latest_sub is not None and latest_sub.squad_id is not None and locked_squad is not None:
+            squad_name = squads.display_name(locked_squad)
+            if latest_sub.status == SubmissionStatus.QUIZ_SENT:
+                states = await squads.member_quiz_states(db, latest_sub)
+                me = next((m for m in states if m.student_id == student_id), None)
+                if me is not None and me.passed:
+                    waiting_for = [m.full_name for m in states if not m.passed]
         assignment_rows.append(
             AssignmentRow(
                 student_assignment_id=sa.id,
@@ -230,16 +248,15 @@ async def assignments_list(
                 min_grade=sa.subjects_assignment.min_grade,
                 max_grade=sa.subjects_assignment.max_grade,
                 submission_status=latest_sub.status if latest_sub else None,
+                squad_name=squad_name,
+                waiting_for=waiting_for,
             )
         )
 
-    squad_max = subject.squad_max_size
     squad_state = "disabled"
-    locked_squad = None
     pending = None
     classmates: list[Student] = []
     if squad_max is not None:
-        locked_squad = await squads.active_squad(db, subject_id, student_id)
         if locked_squad is not None:
             squad_state = "locked"
         else:
@@ -302,9 +319,11 @@ async def assignment_detail(
     if sa is None:
         raise HTTPException(status_code=404)
 
-    latest_sub = max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None
+    latest_sub = await squads.latest_submission(db, sa)
 
-    # Quiz attempt metadata: count used attempts across all submissions for this sa
+    # Quiz attempt metadata: count used attempts across all submissions for this sa. Legacy
+    # NULL rows predate per-student attempts and belong to solo submissions by this same
+    # student, so they still count here.
     attempts_used_result = await db.execute(
         select(func.count(QuizAttempt.id)).where(
             and_(
@@ -312,6 +331,7 @@ async def assignment_detail(
                     select(Submission.id).where(Submission.students_assignment_id == sa_id)
                 ),
                 QuizAttempt.status.in_([QuizAttemptStatus.COMPLETED, QuizAttemptStatus.TIMED_OUT]),
+                or_(QuizAttempt.student_id == student_id, QuizAttempt.student_id.is_(None)),
             )
         )
     )
@@ -323,7 +343,10 @@ async def assignment_detail(
     if latest_sub:
         latest_attempt_result = await db.execute(
             select(QuizAttempt)
-            .where(QuizAttempt.submission_id == latest_sub.id)
+            .where(
+                QuizAttempt.submission_id == latest_sub.id,
+                or_(QuizAttempt.student_id == student_id, QuizAttempt.student_id.is_(None)),
+            )
             .order_by(QuizAttempt.started_at.desc())
             .limit(1)
         )
@@ -360,6 +383,25 @@ async def assignment_detail(
         if (assignment_cfg.get("grading") or {}).get("show_breakdown_to_student"):
             grade_breakdown = latest_sub.grade_breakdown
 
+    squad_panel = None
+    if latest_sub is not None and latest_sub.squad_id is not None:
+        squad = await squads.squad_for_submission(db, latest_sub)
+        states = await squads.member_quiz_states(db, latest_sub)
+        if squad is not None:
+            draw = (latest_sub.source_metadata or {}).get("squad_quiz_draw") or {}
+            order = draw.get("member_order") or []
+            my_slice = None
+            if student_id in order:
+                my_slice = len(draw["slices"][order.index(student_id)])
+            squad_panel = SquadPanel(
+                name=squads.display_name(squad),
+                members=[SquadMemberState(**vars(m)) for m in states],
+                complete=all(m.passed for m in states),
+                my_passed=any(m.student_id == student_id and m.passed for m in states),
+                my_slice=my_slice,
+                total_questions=len(draw.get("question_ids") or []) or None,
+            )
+
     detail = AssignmentDetail(
         student_assignment_id=sa.id,
         title=sa.subjects_assignment.title,
@@ -379,6 +421,7 @@ async def assignment_detail(
         content_files=content_files,
         ai_comment=ai_comment,
         grade_breakdown=grade_breakdown,
+        squad=squad_panel,
     )
 
     student = await db.get(Student, student_id)
@@ -410,21 +453,12 @@ async def assignment_status(
 
     ``transient`` tells the caller whether it is still worth asking again.
     """
-    sa_exists = await db.scalar(
-        select(StudentAssignment.id).where(
-            StudentAssignment.id == sa_id,
-            StudentAssignment.student_id == student_id,
-        )
-    )
-    if sa_exists is None:
+    sa = await db.get(StudentAssignment, sa_id)
+    if sa is None or sa.student_id != student_id:
         raise HTTPException(status_code=404)
 
-    status = await db.scalar(
-        select(Submission.status)
-        .where(Submission.students_assignment_id == sa_id)
-        .order_by(Submission.created_at.desc(), Submission.id.desc())
-        .limit(1)
-    )
+    latest = await squads.latest_submission(db, sa) if sa else None
+    status = latest.status if latest else None
     return JSONResponse(
         {
             "status": status.value if status else None,
@@ -463,11 +497,25 @@ async def submit_assignment(
                     detail="The submission deadline has passed. Late submissions are not accepted.",
                 )
 
+    # Resolve the submission scope: a locked squad shares one submission across every
+    # member's StudentAssignment row; a pending invite blocks uploads outright, since
+    # accepting or cancelling it could change who that submission covers mid-flight.
+    subject_for_squad = await db.get(Subject, subjects_assignment.subject_id)
+    squad = None
+    if subject_for_squad is not None and subject_for_squad.squad_max_size is not None:
+        if await squads.has_pending_invites(db, subjects_assignment.subject_id, student_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Squad invitation pending; answer or cancel it before submitting.",
+            )
+        squad = await squads.active_squad(db, subjects_assignment.subject_id, student_id)
+    scope = await squads.member_sa_ids(db, squad, subjects_assignment.id) if squad else [sa_id]
+
     # Block re-submission once the assignment is already passed
     completed_result = await db.execute(
         select(func.count(Submission.id)).where(
             and_(
-                Submission.students_assignment_id == sa_id,
+                Submission.students_assignment_id.in_(scope),
                 Submission.status == SubmissionStatus.COMPLETED,
             )
         )
@@ -481,7 +529,7 @@ async def submit_assignment(
     max_submissions = subjects_assignment.config.get("max_submissions")
     if max_submissions is not None:
         count_result = await db.execute(
-            select(func.count(Submission.id)).where(Submission.students_assignment_id == sa_id)
+            select(func.count(Submission.id)).where(Submission.students_assignment_id.in_(scope))
         )
         current_count = count_result.scalar_one() or 0
         if current_count >= max_submissions:
@@ -510,7 +558,7 @@ async def submit_assignment(
             Submission.students_assignment_id.in_(
                 select(StudentAssignment.id).where(
                     StudentAssignment.subjects_assignment_id == sa.subjects_assignment_id,
-                    StudentAssignment.student_id != student_id,
+                    StudentAssignment.id.not_in(scope),
                 )
             ),
             Submission.source_type == SubmissionSourceType.ZIP_UPLOAD,
@@ -535,9 +583,12 @@ async def submit_assignment(
             "similarity_score": round(max_similarity, 3),
         },
         status=SubmissionStatus.PENDING,
+        squad_id=squad.id if squad else None,
     )
     db.add(submission)
     await db.flush()
+    if squad:
+        squads.lock_on_submit(squad)
 
     # Quiz-examined assignments have nothing to run — no sandbox, no container — so they are
     # accepted here, in the request, and the page this redirects to already carries the quiz
@@ -594,6 +645,7 @@ async def student_summary(
     )
     subjects = enrolled_result.scalars().all()
     subject_ids = [s.id for s in subjects]
+    subject_map = {s.id: s for s in subjects}
 
     # All assignments across all subjects with student progress
     if subject_ids:
@@ -666,8 +718,15 @@ async def student_summary(
     else:
         subs_by_sa = {}
 
-    # Build subject lookup
-    subject_map = {s.id: s for s in subjects}
+    # Squad subjects resolve through the squad scope instead of the student's own
+    # StudentAssignment row, so one upload from any member shows up for everyone.
+    for r in all_rows:
+        sa_obj = r.SubjectsAssignment
+        subj = subject_map.get(sa_obj.subject_id)
+        if subj is not None and subj.squad_max_size is not None and r.student_assignment_id:
+            sub = await squads.latest_submission_for(db, student_id, sa_obj.subject_id, sa_obj.id)
+            if sub is not None:
+                subs_by_sa[r.student_assignment_id] = sub
 
     summary_rows = []
     for r in all_rows:
@@ -677,6 +736,10 @@ async def student_summary(
             deadline = deadline.replace(tzinfo=UTC)
         sub = subs_by_sa.get(r.student_assignment_id)
         is_overdue = deadline is not None and deadline < now and r.grade is None
+        row_squad_name = None
+        if sub is not None and sub.squad_id:
+            row_squad = await squads.squad_for_submission(db, sub)
+            row_squad_name = squads.display_name(row_squad) if row_squad is not None else None
         summary_rows.append(
             {
                 "subject": subject_map.get(sa.subject_id),
@@ -686,6 +749,7 @@ async def student_summary(
                 "submission_status": sub.status if sub else None,
                 "deadline": deadline,
                 "is_overdue": is_overdue,
+                "squad_name": row_squad_name,
             }
         )
 
