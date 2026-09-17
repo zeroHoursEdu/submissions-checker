@@ -288,6 +288,20 @@ migration is a no-op.
 
 ---
 
+### Deferred contraction (do this in a later release)
+
+`students.github_username` and `subjects.github_repo` are no longer used by the code
+(since 2026-09-17, migration 0027) but were left in place so the previous release could
+keep serving during the rolling deploy. Once every replica runs a build newer than
+2dc6708, add a migration with:
+
+```python
+op.drop_column("students", "github_username")
+op.drop_column("subjects", "github_repo")
+```
+
+(`IF EXISTS` semantics are not needed — no release since has re-created them.)
+
 ## Creating the first account
 
 A production deployment seeds no accounts — the demo accounts exist only when

@@ -6,7 +6,10 @@ Revises: 0026
 The GitHub-PR ingest and the pre-2026-06 "CHECKING" flow are gone from the code.
 Historical rows are mapped to their closest current value before the enum
 values are removed, so this is safe on any database regardless of contents.
-PostgreSQL cannot drop an enum value, hence the rename/recreate dance.
+PostgreSQL cannot drop an enum value, hence the rename/recreate dance. The enum
+swap is compatible with the previous release running alongside (it never wrote
+the removed values); the GitHub-era columns are deliberately left in place for
+the same reason.
 """
 
 from __future__ import annotations
@@ -98,10 +101,14 @@ def upgrade() -> None:
     op.execute("DELETE FROM outbox_messages WHERE event_type IN ('PULL', 'REVIEW', 'NOTIFY')")
     _recreate_enum("outbox_event_type", "outbox_messages", "event_type", _EVENT_VALUES)
 
-    # 4. GitHub-era columns.
+    # 4. GitHub-era columns (students.github_username, subjects.github_repo) are NOT
+    # dropped here. A rolling deploy runs the previous release alongside this one, and
+    # that release still selects both columns; dropping them would 500 every request the
+    # old replica serves until Watchtower replaces it. The ORM no longer declares them,
+    # so they sit unused (nullable) until a later release drops them — see
+    # docs/deployment.md, "The migration rule". Only the unique constraint goes, so the
+    # new code's inserts (which leave the column NULL) can never collide.
     op.execute("ALTER TABLE students DROP CONSTRAINT IF EXISTS uq_students_github_username")
-    op.drop_column("students", "github_username")
-    op.drop_column("subjects", "github_repo")
 
 
 def downgrade() -> None:
