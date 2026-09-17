@@ -82,3 +82,25 @@ async def test_latency_is_observed_once_per_request() -> None:
         await c.get("/items/1")
     assert metrics.http_request_duration_seconds._sum.get() >= before
     assert sum(b.get() for b in metrics.http_request_duration_seconds._buckets) == count_before + 1
+
+
+@pytest.mark.asyncio
+async def test_routes_inside_included_routers_resolve_to_their_template() -> None:
+    """The real app mounts every route through APIRouter.include_router; those must count
+    by template too, not collapse to 'unmatched'."""
+    from fastapi import APIRouter
+
+    app = FastAPI()
+    router = APIRouter(prefix="/portal")
+
+    @router.get("/quiz/{attempt_id}")
+    async def quiz(attempt_id: int) -> dict[str, int]:
+        return {"id": attempt_id}
+
+    app.include_router(router)
+    app.add_middleware(PrometheusMiddleware)
+
+    before = _count("/portal/quiz/{attempt_id}", "GET", "2xx")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        await c.get("/portal/quiz/7")
+    assert _count("/portal/quiz/{attempt_id}", "GET", "2xx") == before + 1
