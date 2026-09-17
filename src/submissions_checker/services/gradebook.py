@@ -197,9 +197,14 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
     per-attempt integrity table this once fed on the page itself was dropped in
     the subject-tabs rework in favor of that single aggregate number.
     """
+    # A squad's shared submission carries only the uploader's StudentAssignment, but each
+    # member has their own QuizAttempt.student_id — keying off StudentAssignment.student_id
+    # alone would attribute every squad-mate's attempt to the uploader. Coalesce to the
+    # attempt's own student_id first (falls back to the SA's for the solo, pre-attempt case).
+    student_key = func.coalesce(QuizAttempt.student_id, StudentAssignment.student_id)
     result = await db.execute(
         select(
-            Student.id.label("student_id"),
+            student_key.label("student_id"),
             Student.full_name.label("student_name"),
             SubjectsAssignment.id.label("assignment_id"),
             SubjectsAssignment.title.label("assignment_title"),
@@ -215,7 +220,7 @@ async def fetch_integrity_rows(db: AsyncSession, subject_id: int) -> list[Integr
             SubjectsAssignment,
             SubjectsAssignment.id == StudentAssignment.subjects_assignment_id,
         )
-        .join(Student, Student.id == StudentAssignment.student_id)
+        .join(Student, Student.id == student_key)
         .join(
             SubjectsStudents,
             and_(

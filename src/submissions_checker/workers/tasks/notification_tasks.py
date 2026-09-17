@@ -23,6 +23,7 @@ from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.db.models.user import User
+from submissions_checker.services import squads
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.notifications.dispatcher import build_dispatcher
 from submissions_checker.services.notifications.templates import (
@@ -160,58 +161,82 @@ async def execute_submission_reviewed_task(db: AsyncSession, payload: dict[str, 
         return
 
     sa = submission.students_assignment
-    student = sa.student
     assignment = sa.subjects_assignment
 
-    portal_url = (
-        f"{settings.app_base_url.rstrip('/')}"
-        f"/portal/subjects/{assignment.subject_id}/assignments/{sa.id}"
-    )
+    # A squad's shared submission is reviewed once but must reach every member, not just
+    # the uploader whose StudentAssignment the row happens to carry — solo path (no squad)
+    # is exactly the old single-student behaviour.
+    squad = await squads.squad_for_submission(db, submission)
+    members = [m.student for m in squad.members] if squad is not None else [sa.student]
 
-    email_subject, body = submission_reviewed_template(
-        full_name=student.full_name,
-        assignment_title=assignment.title,
-        action=action,
-        reason=reason,
-        portal_url=portal_url,
-    )
-
-    # In-app notification is a separate channel from email — pushed regardless of the
-    # student's SUBMISSION_CHECKED/EMAIL preference, which only governs email.
     verb = "approved" if action == "approve" else "rejected"
-    in_app_body = f'Your submission for "{assignment.title}" was {verb}.'
-    if reason and action == "reject":
-        in_app_body += f" Feedback: {reason}"
-    notify_user_id = await db.scalar(select(User.id).where(User.student_id == student.id))
-    if notify_user_id is not None:
-        await push_notification(
-            db,
-            notify_user_id,
-            email_subject,
-            in_app_body,
-            f"/portal/subjects/{assignment.subject_id}/assignments/{sa.id}",
+    dispatcher = build_dispatcher(settings)
+    has_channel = bool(dispatcher._channels)
+    if not has_channel:
+        logger.warning("submission_reviewed_task_no_channel", submission_id=submission_id)
+
+    for student in members:
+        # Each member's own students_assignments.id — the portal link must open their
+        # own assignment page, not the uploader's — falling back to the uploader's SA id
+        # if the member somehow has none (shouldn't happen once squad-scoped, but the
+        # link must still resolve to something).
+        member_sa_id = sa.id
+        if student.id != sa.student_id:
+            found = await db.scalar(
+                select(StudentAssignment.id).where(
+                    StudentAssignment.student_id == student.id,
+                    StudentAssignment.subjects_assignment_id == assignment.id,
+                )
+            )
+            if found is not None:
+                member_sa_id = found
+
+        portal_url = (
+            f"{settings.app_base_url.rstrip('/')}"
+            f"/portal/subjects/{assignment.subject_id}/assignments/{member_sa_id}"
         )
 
-    if not await _is_email_enabled(db, student.id, NotificationCase.SUBMISSION_CHECKED):
+        email_subject, body = submission_reviewed_template(
+            full_name=student.full_name,
+            assignment_title=assignment.title,
+            action=action,
+            reason=reason,
+            portal_url=portal_url,
+        )
+
+        # In-app notification is a separate channel from email — pushed regardless of the
+        # student's SUBMISSION_CHECKED/EMAIL preference, which only governs email.
+        in_app_body = f'Your submission for "{assignment.title}" was {verb}.'
+        if reason and action == "reject":
+            in_app_body += f" Feedback: {reason}"
+        notify_user_id = await db.scalar(select(User.id).where(User.student_id == student.id))
+        if notify_user_id is not None:
+            await push_notification(
+                db,
+                notify_user_id,
+                email_subject,
+                in_app_body,
+                f"/portal/subjects/{assignment.subject_id}/assignments/{member_sa_id}",
+            )
+
+        if not await _is_email_enabled(db, student.id, NotificationCase.SUBMISSION_CHECKED):
+            logger.info(
+                "submission_reviewed_email_suppressed",
+                submission_id=submission_id,
+                student_id=student.id,
+            )
+            continue
+
+        if not has_channel:
+            continue
+
+        await dispatcher.notify(student.email, email_subject, body)
         logger.info(
-            "submission_reviewed_email_suppressed",
+            "submission_reviewed_email_sent",
             submission_id=submission_id,
             student_id=student.id,
+            action=action,
         )
-        return
-
-    dispatcher = build_dispatcher(settings)
-    if not dispatcher._channels:
-        logger.warning("submission_reviewed_task_no_channel", student_id=student.id)
-        return
-
-    await dispatcher.notify(student.email, email_subject, body)
-    logger.info(
-        "submission_reviewed_email_sent",
-        submission_id=submission_id,
-        student_id=student.id,
-        action=action,
-    )
 
 
 async def execute_quiz_result_task(db: AsyncSession, payload: dict[str, Any]) -> None:

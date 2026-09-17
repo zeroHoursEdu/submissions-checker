@@ -194,9 +194,11 @@ async def _make_quiz_attempt(
     paused_seconds: int = 0,
     violations: dict | None = None,
     status: QuizAttemptStatus = QuizAttemptStatus.COMPLETED,
+    student_id: int | None = None,
 ) -> QuizAttempt:
     attempt = QuizAttempt(
         submission_id=submission_id,
+        student_id=student_id,
         questions_snapshot=[],
         config_snapshot={},
         started_at=started_at,
@@ -326,6 +328,59 @@ async def test_fetch_integrity_rows_median_is_per_assignment(
     assert by_student["S1"].median_seconds == 330
     assert by_student["S2"].duration_anomalous is True
     assert by_student["S1"].duration_anomalous is False
+
+
+async def test_fetch_integrity_rows_keys_squad_mates_by_their_own_attempt(
+    db: AsyncSession, teacher, make_student
+) -> None:
+    """I6: a squad's shared submission carries only the uploader's StudentAssignment,
+    but each member has their own QuizAttempt.student_id — squad-mates must not all be
+    attributed to the uploader."""
+    from submissions_checker.services import squads
+
+    subject = Subject(name="Squad Integrity", owner_id=teacher.id, squad_max_size=2)
+    db.add(subject)
+    await db.commit()
+    await db.refresh(subject)
+    a1 = await _make_assignment(db, subject.id, title="Quiz 1", code="quiz1")
+    s1 = await make_student(full_name="Squad A")
+    s2 = await make_student(full_name="Squad B")
+    await _enroll(db, subject.id, s1.id)
+    await _enroll(db, subject.id, s2.id)
+    sa1 = await _make_student_assignment(db, s1.id, a1.id)
+    await _make_student_assignment(db, s2.id, a1.id)
+    squad = await squads.teacher_assign(db, subject.id, teacher.id, [s1.id, s2.id])
+    await db.commit()
+    sub = Submission(
+        students_assignment_id=sa1.id,
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+        source_metadata={},
+        status=SubmissionStatus.COMPLETED,
+        squad_id=squad.id,
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    await _make_quiz_attempt(
+        db,
+        sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=100),
+        student_id=s1.id,
+    )
+    await _make_quiz_attempt(
+        db,
+        sub.id,
+        started_at=start,
+        submitted_at=start + timedelta(seconds=120),
+        student_id=s2.id,
+    )
+
+    rows = await fetch_integrity_rows(db, subject.id)
+
+    assert {r.student_id for r in rows} == {s1.id, s2.id}
+    assert len(rows) == 2
 
 
 async def test_fetch_integrity_rows_excludes_test_students(
