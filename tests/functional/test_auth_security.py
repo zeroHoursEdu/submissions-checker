@@ -223,3 +223,38 @@ async def test_analytics_routes_are_gone(admin_client: AsyncClient) -> None:
     docs/superpowers/specs/2026-09-15-prometheus-grafana-observability-design.md)."""
     for path in ("/teacher/analytics", "/teacher/analytics/fraud", "/teacher/analytics/students/1"):
         assert (await admin_client.get(path)).status_code == 404, path
+
+
+# ── CSRF: cross-site state-changing requests are refused ──────────────────────
+
+
+async def test_cross_site_post_is_refused_by_origin(client: AsyncClient) -> None:
+    r = await client.post(
+        "/auth/login",
+        data={"username": "x", "password": "y"},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert r.status_code == 403
+
+
+async def test_cross_site_post_is_refused_by_fetch_metadata(client: AsyncClient) -> None:
+    r = await client.post(
+        "/auth/login",
+        data={"username": "x", "password": "y"},
+        headers={"Sec-Fetch-Site": "cross-site", "Origin": "http://test"},
+    )
+    assert r.status_code == 403
+
+
+async def test_same_origin_post_passes(client: AsyncClient) -> None:
+    r = await client.post(
+        "/auth/login",
+        data={"username": "x", "password": "y"},
+        headers={"Origin": "http://test", "Sec-Fetch-Site": "same-origin"},
+    )
+    assert r.status_code == 401  # reached the handler; bad credentials
+
+
+async def test_get_is_never_origin_checked(client: AsyncClient) -> None:
+    r = await client.get("/auth/login", headers={"Origin": "https://evil.example"})
+    assert r.status_code == 200

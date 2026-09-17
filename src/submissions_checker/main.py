@@ -21,6 +21,7 @@ from submissions_checker.api.routes import (
     teacher_portal,
 )
 from submissions_checker.core.config import get_settings
+from submissions_checker.core.csrf_middleware import OriginCheckMiddleware
 from submissions_checker.core.database import close_db, init_db
 from submissions_checker.core.i18n import load_vocabularies
 from submissions_checker.core.logging import configure_logging, get_logger
@@ -112,6 +113,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Refuse cross-site POST/PUT/PATCH/DELETE (second CSRF layer after SameSite=Strict).
+    app.add_middleware(OriginCheckMiddleware)
     # Outermost of the app middlewares: counts every request by route template.
     app.add_middleware(PrometheusMiddleware)
 
