@@ -83,12 +83,17 @@ detail.
 | Cross-subject standing (average grade, upcoming/overdue work) | STUDENT | `GET /portal/summary` |
 | See a subject's assignments | STUDENT (enrolled) | `GET /portal/subjects/{subject}` |
 | Open one assignment (brief, files, history, actions) | STUDENT (owner of the record) | `GET /portal/subjects/{subject}/assignments/{sa_id}` |
+| Invite classmates into a squad (subject must have `squad_max_size` set; invitee must have zero submissions in the subject) — audited `squad_create` | STUDENT (enrolled) | `POST /portal/subjects/{subject}/squad/create` |
+| Accept / decline / cancel a squad invite (accept re-checks eligibility and locks the squad at max size; only the creator can cancel) — accept audited `squad_join` | STUDENT (enrolled) | `POST /portal/subjects/{subject}/squad/invites/{id}/accept`, `.../decline`, `.../cancel` |
+| Assign a squad directly (no acceptance step; 2..`squad_max_size` eligible students, optional name) — audited `squad_assign` | Owner / ADMIN | `POST /teacher/subjects/{id}/squads/assign` |
+
+See [`docs/features/squads.md`](features/squads.md) for the full squad feature.
 
 ## 4. Submissions & the checking pipeline
 
 | Feature | Who | Route(s) |
 |---|---|---|
-| Submit work as a ZIP (≤ 50 MB; deadline/late-policy, completed-once, and `max_submissions` checks; queued for checking; similarity score recorded) — audited `student_submit` | STUDENT (owner) | `POST /portal/subjects/{subject}/assignments/{sa_id}/submit` |
+| Submit work as a ZIP (≤ 50 MB; deadline/late-policy, completed-once, and `max_submissions` checks; queued for checking; similarity score recorded; **one row per squad when `squads` is enabled and the submitter is in a locked squad — any member's upload counts for all**) — audited `student_submit` | STUDENT (owner) | `POST /portal/subjects/{subject}/assignments/{sa_id}/submit` |
 | Watch checking progress (refresh the assignment page) | STUDENT (owner) | `GET /portal/subjects/{subject}/assignments/{sa_id}` |
 | Assignment review board (per-student latest submission, grade, integrity flags) | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}` |
 | Review one submission (test results, AI verdict when the mode ran one, proctoring evidence, submitted archive) | Owner / ADMIN | `GET /teacher/submissions/{id}/review` |
@@ -161,6 +166,10 @@ Question types (`QuizQuestionType`): `SINGLE_CHOICE`, `MULTIPLE_CHOICE`, `ORDERI
 `TRUE_FALSE`. Any other type is rejected when the config is applied. Quiz
 violation flags and webcam thumbnails surface to the teacher on the assignment review board
 (§4).
+
+Squad quiz = per-member slices of one shared draw: the submission completes (and the
+squad gets a grade) only when every currently-enrolled member has passed their own slice.
+See [`docs/features/squads.md`](features/squads.md).
 
 ### Reported questions ("disputes")
 

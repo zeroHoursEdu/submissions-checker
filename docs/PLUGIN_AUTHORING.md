@@ -50,6 +50,11 @@ description: "Linear algebra and numerical methods for software engineers."
 gridPicture: grid.png
 mainPicture: main.png
 
+# Squads (optional). Students may pair up: one ZIP per squad, the quiz split between
+# members, one unified grade. Omit the block to keep every student solo.
+squads:
+  maxAllowedSize: 2        # 2..6
+
 assignments:
   homework1:                     # assignment code — must be unique within the subject
     title: "Homework 1 — Matrix Operations"
@@ -83,6 +88,16 @@ assignments:
       "2":
         check_command: assignments/homework1/variants/2/check.py
 ```
+
+### Squads
+
+Optional, subject-level. When `squads.maxAllowedSize` is set, students on this subject
+may pair up (or form larger groups, up to the configured size) instead of working
+solo: one ZIP upload counts for the whole squad, the defence quiz is split into a
+disjoint slice per member, and the final grade is one shared mark written to every
+member. `maxAllowedSize` must be an integer between 2 and 6; omit the block entirely
+to keep the subject solo-only. See [`docs/features/squads.md`](features/squads.md)
+for the full rules, teacher/student usage, and the tables involved.
 
 ### Review Modes
 
