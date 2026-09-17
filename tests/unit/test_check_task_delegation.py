@@ -234,3 +234,64 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
     assert submission.status == SubmissionStatus.VALIDATION_FAILED
     assert "boom" in submission.test_results["check_reason"]
     assert metrics.checks_total.labels(outcome="error")._value.get() == error_before + 1
+
+
+async def test_worker_refuses_path_like_subject_code(tmp_path, monkeypatch) -> None:
+    """A stored config whose subjectCode is not a plain identifier must never be joined
+    onto the plugins root: the check fails validation and the sandbox is never reached."""
+    zip_path = tmp_path / "s.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("solution.py", "print('hi')\n")
+
+    subject = SimpleNamespace(id=5)
+    subjects_assignment = SimpleNamespace(
+        id=7,
+        code="lab1",
+        title="Lab 1",
+        subject=subject,
+        subject_id=5,
+        config={},
+        min_grade=0,
+        max_grade=100,
+    )
+    student_assignment = SimpleNamespace(
+        variant="3", subjects_assignment=subjects_assignment, student_id=42, grade=None
+    )
+    submission = SimpleNamespace(
+        id=1,
+        plugin_config_id=99,
+        source_metadata={"saved_as": "s.zip"},
+        status=SubmissionStatus.PENDING,
+        test_results=None,
+        ai_review=None,
+        grade_breakdown=None,
+        quiz_attempts=[],
+        students_assignment=student_assignment,
+    )
+    evil = {**_CONFIG, "subjectCode": "../templates"}
+    db = _FakeDB(submission, SimpleNamespace(id=99, version=2, config=evil))
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(
+        check_tasks,
+        "get_settings",
+        lambda: SimpleNamespace(
+            plugins_dir=str(tmp_path),
+            host_plugins_dir=None,
+            sandbox_max_memory="512m",
+            sandbox_max_cpus=1.0,
+        ),
+    )
+    called: list = []
+
+    async def fake_run_check(**kwargs):
+        called.append(kwargs)
+        return check_core.CheckOutcome("passed", 100, 100, [])
+
+    monkeypatch.setattr(check_tasks.check_core, "run_check", fake_run_check)
+
+    await check_tasks.execute_check_task(db, {"submission_id": 1})
+
+    assert called == []
+    assert submission.status == SubmissionStatus.VALIDATION_FAILED
+    assert "subjectCode" in submission.test_results["check_reason"]

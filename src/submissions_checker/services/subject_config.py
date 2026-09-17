@@ -6,10 +6,26 @@ parsing path (no DB, no side effects).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# A subject code is used verbatim as a directory name under the plugins root (and as an
+# S3 key prefix). One path component, ASCII, no leading dot, no "..": anything else could
+# escape the plugins directory when the tree is extracted and swapped into place.
+_SUBJECT_CODE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+
+
+def validate_subject_code(code: object) -> str:
+    """Return ``code`` if it is safe to use as a single path component, else ValueError."""
+    if not isinstance(code, str) or not _SUBJECT_CODE_RE.fullmatch(code) or ".." in code:
+        raise ValueError(
+            "subjectCode must be 1-64 characters of letters, digits, '_', '-' or '.', "
+            "start with a letter or digit, and not contain '..'"
+        )
+    return code
 
 
 def parse_config(raw: bytes) -> Any:

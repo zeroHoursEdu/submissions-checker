@@ -40,6 +40,7 @@ from submissions_checker.services import check_core
 from submissions_checker.services.docker_sandbox import DockerSandbox
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
+from submissions_checker.services.subject_config import validate_subject_code
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
@@ -151,7 +152,14 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         return
 
     plugins_root = settings.host_plugins_dir or settings.plugins_dir
-    plugin_dir = Path(plugins_root) / (config_record.config.get("subjectCode") or "")
+    # The stored code is joined onto the plugins root and bind-mounted into the sandbox;
+    # never trust a stored value to still be a plain directory name.
+    try:
+        subject_code = validate_subject_code(config_record.config.get("subjectCode"))
+    except ValueError as exc:
+        _fail_validation(submission, f"Invalid subjectCode in plugin config: {exc}")
+        return
+    plugin_dir = Path(plugins_root) / subject_code
 
     # Locate and extract the submitted ZIP
     saved_as = (submission.source_metadata or {}).get("saved_as")

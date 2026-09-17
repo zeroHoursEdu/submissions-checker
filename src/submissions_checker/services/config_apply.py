@@ -33,6 +33,7 @@ from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.services.subject_config import validate_subject_code
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 
 if TYPE_CHECKING:
@@ -127,6 +128,9 @@ class ConfigApplyService:
         subject_code: str = new_cfg.get("subjectCode", "")
         if not subject_code:
             raise ValueError("config.yml must contain a non-empty 'subjectCode' field")
+        # The code becomes plugins_dir/<code> and is os.replace()d into place below; a
+        # path-like value would overwrite an arbitrary sibling of the plugins directory.
+        validate_subject_code(subject_code)
         self._validate_quiz_questions(new_cfg)
         self._validate_check_commands(new_cfg)
         self._validate_quiz_reachability(new_cfg)
