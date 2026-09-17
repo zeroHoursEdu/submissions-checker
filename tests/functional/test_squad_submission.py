@@ -40,7 +40,9 @@ def _client(user: User) -> AsyncClient:
     return c
 
 
-async def _arrange(db, make_user, make_student, teacher, *, review_mode: str = "quiz_then_teacher"):
+async def _arrange(
+    db, make_user, make_student, teacher, *, review_mode: str = "quiz_then_teacher", quiz=None
+):
     """Subject with squads on, one quiz-first assignment, two enrolled consented students."""
     from datetime import UTC, datetime
 
@@ -48,22 +50,23 @@ async def _arrange(db, make_user, make_student, teacher, *, review_mode: str = "
     db.add(subject)
     await db.commit()
     await db.refresh(subject)
-    quiz = {
-        "questions": [
-            {
-                "type": "single_choice",
-                "text": f"q{i}",
-                "points": 1,
-                "options": ["w", "r"],
-                "correct": 1,
-            }
-            for i in range(4)
-        ],
-        "shuffle_questions": False,
-        "shuffle_options": False,
-        "pass_threshold_pct": 0.5,
-        "max_quiz_attempts": 2,
-    }
+    if quiz is None:
+        quiz = {
+            "questions": [
+                {
+                    "type": "single_choice",
+                    "text": f"q{i}",
+                    "points": 1,
+                    "options": ["w", "r"],
+                    "correct": 1,
+                }
+                for i in range(4)
+            ],
+            "shuffle_questions": False,
+            "shuffle_options": False,
+            "pass_threshold_pct": 0.5,
+            "max_quiz_attempts": 2,
+        }
     cfg = SubjectPluginConfig(
         subject_id=subject.id,
         version=1,

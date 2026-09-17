@@ -127,3 +127,58 @@ async def test_member_cannot_open_partners_attempt(db, make_user, make_student, 
         att_a = await _start(ca, subject, sa_a)
         r = await cb.get(f"/portal/quiz/{att_a}")
         assert r.status_code == 403
+
+
+_QUIZ_REQUIRED_HEAVY = {
+    "questions": [
+        {
+            "type": "single_choice",
+            "text": f"q{i}",
+            "points": 1,
+            "options": ["w", "r"],
+            "correct": 1,
+            "required": True,
+        }
+        for i in range(3)
+    ]
+    + [
+        {
+            "type": "single_choice",
+            "text": "q3",
+            "points": 1,
+            "options": ["w", "r"],
+            "correct": 1,
+            "required": False,
+        }
+    ],
+    "shuffle_questions": False,
+    "shuffle_options": False,
+    "pass_threshold_pct": 0.5,
+    "max_quiz_attempts": 2,
+    "questions_to_send": 4,
+}
+
+
+async def test_retry_keeps_slice_size_when_required_outnumber_slice(
+    db, make_user, make_student, teacher
+) -> None:
+    """3 required + 1 optional, squad of 2 -> a 2-question slice. A retry must stay at 2
+    questions even when both of a member's original questions were required — the config
+    still has 3 required questions overall, more than that member's slice ever held."""
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(
+        db, make_user, make_student, teacher, quiz=_QUIZ_REQUIRED_HEAVY
+    )
+    await _lock_pair(db, subject, teacher, (ua, ub))
+    async with _client(ua) as ca, _client(ub) as cb:
+        await _upload(ca, subject, sa_a)
+        att_b1 = await _start(cb, subject, sa_b)
+        first = await db.get(QuizAttempt, att_b1)
+        await _answer_all(cb, db, att_b1, correct=False)
+        att_b2 = await _start(cb, subject, sa_b)
+        assert att_b2 != att_b1
+        second = await db.get(QuizAttempt, att_b2)
+        assert len(second.questions_snapshot) == len(first.questions_snapshot)
+        first_ids = {q["id"] for q in first.questions_snapshot}
+        for q in second.questions_snapshot:
+            if q["is_required"]:
+                assert q["id"] in first_ids

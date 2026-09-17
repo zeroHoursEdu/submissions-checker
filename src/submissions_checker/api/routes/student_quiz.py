@@ -444,8 +444,22 @@ async def _draw_for_member(
         await db.flush()
     idx = draw["member_order"].index(student_id)
     my_ids: list[int] = list(draw["slices"][idx])
+    draw_cfg = quiz_cfg
     if retry:
-        my_ids = _select_question_ids({**quiz_cfg, "questions_to_send": len(my_ids)})
+        # Only the required questions that were in THIS member's original slice stay
+        # required for the retry draw — otherwise a config with more required questions
+        # than the slice size would make `_select_question_ids` return more questions
+        # than the member's slice ever held (it always includes every required question).
+        mine = set(my_ids)
+        draw_cfg = {
+            **quiz_cfg,
+            "questions_to_send": len(mine),
+            "questions": [
+                {**q, "required": bool(q.get("required")) and i in mine}
+                for i, q in enumerate(quiz_cfg.get("questions", []))
+            ],
+        }
+        my_ids = _select_question_ids(draw_cfg)
     elif bool(quiz_cfg.get("shuffle_questions", True)):
         random.shuffle(my_ids)
     squad_snapshot = {
@@ -453,7 +467,11 @@ async def _draw_for_member(
         "member_count": len(draw["member_order"]),
         "total_questions": len(draw["question_ids"]),
     }
-    return _snapshot_questions(quiz_cfg, my_ids), squad_snapshot
+    # `draw_cfg` (not `quiz_cfg`) so a retry's snapshot reports "required" scoped to this
+    # draw — otherwise a filler question pulled in only because a sibling was already
+    # required-and-in-slice would still show as required, when this draw treats it as
+    # optional filler.
+    return _snapshot_questions(draw_cfg, my_ids), squad_snapshot
 
 
 def _grade_answer(
