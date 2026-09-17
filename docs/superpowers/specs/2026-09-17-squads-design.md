@@ -136,7 +136,7 @@ Single home for every rule. Every function takes an `AsyncSession` and does not 
 | `active_squad(db, subject_id, student_id) -> Squad | None` | The student's squad in this subject, **only if locked**. Unlocked squads are UI state, never grading state. |
 | `pending_state(db, subject_id, student_id)` | For the student card: outgoing squad + its invites, or incoming invites. |
 | `member_sa_ids(db, squad, subjects_assignment_id) -> list[int]` | `students_assignments.id` of every member for that assignment; creates missing rows (same fan-out `_ensure_assignment_rows` does). |
-| `resolve_submission_scope(db, sa) -> list[int]` | `[sa.id]` for a solo student; `member_sa_ids(...)` when `active_squad` exists. **Every** "latest submission for this assignment" query goes through this. |
+| `resolve_submission_scope(db, sa) -> list[int]` | `[sa.id]` for a solo student; `member_sa_ids(...)` when `active_squad` exists. **Every** "latest submission for this assignment" query goes through this. Shipped as three functions: `scope_sa_ids(db, student_id, subject_id, subjects_assignment_id) -> list[int]` (the scope itself), `latest_submission_for(db, student_id, subject_id, subjects_assignment_id) -> Submission \| None` (latest over that scope), and `latest_submission(db, sa) -> Submission \| None` (the `StudentAssignment`-keyed convenience wrapper callers actually use). |
 | `latest_submission(db, sa) -> Submission | None` | `max(created_at)` over the scope. Replaces the `max(sa.submissions, ...)` idiom. |
 | `lock_on_submit(squad)` | Sets `locked_at` if NULL. Called from `submit_assignment`. |
 | `quiz_complete(db, submission) -> bool` | Solo: the passed attempt exists. Squad: every member has an `is_passed` attempt on this submission. |

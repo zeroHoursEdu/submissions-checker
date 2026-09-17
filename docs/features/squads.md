@@ -155,6 +155,8 @@ then quiz, then teacher approval), squad of two (A, B):
 | Grid waiting (⏳) tooltip | Known limitation — shows a placeholder, not the actual partner names. |
 | Declining or cancelling an invite | Not written to the audit log (unlike `squad_create` / `squad_join` / `squad_assign`) — known limitation. |
 | Need to undo a locked squad, or drop a member entirely | DB only, by design (no UI/API undoes a lock): `DELETE FROM squad_members WHERE squad_id = … AND student_id = …` to drop a member, or `UPDATE squads SET locked_at = NULL WHERE id = …` to unlock one for further changes. |
+| CSV grade export | Shows the unified grade for every member, but the Status / Submitted-at columns are populated only on the uploader's row — squad-mates' rows show those blank. |
+| Deadline reminders | Still go to a squad-mate whose partner already uploaded on the squad's behalf — the reminder job is per-enrollment, not squad-aware. |
 
 ## Routes
 

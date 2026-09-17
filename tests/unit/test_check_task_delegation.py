@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 from submissions_checker.core import metrics
 from submissions_checker.db.models.enums import SubmissionStatus
+from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.services import check_core
 from submissions_checker.workers.tasks import check_tasks
 
@@ -53,7 +54,14 @@ class _FakeDB:
     async def execute(self, _stmt):
         return _Result(self._submission)
 
-    async def get(self, _model, _pk):
+    async def get(self, model, pk):
+        # finalize_grade re-fetches the target StudentAssignment(s) by id rather than
+        # writing straight to the already-loaded row (squad submissions fan the grade
+        # out to every member's row) — route that lookup to the fake's own SA, and
+        # everything else (the plugin config) to the config record as before.
+        sa = getattr(self._submission, "students_assignment", None)
+        if model is StudentAssignment and sa is not None and getattr(sa, "id", None) == pk:
+            return sa
         return self._config_record
 
     async def scalar(self, _stmt):
@@ -83,7 +91,7 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         max_grade=100,
     )
     student_assignment = SimpleNamespace(
-        variant="3", subjects_assignment=subjects_assignment, student_id=42, grade=None
+        id=11, variant="3", subjects_assignment=subjects_assignment, student_id=42, grade=None
     )
     submission = SimpleNamespace(
         id=1,
@@ -95,6 +103,7 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         grade_breakdown=None,
         quiz_attempts=[],
         students_assignment=student_assignment,
+        squad_id=None,
     )
     config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
     db = _FakeDB(submission, config_record)
