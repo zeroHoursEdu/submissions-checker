@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from jose import JWTError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from submissions_checker.api.dependencies import CurrentUser, DBSession
 from submissions_checker.core import metrics
@@ -28,6 +28,7 @@ from submissions_checker.core.security import (
     decode_access_token,
     dummy_password_hash,
     hash_password,
+    hash_token,
     password_too_long,
     verify_password,
 )
@@ -201,14 +202,26 @@ async def forgot_password(
     )
 
 
+async def _find_reset_token(db: DBSession, raw: str) -> PasswordResetToken | None:
+    """Match by hash; rows from before hashing (revision 0030) still match by value."""
+    result = await db.execute(
+        select(PasswordResetToken).where(
+            or_(
+                PasswordResetToken.token_hash == hash_token(raw),
+                PasswordResetToken.token == raw,
+            )
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 @router.get("/reset-password", response_class=HTMLResponse)
 async def reset_password_page(
     request: Request,
     token: str,
     db: DBSession,
 ) -> HTMLResponse:
-    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
-    prt = result.scalar_one_or_none()
+    prt = await _find_reset_token(db, token)
     valid = prt is not None and prt.is_valid()
     return render(
         request,
@@ -253,8 +266,7 @@ async def reset_password(
             status_code=422,
         )
 
-    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
-    prt = result.scalar_one_or_none()
+    prt = await _find_reset_token(db, token)
     if prt is None or not prt.is_valid():
         return render(
             request,

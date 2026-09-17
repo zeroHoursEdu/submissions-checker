@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
+from submissions_checker.core.sealed import unseal
 from submissions_checker.db.models.enums import NotificationCase, NotificationMethod
 from submissions_checker.db.models.feedback_token import FeedbackToken
 from submissions_checker.db.models.notification_preference import NotificationPreference
@@ -54,7 +55,8 @@ async def _is_email_enabled(db: AsyncSession, student_id: int, case: Notificatio
 async def execute_feedback_request_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     """Email a student their personal feedback link.
 
-    Payload: feedback_token_id
+    Payload: feedback_token_id, token_sealed (the raw link token, sealed; absent on
+    rows written before tokens were hashed at rest).
     """
     from submissions_checker.db.models.feedback_request import FeedbackRequest
     from submissions_checker.db.models.semester import Semester
@@ -108,7 +110,14 @@ async def execute_feedback_request_task(db: AsyncSession, payload: dict[str, Any
         )
         return
 
-    feedback_url = f"{settings.app_base_url.rstrip('/')}/feedback/{token.token}"
+    # The raw token comes sealed in the payload; only rows written before tokens were
+    # hashed (revision 0030) still carry it in clear on the token row itself.
+    sealed_token = payload.get("token_sealed")
+    raw_token = unseal(str(sealed_token)) if sealed_token is not None else token.token
+    if not raw_token:
+        logger.warning("feedback_request_task_token_unavailable", token_id=token_id)
+        return
+    feedback_url = f"{settings.app_base_url.rstrip('/')}/feedback/{raw_token}"
     email_subject, body = feedback_request_template(
         full_name=student.full_name,
         subject_name=subject.name,

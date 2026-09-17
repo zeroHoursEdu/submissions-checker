@@ -874,7 +874,8 @@ async def test_feedback_request_creates_request_tokens_and_outbox(
     )
     assert len(tokens) == 2
     assert {t.student_id for t in tokens} == {s1.id, s2.id}
-    assert all(t.token for t in tokens)
+    # Only the hash is stored; the raw token travels sealed in the outbox payload.
+    assert all(t.token is None and t.token_hash for t in tokens)
 
     # One FEEDBACK_REQUEST_SENT outbox per token.
     ob = (
@@ -891,6 +892,13 @@ async def test_feedback_request_creates_request_tokens_and_outbox(
     assert len(ob) == 2
     token_ids = {t.id for t in tokens}
     assert {m.payload["feedback_token_id"] for m in ob} == token_ids
+    from submissions_checker.core.sealed import unseal
+    from submissions_checker.core.security import hash_token
+
+    by_id = {t.id: t for t in tokens}
+    for m in ob:
+        raw = unseal(m.payload["token_sealed"])
+        assert hash_token(raw) == by_id[m.payload["feedback_token_id"]].token_hash
 
 
 async def test_feedback_request_no_active_semester_redirects_with_error(

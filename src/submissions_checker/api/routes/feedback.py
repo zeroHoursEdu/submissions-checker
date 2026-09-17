@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from submissions_checker.api.dependencies import DBSession
+from submissions_checker.core.security import hash_token
 from submissions_checker.core.templates import render
 from submissions_checker.db.models.feedback_response import FeedbackResponse
 from submissions_checker.db.models.feedback_token import FeedbackToken
@@ -17,10 +18,19 @@ from submissions_checker.db.models.subject import Subject
 router = APIRouter(tags=["feedback"])
 
 
+async def _find_feedback_token(db: DBSession, raw: str) -> FeedbackToken | None:
+    """Match by hash; rows from before hashing (revision 0030) still match by value."""
+    result = await db.execute(
+        select(FeedbackToken).where(
+            or_(FeedbackToken.token_hash == hash_token(raw), FeedbackToken.token == raw)
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 @router.get("/feedback/{token}", response_class=HTMLResponse)
 async def feedback_form(token: str, request: Request, db: DBSession) -> HTMLResponse:
-    token_result = await db.execute(select(FeedbackToken).where(FeedbackToken.token == token))
-    feedback_token = token_result.scalar_one_or_none()
+    feedback_token = await _find_feedback_token(db, token)
 
     if feedback_token is None:
         return render(request, "feedback_not_found.html", {}, status_code=404)
@@ -52,8 +62,7 @@ async def submit_feedback(
     went_bad: str = Form(...),
     to_change: str = Form(...),
 ) -> HTMLResponse | RedirectResponse:
-    token_result = await db.execute(select(FeedbackToken).where(FeedbackToken.token == token))
-    feedback_token = token_result.scalar_one_or_none()
+    feedback_token = await _find_feedback_token(db, token)
 
     if feedback_token is None:
         return render(request, "feedback_not_found.html", {}, status_code=404)

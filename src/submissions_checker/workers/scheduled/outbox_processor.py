@@ -193,6 +193,8 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     elif message.event_type == OutboxEventType.FEEDBACK_REQUEST_SENT:
         await execute_feedback_request_task(db, message.payload)
+        # The link token was sealed into the row for delivery only.
+        message.payload = redact_credentials(message.payload)
 
     elif message.event_type == OutboxEventType.QUIZ_DISPUTE_RESOLVED:
         await execute_quiz_dispute_resolved_task(db, message.payload)

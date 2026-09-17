@@ -17,7 +17,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
-from submissions_checker.core.security import COOKIE_NAME, decode_access_token
+from submissions_checker.core.security import COOKIE_NAME, decode_access_token, hash_token
 from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models.password_reset import PasswordResetToken
 from submissions_checker.db.models.user import User
@@ -253,7 +253,9 @@ async def test_reset_password_valid_token_updates_hash_and_consumes_token(
     assert bcrypt.checkpw(new_pw.encode(), fresh.password_hash.encode())
 
     prt = (
-        await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token_str))
+        await db.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(token_str))
+        )
     ).scalar_one()
     await db.refresh(prt)
     assert prt.used is True
@@ -348,7 +350,9 @@ async def test_reset_password_mismatch_rejected_with_422(
     assert resp.status_code == 422
     # Token must remain unused since the change never applied.
     prt = (
-        await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token_str))
+        await db.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(token_str))
+        )
     ).scalar_one()
     await db.refresh(prt)
     assert prt.used is False
@@ -666,3 +670,46 @@ async def test_reset_password_ends_existing_sessions(client: AsyncClient, make_u
     assert resp.status_code == 200
     client.cookies.set(COOKIE_NAME, old)
     assert (await client.get("/teacher")).status_code == 401
+
+
+# ── Reset tokens are stored hashed ───────────────────────────────────────────
+
+
+async def test_forgot_password_stores_only_the_token_hash(
+    client: AsyncClient, make_user, db
+) -> None:
+    """A database read must not yield a working reset link."""
+    user = await make_user(role=UserRole.TEACHER, username="oli", password=PASSWORD)
+    resp = await client.post("/auth/forgot-password", data={"username": "oli"})
+    assert resp.status_code == 200
+    prt = (
+        await db.execute(select(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+    ).scalar_one()
+    assert prt.token is None
+    assert prt.token_hash is not None and len(prt.token_hash) == 64
+
+
+async def test_legacy_plaintext_reset_token_still_works(client: AsyncClient, make_user, db) -> None:
+    """Rows written before hashing keep their token in clear and are still honoured."""
+    from datetime import UTC, datetime, timedelta
+
+    user = await make_user(role=UserRole.TEACHER, username="pat", password=PASSWORD)
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token="legacy-raw-token",
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+    )
+    await db.commit()
+    resp = await client.post(
+        "/auth/reset-password",
+        data={
+            "token": "legacy-raw-token",
+            "new_password": "N3wPassw0rd!",
+            "confirm_password": "N3wPassw0rd!",
+        },
+    )
+    assert resp.status_code == 200
+    await db.refresh(user)
+    assert bcrypt.checkpw(b"N3wPassw0rd!", user.password_hash.encode())

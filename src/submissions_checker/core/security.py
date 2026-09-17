@@ -1,5 +1,6 @@
 """Security utilities: password hashing and JWT auth."""
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -52,6 +53,19 @@ def dummy_password_hash() -> str:
     if _DUMMY_HASH is None:
         _DUMMY_HASH = hash_password("no-such-user")
     return _DUMMY_HASH
+
+
+# ── Bearer tokens at rest ─────────────────────────────────────────────────────
+
+
+def hash_token(raw: str) -> str:
+    """SHA-256 hex of a high-entropy bearer token (reset / feedback links).
+
+    Plain SHA-256 is enough here: the tokens are 32+ random bytes, so there is nothing
+    to guess and no need for a slow hash. Storing only the hash means a database read
+    cannot produce a working link.
+    """
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 # ── JWT ───────────────────────────────────────────────────────────────────────

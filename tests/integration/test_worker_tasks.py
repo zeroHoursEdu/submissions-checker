@@ -651,6 +651,34 @@ async def test_feedback_request_sends_link(
 
 
 @pytest.mark.asyncio
+async def test_feedback_request_uses_the_sealed_token_and_redacts_it(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    """New rows carry the raw link token sealed in the payload, never on the token row."""
+    from submissions_checker.core import sealed
+    from submissions_checker.core.security import hash_token
+
+    monkeypatch.setattr(sealed, "_secret_key", lambda: test_settings.secret_key)
+    monkeypatch.setattr(notification_tasks, "get_settings", lambda: test_settings)
+    dispatcher = _FakeDispatcher()
+    _patch_dispatcher(monkeypatch, notification_tasks, dispatcher)
+
+    _student, token = await _seed_feedback(db_session, "sealed")
+    token.token = None
+    token.token_hash = hash_token("raw-sealed-token")
+    await db_session.commit()
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.FEEDBACK_REQUEST_SENT,
+        payload={"feedback_token_id": token.id, "token_sealed": sealed.seal("raw-sealed-token")},
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    assert "/feedback/raw-sealed-token" in dispatcher.sent[0][2]
+    assert message.payload["token_sealed"] == "<sent>"
+
+
 async def test_feedback_request_suppressed_by_preference(
     db_session: AsyncSession, test_settings, monkeypatch
 ) -> None:

@@ -25,7 +25,7 @@ from submissions_checker.api.routes.teacher_disputes import count_open_disputes
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.sealed import seal
-from submissions_checker.core.security import COOKIE_NAME, create_access_token
+from submissions_checker.core.security import COOKIE_NAME, create_access_token, hash_token
 from submissions_checker.core.state_machine import InvalidTransitionError, transition
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
@@ -1954,23 +1954,23 @@ async def request_feedback(
 
     for student in students:
         token_str = secrets.token_urlsafe(32)
-        db.add(
-            FeedbackToken(
-                feedback_request_id=feedback_request.id,
-                student_id=student.id,
-                token=token_str,
-            )
+        # Only the hash is stored; the raw token travels to the e-mail job sealed and
+        # is scrubbed from the outbox row once the link has been sent.
+        feedback_token = FeedbackToken(
+            feedback_request_id=feedback_request.id,
+            student_id=student.id,
+            token_hash=hash_token(token_str),
         )
+        db.add(feedback_token)
         await db.flush()
-        token_result = await db.execute(
-            select(FeedbackToken).where(FeedbackToken.token == token_str)
-        )
-        saved_token = token_result.scalar_one()
         db.add(
             OutboxMessage(
                 event_type=OutboxEventType.FEEDBACK_REQUEST_SENT,
                 state=OutboxMessageState.PENDING,
-                payload={"feedback_token_id": saved_token.id},
+                payload={
+                    "feedback_token_id": feedback_token.id,
+                    "token_sealed": seal(token_str),
+                },
             )
         )
 

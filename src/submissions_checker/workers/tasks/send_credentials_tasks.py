@@ -51,7 +51,7 @@ async def execute_send_credentials_task(db: AsyncSession, payload: dict[str, Any
 
 
 REDACTED = "<sent>"
-_SECRET_KEYS = ("password_sealed", "password")
+_SECRET_KEYS = ("password_sealed", "password", "token_sealed")
 
 
 def _password_from(payload: dict[str, Any]) -> str:
@@ -65,7 +65,7 @@ def _password_from(payload: dict[str, Any]) -> str:
 
 
 def redact_credentials(payload: dict[str, Any]) -> dict[str, Any]:
-    """The payload with every form of the password replaced by a placeholder.
+    """The payload with every secret-bearing key replaced by a placeholder.
 
     Returns a new dict on purpose: assigning it to the row is what makes SQLAlchemy
     notice the JSONB column changed."""
