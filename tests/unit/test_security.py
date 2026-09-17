@@ -121,3 +121,30 @@ def test_decode_rejects_token_signed_with_different_algorithm() -> None:
     )
     with pytest.raises(JWTError):
         security.decode_access_token(token)
+
+
+# ── bcrypt's 72-byte limit ───────────────────────────────────────────────────
+
+
+def test_verify_treats_overlong_password_as_wrong() -> None:
+    """bcrypt 5 raises on >72 bytes; a login attempt must never turn that into a 500."""
+    from submissions_checker.core.security import hash_password, verify_password
+
+    hashed = hash_password("short")
+    assert verify_password("a" * 80, hashed) is False
+
+
+def test_hash_refuses_overlong_password() -> None:
+    from submissions_checker.core.security import hash_password
+
+    with pytest.raises(ValueError):
+        hash_password("a" * 73)
+
+
+def test_password_too_long_counts_bytes_not_characters() -> None:
+    from submissions_checker.core.security import password_too_long
+
+    assert password_too_long("a" * 72) is False
+    assert password_too_long("a" * 73) is True
+    # 3 bytes per character in UTF-8.
+    assert password_too_long("я" * 37) is True  # 2 bytes each: 74

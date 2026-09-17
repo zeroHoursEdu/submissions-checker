@@ -23,8 +23,10 @@ class Settings(BaseSettings):
     secret_key: str = Field(..., min_length=32)
     debug: bool = False
 
-    # Credential-endpoint throttling (per process, per client IP + username).
+    # Credential-endpoint throttling (per process). Failures per (client IP, username),
+    # and a larger budget per client IP alone against password spraying.
     login_max_attempts: int = 10
+    login_ip_max_attempts: int = 50
     login_window_seconds: int = 900
 
     # API

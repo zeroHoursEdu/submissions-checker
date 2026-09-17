@@ -470,3 +470,86 @@ async def test_forgot_password_is_throttled_per_client(client: AsyncClient, monk
     assert (
         await client.post("/auth/forgot-password", data={"username": "nobody"})
     ).status_code == 429
+
+
+# ── Login hardening ──────────────────────────────────────────────────────────
+
+
+async def test_login_with_overlong_password_is_an_ordinary_failure(
+    client: AsyncClient, make_user, monkeypatch
+) -> None:
+    """bcrypt refuses >72 bytes; that must be a 401 that costs throttle budget, not a 500
+    that bypasses the counter."""
+    from submissions_checker.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_login_limiter", rate_limit.SlidingWindowLimiter(2, 900))
+    await make_user(role=UserRole.TEACHER, username="gus", password=PASSWORD)
+    for _ in range(2):
+        r = await client.post("/auth/login", data={"username": "gus", "password": "x" * 100})
+        assert r.status_code == 401
+    r = await client.post("/auth/login", data={"username": "gus", "password": PASSWORD})
+    assert r.status_code == 429
+
+
+async def test_password_spraying_is_throttled_per_client(
+    client: AsyncClient, make_user, monkeypatch
+) -> None:
+    """One client trying one password against many usernames hits a per-IP budget."""
+    from submissions_checker.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_login_limiter", rate_limit.SlidingWindowLimiter(10, 900))
+    monkeypatch.setattr(rate_limit, "_login_ip_limiter", rate_limit.SlidingWindowLimiter(3, 900))
+    await make_user(role=UserRole.TEACHER, username="hal", password=PASSWORD)
+    for name in ("u1", "u2", "u3"):
+        r = await client.post("/auth/login", data={"username": name, "password": "guess"})
+        assert r.status_code == 401
+    r = await client.post("/auth/login", data={"username": "hal", "password": PASSWORD})
+    assert r.status_code == 429
+
+
+async def test_unknown_username_still_pays_for_a_hash_check(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """Without this, response time reveals whether a username exists."""
+    from submissions_checker.api.routes import auth as auth_module
+
+    calls: list[str] = []
+    real = auth_module.verify_password
+
+    def spy(plain: str, hashed: str) -> bool:
+        calls.append(hashed)
+        return real(plain, hashed)
+
+    monkeypatch.setattr(auth_module, "verify_password", spy)
+    r = await client.post("/auth/login", data={"username": "ghost", "password": "whatever"})
+    assert r.status_code == 401
+    assert len(calls) == 1
+
+
+async def test_change_password_rejects_overlong_new_password(
+    client: AsyncClient, make_user, login
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="ida", password=PASSWORD)
+    login(client, user)
+    resp = await client.post(
+        "/auth/change-password",
+        data={
+            "current_password": PASSWORD,
+            "new_password": "n" * 73,
+            "confirm_password": "n" * 73,
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_reset_password_rejects_overlong_new_password(
+    client: AsyncClient, make_user, db
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="jon", password=PASSWORD)
+    db.add(PasswordResetToken.create(user_id=user.id, token="tok-long"))
+    await db.commit()
+    resp = await client.post(
+        "/auth/reset-password",
+        data={"token": "tok-long", "new_password": "n" * 73, "confirm_password": "n" * 73},
+    )
+    assert resp.status_code == 422

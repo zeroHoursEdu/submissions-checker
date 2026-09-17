@@ -14,13 +14,20 @@ from submissions_checker.api.dependencies import CurrentUser, DBSession
 from submissions_checker.core import metrics
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.i18n import get_vocab
-from submissions_checker.core.rate_limit import client_ip, get_login_limiter
+from submissions_checker.core.rate_limit import (
+    client_ip,
+    get_login_ip_limiter,
+    get_login_limiter,
+)
 from submissions_checker.core.security import (
     COOKIE_NAME,
     JWT_EXPIRY_HOURS,
+    MAX_PASSWORD_BYTES,
     create_access_token,
     decode_access_token,
+    dummy_password_hash,
     hash_password,
+    password_too_long,
     verify_password,
 )
 from submissions_checker.core.templates import render
@@ -82,8 +89,10 @@ async def login(
     password: str = Form(...),
 ) -> Response:
     limiter = get_login_limiter()
-    throttle_key = f"{client_ip(request)}|{username.strip().lower()}"
-    if limiter.is_blocked(throttle_key):
+    ip_limiter = get_login_ip_limiter()
+    ip = client_ip(request)
+    throttle_key = f"{ip}|{username.strip().lower()}"
+    if limiter.is_blocked(throttle_key) or ip_limiter.is_blocked(ip):
         return render(
             request,
             "login.html",
@@ -96,8 +105,12 @@ async def login(
     )
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(password, user.password_hash):
+    # Always run one bcrypt check, so an unknown username costs the same time as a
+    # wrong password. An over-long password is simply wrong (bcrypt caps at 72 bytes).
+    hashed = user.password_hash if user is not None else dummy_password_hash()
+    if not verify_password(password, hashed) or user is None:
         limiter.record_failure(throttle_key)
+        ip_limiter.record_failure(ip)
         return render(
             request,
             "login.html",
@@ -225,7 +238,7 @@ async def reset_password(
             status_code=422,
         )
 
-    if len(new_password) < 8:
+    if len(new_password) < 8 or password_too_long(new_password):
         return render(
             request,
             "reset_password.html",
@@ -233,7 +246,7 @@ async def reset_password(
                 "current_user": None,
                 "token": token,
                 "valid": True,
-                "error": "Password must be at least 8 characters.",
+                "error": (f"Password must be between 8 characters and {MAX_PASSWORD_BYTES} bytes."),
                 "success": False,
             },
             status_code=422,
@@ -315,6 +328,8 @@ async def change_password(
         error = vocab.get("error_mismatch", "Passwords do not match.")
     elif len(new_password) < _MIN_PASSWORD_LEN:
         error = vocab.get("error_too_short", "Password must be at least 8 characters.")
+    elif password_too_long(new_password):
+        error = vocab.get("error_too_long", f"Password must be at most {MAX_PASSWORD_BYTES} bytes.")
     elif new_password == current_password:
         error = vocab.get("error_same_as_current", "Choose a different password.")
     if error is not None:

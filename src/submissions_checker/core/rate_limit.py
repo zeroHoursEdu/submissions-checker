@@ -53,15 +53,30 @@ class SlidingWindowLimiter:
 
 
 _login_limiter: SlidingWindowLimiter | None = None
+_login_ip_limiter: SlidingWindowLimiter | None = None
 
 
 def get_login_limiter() -> SlidingWindowLimiter:
-    """The process-wide limiter shared by login and forgot-password."""
+    """The process-wide limiter shared by login and forgot-password, keyed per account."""
     global _login_limiter
     if _login_limiter is None:
         s = get_settings()
         _login_limiter = SlidingWindowLimiter(s.login_max_attempts, s.login_window_seconds)
     return _login_limiter
+
+
+def get_login_ip_limiter() -> SlidingWindowLimiter:
+    """A second, larger budget keyed per client only.
+
+    The per-account key stops guessing one user's password; this stops one client
+    trying one password against every username (spraying), which the per-account key
+    never notices.
+    """
+    global _login_ip_limiter
+    if _login_ip_limiter is None:
+        s = get_settings()
+        _login_ip_limiter = SlidingWindowLimiter(s.login_ip_max_attempts, s.login_window_seconds)
+    return _login_ip_limiter
 
 
 def client_ip(request: Request) -> str:

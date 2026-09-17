@@ -18,13 +18,40 @@ JWT_EXPIRY_HOURS = 8
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 
+# bcrypt hashes at most 72 bytes; bcrypt 5 raises on longer input instead of silently
+# truncating. Callers validate before hashing and treat longer input as a wrong password.
+MAX_PASSWORD_BYTES = 72
+
+_DUMMY_HASH: str | None = None
+
+
+def password_too_long(plain: str) -> bool:
+    return len(plain.encode()) > MAX_PASSWORD_BYTES
+
 
 def hash_password(plain: str) -> str:
+    if password_too_long(plain):
+        raise ValueError(f"password must be at most {MAX_PASSWORD_BYTES} bytes")
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=12)).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    if password_too_long(plain):
+        return False
     return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+
+def dummy_password_hash() -> str:
+    """A real bcrypt hash to verify against when the username does not exist.
+
+    Without it, a login for an unknown username returns noticeably faster than one for a
+    known username with a wrong password, which turns the login form into a username
+    oracle. Computed once per process.
+    """
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = hash_password("no-such-user")
+    return _DUMMY_HASH
 
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
