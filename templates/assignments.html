@@ -47,6 +47,72 @@
   {% endif %}
 </div>
 
+{% if squad_error %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">
+  {{ vocab.squad.get("error_" ~ squad_error, squad_error) }}
+</div>
+{% elif squad_flash %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
+  {{ vocab.squad.get("flash_" ~ squad_flash, squad_flash) }}
+</div>
+{% endif %}
+
+{% if squad_enabled and squad_state != "disabled" %}
+<div class="bg-white rounded-xl border border-violet-200 shadow-sm p-5 mb-6" data-squad-card data-squad-state="{{ squad_state }}">
+  <h2 class="font-semibold text-slate-900 mb-1 flex items-center gap-2">👥 {{ vocab.squad.card_title }}
+    {% if squad_state == "locked" %}{% with squad_name=squad_name, squad_members=squad_members %}{% include "_squad_badge.html" %}{% endwith %}{% endif %}
+  </h2>
+  <p class="text-sm text-slate-500 mb-4">{{ vocab.squad.card_hint }}</p>
+
+  {% if squad_state == "locked" %}
+    <p class="text-sm text-slate-700"><strong>{{ vocab.squad.members }}:</strong> {{ squad_members | join(", ") }}</p>
+    <p class="text-xs text-slate-400 mt-1">{{ vocab.squad.locked_note }}</p>
+
+  {% elif squad_state == "pending" %}
+    <p class="text-sm text-slate-700"><strong>{{ vocab.squad.members }}:</strong>
+      {{ pending.squad.members | map(attribute="student.full_name") | join(", ") }}</p>
+    <p class="text-sm text-amber-700 mt-2">{{ vocab.squad.waiting_for }}
+      {% for inv in pending.outgoing %}
+        {{ inv.invited_student.full_name }}
+        <form method="POST" action="/portal/subjects/{{ subject.id }}/squad/invites/{{ inv.id }}/cancel" class="inline">
+          <button type="submit" class="text-xs underline text-slate-500 hover:text-red-700">{{ vocab.squad.cancel }}</button>
+        </form>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </p>
+    <p class="text-xs text-slate-400 mt-1">{{ vocab.squad.submit_blocked_pending }}</p>
+
+  {% elif squad_state == "incoming" %}
+    {% for inv in pending.incoming %}
+    <div class="flex items-center gap-3 flex-wrap text-sm mb-2">
+      <span>{{ vocab.squad.invited_you.format(name=(inv.squad.members | map(attribute="student.full_name") | join(", "))) }}</span>
+      <form method="POST" action="/portal/subjects/{{ subject.id }}/squad/invites/{{ inv.id }}/accept" class="inline">
+        <button type="submit" class="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700">{{ vocab.squad.accept }}</button>
+      </form>
+      <form method="POST" action="/portal/subjects/{{ subject.id }}/squad/invites/{{ inv.id }}/decline" class="inline">
+        <button type="submit" class="px-3 py-1 rounded-lg border border-slate-300 text-slate-600 text-xs font-medium hover:bg-slate-50">{{ vocab.squad.decline }}</button>
+      </form>
+    </div>
+    {% endfor %}
+
+  {% elif squad_state == "eligible" %}
+    {% if classmates %}
+    <form method="POST" action="/portal/subjects/{{ subject.id }}/squad/create" class="flex flex-col gap-3">
+      <label class="text-xs font-medium text-slate-500">{{ vocab.squad.pick_classmates.format(n=squad_max_size - 1) }}</label>
+      <select name="invitee_ids" multiple size="{{ [classmates | length, 6] | min }}" class="text-sm border border-slate-300 rounded-lg px-3 py-2 max-w-sm">
+        {% for s in classmates %}<option value="{{ s.id }}">{{ s.full_name }}</option>{% endfor %}
+      </select>
+      <button type="submit" class="self-start px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">{{ vocab.squad.create_button }}</button>
+    </form>
+    {% else %}
+    <p class="text-sm text-slate-400">{{ vocab.squad.no_candidates }}</p>
+    {% endif %}
+
+  {% else %}
+    <p class="text-sm text-slate-400">{{ vocab.squad.ineligible_has_submissions }}</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if assignments %}
   {% set done_count = assignments | selectattr('grade', 'ne', none) | list | length %}
   {% set submitted_count = assignments | selectattr('submission_status', 'ne', none) | list | length %}

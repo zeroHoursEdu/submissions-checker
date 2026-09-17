@@ -1,0 +1,3 @@
+{# Expects: squad_name (str), squad_members (list of names). Shown next to every unified mark. #}
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-violet-100 text-violet-700 align-middle"
+      title="{{ vocab.squad.badge_title }}: {{ squad_members | join(', ') }}">👥 {{ squad_name }}</span>

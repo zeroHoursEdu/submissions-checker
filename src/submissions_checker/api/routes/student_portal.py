@@ -43,6 +43,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from submissions_checker.services import squads
 from submissions_checker.services.audit import audit
 from submissions_checker.services.similarity import compare_zip_files
 from submissions_checker.workers.tasks.check_tasks import (
@@ -232,6 +233,27 @@ async def assignments_list(
             )
         )
 
+    squad_max = subject.squad_max_size
+    squad_state = "disabled"
+    locked_squad = None
+    pending = None
+    classmates: list[Student] = []
+    if squad_max is not None:
+        locked_squad = await squads.active_squad(db, subject_id, student_id)
+        if locked_squad is not None:
+            squad_state = "locked"
+        else:
+            pending = await squads.pending_state(db, subject_id, student_id)
+            if pending.squad is not None:
+                squad_state = "pending"
+            elif pending.incoming:
+                squad_state = "incoming"
+            elif await squads.eligibility(db, subject_id, student_id) is None:
+                squad_state = "eligible"
+                classmates = await squads.eligible_classmates(db, subject_id, student_id)
+            else:
+                squad_state = "ineligible"
+
     return render(
         request,
         "assignments.html",
@@ -240,6 +262,18 @@ async def assignments_list(
             "student": student,
             "subject": subject,
             "assignments": assignment_rows,
+            "squad_enabled": squad_max is not None,
+            "squad_max_size": squad_max,
+            "squad_state": squad_state,
+            "squad": locked_squad,
+            "squad_name": squads.display_name(locked_squad) if locked_squad else None,
+            "squad_members": [m.student.full_name for m in locked_squad.members]
+            if locked_squad
+            else [],
+            "pending": pending,
+            "classmates": classmates,
+            "squad_error": request.query_params.get("squad_error"),
+            "squad_flash": request.query_params.get("squad_flash"),
         },
     )
 

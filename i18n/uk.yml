@@ -479,3 +479,72 @@ notifications:
   email_method_hint: Отримуйте email, коли відбувається ця подія.
   enabled: Увімкнено
   disabled: Вимкнено
+
+squad:
+  badge_title: "Спільна оцінка сквaду"
+  card_title: Сквад
+  card_hint: "Сквад здає одну роботу на всіх і ділить тест-захист порівну. Приєднатися можна лише до першої здачі; після цього склад не змінюється."
+  create_button: Запросити у сквад
+  pick_classmates: "Оберіть одногрупників (до {n})"
+  no_candidates: Немає одногрупників, які можуть приєднатися.
+  invited_you: "{name} запрошує вас у сквад"
+  accept: Прийняти
+  decline: Відхилити
+  cancel: Скасувати запрошення
+  waiting_for: "Очікуємо відповіді:"
+  submit_blocked_pending: "Здача заблокована, доки є нерозглянуті запрошення."
+  members: Учасники
+  locked_note: Склад сквaду зафіксовано.
+  waiting_partner: "чекаємо на {names}"
+  grade_pending: Оцінка з'явиться, коли всі учасники сквaду пройдуть тест.
+  grade_unified: "Спільна оцінка сквaду — середнє по учасниках, округлене вгору."
+  your_part: "Ваша частина: {k} з {total} питань"
+  partners: "Партнер(и):"
+  quiz_button_part: "Пройти свою частину тесту ({k} з {total} питань)"
+  member_submitted: здав ZIP
+  member_passed: тест пройдено
+  member_failed: тест не пройдено
+  member_not_started: тест не розпочато
+  member_attempts: "спроб: {n}"
+  ineligible_has_submissions: Ви вже здавали роботи з цього предмета — сквад доступний лише до першої здачі.
+  error_disabled: На цьому предметі сквади вимкнено.
+  error_already_in_squad: Ви вже у сквaді.
+  error_has_submissions: Один із студентів уже має здані роботи.
+  error_not_enrolled: Студент не записаний на предмет.
+  error_test_student: Тестовий студент не може бути у сквaді.
+  error_too_few: Замало учасників.
+  error_too_many: Забагато учасників для дозволеного розміру сквaду.
+  error_duplicate: Повторний студент у списку.
+  error_not_pending: Запрошення вже не активне.
+  error_not_yours: Це не ваше запрошення.
+  error_squad_locked: Склад сквaду вже зафіксовано.
+  error_squad_full: У сквaді немає місця.
+  error_self_invite: Не можна запросити себе.
+  flash_invited: Запрошення надіслано.
+  flash_joined: Ви приєдналися до сквaду.
+  flash_declined: Запрошення відхилено.
+  flash_cancelled: Запрошення скасовано.
+  notif_invited_title: Запрошення у сквад
+  notif_invited_body: "{name} запрошує вас працювати разом."
+  notif_accepted_title: Сквад сформовано
+  notif_accepted_body: "{name} прийняв(ла) запрошення."
+  notif_declined_title: Запрошення відхилено
+  notif_declined_body: "{name} відхилив(ла) запрошення."
+  notif_cancelled_title: Запрошення скасовано
+  notif_cancelled_body: Автор запрошення скасував його.
+  notif_assigned_title: Вас додано у сквад
+  notif_assigned_body: "Викладач сформував сквад: {members}."
+  notif_partner_passed_title: Партнер пройшов свою частину тесту
+  notif_partner_passed_body: "{name} пройшов(ла) свою частину. Оцінка з'явиться, коли пройдуть усі."
+  teacher_section: Сквади
+  teacher_assign_hint: "Оберіть від 2 до {n} студентів без зданих робіт."
+  teacher_assign_button: Сформувати сквад
+  teacher_name_label: Назва (необов'язково)
+  teacher_no_squads: Сквадів ще немає.
+  teacher_col_squad: Сквад
+  teacher_col_members: Учасники
+  teacher_col_state: Стан
+  teacher_state_locked: зафіксовано
+  teacher_state_pending: очікує
+  teacher_flash_assigned: Сквад сформовано.
+  teacher_flash_error: "Не вдалося сформувати сквад: {reason}"
