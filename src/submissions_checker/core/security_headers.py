@@ -4,11 +4,12 @@ Caddy sets a similar set in production, but the application must not depend on t
 proxy in front of it: the development and e2e stacks talk to uvicorn directly, and a
 future deployment behind a different proxy would otherwise ship bare.
 
-The CSP is deliberately modest. Templates carry inline scripts and styles and Tailwind
-is loaded from its CDN, so ``'unsafe-inline'`` stays until the assets are vendored; the
-policy still forbids framing by other origins (clickjacking), ``<base>`` hijacking,
-posting forms to other origins, and plugin objects. Camera and geolocation are allowed
-for the page itself because the proctored quiz uses both.
+The CSP is deliberately modest. Templates carry inline scripts and styles and the
+vendored Tailwind play build injects styles at runtime, so ``'unsafe-inline'`` stays;
+but no script or style may come from another host at all. The policy also forbids
+framing by other origins (clickjacking), ``<base>`` hijacking, posting forms to other
+origins, and plugin objects. Camera and geolocation are allowed for the page itself
+because the proctored quiz uses both.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 CONTENT_SECURITY_POLICY = "; ".join(
     [
-        "default-src 'self' https://cdn.tailwindcss.com",
-        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com",
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "media-src 'self' blob:",
