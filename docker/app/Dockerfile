@@ -20,7 +20,7 @@ FROM docker:29-cli AS dockercli
 # ---------------------------------------------------------------------------
 # Shared base: interpreter, uv, and the Docker client.
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim AS base
+FROM python:3.14-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -83,7 +83,7 @@ RUN uv pip install --python /usr/local/bin/python --prefix /install --no-cache .
 # ---------------------------------------------------------------------------
 # prod — runtime only, unprivileged.
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim AS prod
+FROM python:3.14-slim AS prod
 
 # The commit this image was built from, surfaced at /version. Baked in rather than
 # passed at run time so it always describes the code actually inside the image:
