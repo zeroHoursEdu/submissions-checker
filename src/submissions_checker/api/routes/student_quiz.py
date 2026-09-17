@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.dependencies import (
@@ -23,6 +23,7 @@ from submissions_checker.api.dependencies import (
     StudentUser,
 )
 from submissions_checker.core import metrics
+from submissions_checker.core.i18n import get_vocab
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.core.templates import render
@@ -36,6 +37,7 @@ from submissions_checker.db.models import (
     StudentAssignment,
     Submission,
     SubmissionStatus,
+    User,
 )
 from submissions_checker.db.models.enums import (
     OutboxEventType,
@@ -45,15 +47,18 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from submissions_checker.services import squads
 from submissions_checker.services.air_raid.base import AirRaidProviderError
 from submissions_checker.services.air_raid.geo import resolve_region
 from submissions_checker.services.audit import audit
 from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.quiz_scoring import (
     apply_question_overrides,
     load_question_overrides,
     score_attempt,
 )
+from submissions_checker.services.quiz_split import split_draw
 from submissions_checker.services.storage import StorageService
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
@@ -231,6 +236,18 @@ async def _disputed_question_ids(db: DBSession, attempt_id: int) -> set[int]:
     return set(rows.scalars().all())
 
 
+def _assert_attempt_owner(
+    attempt: QuizAttempt, submission: Submission | None, student_id: int
+) -> None:
+    """The attempt belongs to this student — directly, or (legacy NULL rows) via the
+    submission's own students_assignment owner."""
+    owner = attempt.student_id
+    if owner is None and submission is not None:
+        owner = submission.students_assignment.student_id
+    if submission is None or owner != student_id:
+        raise HTTPException(status_code=403)
+
+
 def _record_timed_out(attempt: QuizAttempt, db: DBSession) -> None:
     """Burn the current question: zero points, flagged as lost to the clock."""
     question = _current_question(attempt)
@@ -318,40 +335,15 @@ def _build_question_config(q_type: str, q: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any]]:
-    """Select and snapshot questions from config quiz section.
-
-    Each question's ``id`` is its 0-based index in the config ``questions`` list so
-    grading can reference it without DB rows.
-    """
+def _snapshot_questions(quiz_cfg: dict[str, Any], ids: list[int]) -> list[dict[str, Any]]:
+    """Snapshot the config questions with the given 0-based ids, in that order."""
     questions_raw: list[dict[str, Any]] = quiz_cfg.get("questions", [])
-    total = int(quiz_cfg.get("questions_to_send", len(questions_raw)))
     default_seconds = quiz_cfg.get("question_time_default_seconds")
-    shuffle_q = bool(quiz_cfg.get("shuffle_questions", True))
     shuffle_opts = bool(quiz_cfg.get("shuffle_options", True))
 
-    # Config apply refuses unknown types now, but a config stored earlier may still
-    # carry one (short_answer); drawing it would show a question with no input that
-    # still counts toward max_score. Ids stay the config index, so skipping is safe.
-    indexed = [
-        (i, q)
-        for i, q in enumerate(questions_raw)
-        if str(q.get("type", "")).upper() in _SUPPORTED_QUESTION_TYPES
-    ]
-    required = [(i, q) for i, q in indexed if q.get("required")]
-    optional = [(i, q) for i, q in indexed if not q.get("required")]
-
-    if shuffle_q:
-        random.shuffle(optional)
-
-    remaining = max(0, total - len(required))
-    selected = required + optional[:remaining]
-
-    if shuffle_q:
-        random.shuffle(selected)
-
     snapshot: list[dict[str, Any]] = []
-    for orig_idx, q in selected:
+    for orig_idx in ids:
+        q = questions_raw[orig_idx]
         q_type = str(q.get("type", "")).upper()
         q_config = _build_question_config(q_type, q)
 
@@ -386,6 +378,82 @@ def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any
 
         snapshot.append(q_snap)
     return snapshot
+
+
+def _select_question_ids(quiz_cfg: dict[str, Any]) -> list[int]:
+    """The existing draw: required first, then a shuffled slice of optional ones."""
+    questions_raw: list[dict[str, Any]] = quiz_cfg.get("questions", [])
+    total = int(quiz_cfg.get("questions_to_send", len(questions_raw)))
+    shuffle_q = bool(quiz_cfg.get("shuffle_questions", True))
+
+    # Config apply refuses unknown types now, but a config stored earlier may still
+    # carry one (short_answer); drawing it would show a question with no input that
+    # still counts toward max_score. Ids stay the config index, so skipping is safe.
+    indexed = [
+        (i, q)
+        for i, q in enumerate(questions_raw)
+        if str(q.get("type", "")).upper() in _SUPPORTED_QUESTION_TYPES
+    ]
+    required = [i for i, q in indexed if q.get("required")]
+    optional = [i for i, q in indexed if not q.get("required")]
+
+    if shuffle_q:
+        random.shuffle(optional)
+
+    selected = required + optional[: max(0, total - len(required))]
+
+    if shuffle_q:
+        random.shuffle(selected)
+
+    return selected
+
+
+def _build_questions_from_config(quiz_cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Select and snapshot questions from config quiz section.
+
+    Each question's ``id`` is its 0-based index in the config ``questions`` list so
+    grading can reference it without DB rows.
+    """
+    return _snapshot_questions(quiz_cfg, _select_question_ids(quiz_cfg))
+
+
+async def _draw_for_member(
+    db: DBSession,
+    submission: Submission,
+    squad: Any,
+    quiz_cfg: dict[str, Any],
+    student_id: int,
+    *,
+    retry: bool,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The member's slice of the squad's shared draw (first attempt) or a fresh draw of
+    the same size (retry). The shared draw is written once, under a row lock, by
+    whichever member opens the quiz first."""
+    locked = (
+        await db.execute(select(Submission).where(Submission.id == submission.id).with_for_update())
+    ).scalar_one()
+    meta = dict(locked.source_metadata or {})
+    member_order = sorted(m.student_id for m in squad.members)
+    draw = meta.get("squad_quiz_draw")
+    if not draw:
+        ids = _select_question_ids(quiz_cfg)
+        slices = split_draw(_snapshot_questions(quiz_cfg, ids), len(member_order))
+        draw = {"question_ids": ids, "slices": slices, "member_order": member_order}
+        meta["squad_quiz_draw"] = draw
+        locked.source_metadata = meta  # reassign: JSONB change tracking
+        await db.flush()
+    idx = draw["member_order"].index(student_id)
+    my_ids: list[int] = list(draw["slices"][idx])
+    if retry:
+        my_ids = _select_question_ids({**quiz_cfg, "questions_to_send": len(my_ids)})
+    elif bool(quiz_cfg.get("shuffle_questions", True)):
+        random.shuffle(my_ids)
+    squad_snapshot = {
+        "member_index": idx,
+        "member_count": len(draw["member_order"]),
+        "total_questions": len(draw["question_ids"]),
+    }
+    return _snapshot_questions(quiz_cfg, my_ids), squad_snapshot
 
 
 def _grade_answer(
@@ -441,8 +509,13 @@ def _grade_answer(
     return {"raw": str(raw_answer)}, False, 0
 
 
-async def _count_used_attempts(db: DBSession, submission_id: int, exclude_id: int) -> int:
-    """Count finished (non-passing) attempts for a submission, excluding the given id."""
+async def _count_used_attempts(
+    db: DBSession, submission_id: int, exclude_id: int, student_id: int | None
+) -> int:
+    """Count this student's finished (non-passing) attempts for a submission, excluding
+    the given id. Squad-shared submissions carry every member's attempts, so this is
+    always scoped to one student (plus legacy NULL rows, which predate per-student ids
+    and belong to a solo submission by this same student)."""
     result = await db.execute(
         select(func.count(QuizAttempt.id)).where(
             QuizAttempt.submission_id == submission_id,
@@ -454,6 +527,7 @@ async def _count_used_attempts(db: DBSession, submission_id: int, exclude_id: in
                 ]
             ),
             QuizAttempt.id != exclude_id,
+            or_(QuizAttempt.student_id == student_id, QuizAttempt.student_id.is_(None)),
         )
     )
     return result.scalar_one() or 0
@@ -496,18 +570,27 @@ async def _grade_and_finalize(
     # student with an InvalidTransitionError.
     if submission and submission.status == SubmissionStatus.QUIZ_SENT:
         if is_passed:
-            # `quiz_then_teacher` hands the attached work to the teacher instead of completing
-            # here; the grade is still computed from the quiz, but only once they approve.
-            if attempt.config_snapshot.get("review_mode") == "quiz_then_teacher":
-                transition(submission, "quiz_passed_teacher")
-                await enqueue_teacher_review_notification(db, submission.id)
-            else:
-                transition(submission, "quiz_passed")
-                await finalize_grade(db, submission)
+            # The submission may be shared by a squad, so a passing attempt is not enough on
+            # its own — `flush` first so `quiz_complete` sees this attempt's `is_passed` write.
+            await db.flush()
+            if await squads.quiz_complete(db, submission):
+                # `quiz_then_teacher` hands the attached work to the teacher instead of
+                # completing here; the grade is still computed from the quiz, but only once
+                # they approve.
+                if attempt.config_snapshot.get("review_mode") == "quiz_then_teacher":
+                    transition(submission, "quiz_passed_teacher")
+                    await enqueue_teacher_review_notification(db, submission.id)
+                else:
+                    transition(submission, "quiz_passed")
+                    await finalize_grade(db, submission)
+            elif submission.squad_id is not None:
+                await _notify_partners_passed(db, submission, attempt.student_id)
         else:
             max_attempts = attempt.config_snapshot.get("max_quiz_attempts")
             if max_attempts is not None:
-                prior = await _count_used_attempts(db, attempt.submission_id, attempt.id)
+                prior = await _count_used_attempts(
+                    db, attempt.submission_id, attempt.id, attempt.student_id
+                )
                 if prior + 1 >= max_attempts:
                     transition(submission, "quiz_failed")
                     attempts_left = 0
@@ -526,11 +609,36 @@ async def _grade_and_finalize(
                 "max_score": max_score,
                 "is_passed": is_passed,
                 "attempts_left": attempts_left,
+                "student_id": attempt.student_id,
             },
         )
     )
 
     await db.commit()
+
+
+async def _notify_partners_passed(
+    db: DBSession, submission: Submission, student_id: int | None
+) -> None:
+    """Tell the rest of the squad that one member cleared their half — the grade still
+    waits on everyone."""
+    states = await squads.member_quiz_states(db, submission)
+    me = next((m for m in states if m.student_id == student_id), None)
+    if me is None:
+        return
+    vocab = get_vocab(None).get("squad", {})
+    for m in states:
+        if m.student_id == student_id:
+            continue
+        user_id = await db.scalar(select(User.id).where(User.student_id == m.student_id))
+        if user_id is not None:
+            await push_notification(
+                db,
+                user_id,
+                str(vocab.get("notif_partner_passed_title", "")),
+                str(vocab.get("notif_partner_passed_body", "")).format(name=me.full_name),
+                "/portal",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -562,13 +670,16 @@ async def start_or_resume_quiz(
     if sa is None:
         raise HTTPException(status_code=404)
 
-    latest_sub = max(sa.submissions, key=lambda s: s.created_at) if sa.submissions else None
+    latest_sub = await squads.latest_submission(db, sa)
     if latest_sub is None or latest_sub.status != SubmissionStatus.QUIZ_SENT:
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
 
     attempts_result = await db.execute(
         select(QuizAttempt)
-        .where(QuizAttempt.submission_id == latest_sub.id)
+        .where(
+            QuizAttempt.submission_id == latest_sub.id,
+            or_(QuizAttempt.student_id == student_id, QuizAttempt.student_id.is_(None)),
+        )
         .order_by(QuizAttempt.started_at)
     )
     existing = list(attempts_result.scalars().all())
@@ -610,7 +721,14 @@ async def start_or_resume_quiz(
             )
         raise HTTPException(status_code=403, detail="No quiz attempts remaining")
 
-    questions_snapshot = _build_questions_from_config(quiz_cfg)
+    squad = await squads.squad_for_submission(db, latest_sub)
+    squad_snapshot: dict[str, Any] | None = None
+    if squad is None:
+        questions_snapshot = _build_questions_from_config(quiz_cfg)
+    else:
+        questions_snapshot, squad_snapshot = await _draw_for_member(
+            db, latest_sub, squad, quiz_cfg, student_id, retry=used_count > 0
+        )
     config_snapshot: dict[str, Any] = {
         "pass_threshold_pct": float(quiz_cfg.get("pass_threshold_pct", 0.6)),
         "show_correct_answers_after": bool(quiz_cfg.get("show_correct_answers_after", False)),
@@ -618,6 +736,8 @@ async def start_or_resume_quiz(
         # Snapshotted so a config re-upload mid-attempt cannot change where a pass lands.
         "review_mode": plugin_assignment.get("review_mode", "tests_only"),
     }
+    if squad_snapshot is not None:
+        config_snapshot["squad"] = squad_snapshot
     if max_attempts is not None:
         config_snapshot["max_quiz_attempts"] = int(max_attempts)
     if quiz_cfg.get("time_limit_minutes") is not None:
@@ -631,6 +751,7 @@ async def start_or_resume_quiz(
     now = _utcnow()
     attempt = QuizAttempt(
         submission_id=latest_sub.id,
+        student_id=student_id,
         plugin_config_id=config_record.id,
         plugin_config_version=config_record.version,
         questions_snapshot=questions_snapshot,
@@ -673,8 +794,10 @@ async def show_quiz(
         .options(selectinload(Submission.students_assignment))
     )
     submission = sub_result.scalar_one_or_none()
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status in _TERMINAL_STATUSES:
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
@@ -812,8 +935,10 @@ async def report_violation(
         .options(selectinload(Submission.students_assignment))
     )
     submission = sub_result.scalar_one_or_none()
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status != QuizAttemptStatus.IN_PROGRESS:
         return JSONResponse({"action": "none", "violation_count": 0})
@@ -937,8 +1062,10 @@ async def report_question(
         .options(selectinload(Submission.students_assignment))
     )
     submission = sub_result.scalar_one_or_none()
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     try:
         body = await request.json()
@@ -1028,8 +1155,10 @@ async def request_air_raid_pause(
         .options(selectinload(Submission.students_assignment))
     )
     submission = sub_result.scalar_one_or_none()
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status != QuizAttemptStatus.IN_PROGRESS:
         return JSONResponse({"paused": False, "reason": "attempt_closed"})
@@ -1136,8 +1265,10 @@ async def resume_after_air_raid(
         .options(selectinload(Submission.students_assignment))
     )
     submission = sub_result.scalar_one_or_none()
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.paused_at is None:
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}", status_code=303)
@@ -1184,8 +1315,10 @@ async def upload_snapshot(
         .options(selectinload(Submission.students_assignment))
     )
     submission = sub_result.scalar_one_or_none()
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status != QuizAttemptStatus.IN_PROGRESS:
         raise HTTPException(status_code=409, detail="Attempt is not in progress")
@@ -1267,8 +1400,10 @@ async def answer_question(
         raise HTTPException(status_code=404)
 
     submission = attempt.submission
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status in _TERMINAL_STATUSES:
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
@@ -1351,8 +1486,10 @@ async def submit_quiz(
         raise HTTPException(status_code=404)
 
     submission = attempt.submission
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status in _TERMINAL_STATUSES:
         return RedirectResponse(url=f"/portal/quiz/{attempt_id}/result", status_code=303)
@@ -1440,8 +1577,10 @@ async def quiz_result(
         raise HTTPException(status_code=404)
 
     submission = attempt.submission
-    if submission is None or submission.students_assignment.student_id != student_id:
-        raise HTTPException(status_code=403)
+    _assert_attempt_owner(attempt, submission, student_id)
+    assert (
+        submission is not None
+    )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status == QuizAttemptStatus.IN_PROGRESS:
         raise HTTPException(status_code=400, detail="Quiz not yet submitted")
@@ -1471,6 +1610,15 @@ async def quiz_result(
     sa_full = sa_full_result.scalar_one()
     subject_id = sa_full.subjects_assignment.subject_id
 
+    # For a squad member who didn't upload, ``sa`` belongs to whoever did — the "back to
+    # assignment" link must point at this student's own StudentAssignment instead.
+    my_sa_id = await db.scalar(
+        select(StudentAssignment.id).where(
+            StudentAssignment.student_id == student_id,
+            StudentAssignment.subjects_assignment_id == sa_full.subjects_assignment_id,
+        )
+    )
+
     return render(
         request,
         "student_quiz_result.html",
@@ -1481,7 +1629,7 @@ async def quiz_result(
             "timed_out_count": sum(1 for r in question_results if r["timed_out"]),
             "show_correct": show_correct,
             "subject_id": subject_id,
-            "student_assignment_id": sa.id,
+            "student_assignment_id": my_sa_id or sa.id,
             "disputed_ids": await _disputed_question_ids(db, attempt.id),
         },
     )

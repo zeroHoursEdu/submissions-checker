@@ -246,6 +246,14 @@ async def execute_quiz_result_task(db: AsyncSession, payload: dict[str, Any]) ->
     student = sa.student
     assignment = sa.subjects_assignment
 
+    # A squad-shared submission's students_assignment belongs to whoever uploaded — the
+    # payload names the actual member whose attempt this result is for, when it differs.
+    member_id = payload.get("student_id")
+    if member_id is not None and member_id != student.id:
+        member = await db.get(Student, member_id)
+        if member is not None:
+            student = member
+
     portal_url = f"{settings.app_base_url.rstrip('/')}/portal/quiz/{attempt_id}/result"
 
     email_subject, body = quiz_result_template(

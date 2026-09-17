@@ -37,6 +37,7 @@ from submissions_checker.db.models.user import User
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.quiz_scoring import apply_question_overrides, score_attempt
+from submissions_checker.services.squads import quiz_complete
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
 )
@@ -148,10 +149,15 @@ async def _advance_submission(db: AsyncSession, attempt: QuizAttempt) -> None:
     status = submission.status
 
     if status == SubmissionStatus.QUIZ_SENT:
-        # Never finished. The ordinary quiz edges apply.
+        # Never finished. The ordinary quiz edges apply — but a squad-shared submission
+        # only moves once every enrolled member has a passing attempt.
+        if not await quiz_complete(db, submission):
+            return
         event = "quiz_passed_teacher" if to_teacher else "quiz_passed"
     elif status == SubmissionStatus.FAILED:
         # The terminal-state gap: only an accepted dispute can move a failed submission.
+        if not await quiz_complete(db, submission):
+            return
         event = "dispute_regrade_passed_teacher" if to_teacher else "dispute_regrade_passed"
     elif status == SubmissionStatus.COMPLETED:
         # Already passed on some attempt; the quiz component may still have risen.
