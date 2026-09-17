@@ -12,6 +12,8 @@ is the persistence wrapper called at every submission-completion point.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -63,12 +65,14 @@ def compute_grade(
     works_pct: float | None,
     ai_mark: float | None,
     quiz_pct: float | None,
+    round_up: bool = False,
 ) -> GradeBreakdown:
     """Compute the final grade from 0–100 component scores.
 
     ``works_pct`` / ``ai_mark`` / ``quiz_pct`` are each 0–100 or None (absent →
     weight dropped). The blended 0–100 grade is scaled into ``[min_grade,
-    max_grade]`` and clamped to it.
+    max_grade]`` and clamped to it. When ``round_up`` is True, rounds to the
+    higher grade (ceil) instead of the nearest grade (round).
     """
     cfg = grading_cfg or {}
     code_cfg = cfg.get("code") or {}
@@ -83,7 +87,10 @@ def compute_grade(
     # No component at all → floor to min_grade (matches "nothing earned").
     normalized = blended if blended is not None else 0.0
     scaled = min_grade + (max_grade - min_grade) * (normalized / 100.0)
-    grade = max(min_grade, min(max_grade, round(scaled)))
+    # Squads round up ("average, rounded to the higher mark"); round(…, 6) first so an
+    # exact 6.0 that floats as 6.0000000001 does not ceil to 7.
+    rounded = math.ceil(round(scaled, 6)) if round_up else round(scaled)
+    grade = max(min_grade, min(max_grade, rounded))
 
     return GradeBreakdown(
         grade=grade,
@@ -101,6 +108,25 @@ def _pct(score: float | int | None, max_score: float | int | None) -> float | No
     if not max_score or max_score <= 0 or score is None:
         return None
     return (score / max_score) * 100.0
+
+
+def squad_quiz_pct(attempts: Iterable[Any]) -> tuple[float | None, list[dict[str, Any]]]:
+    """Mean quiz percentage over squad members, one passed attempt per ``student_id``.
+
+    Returns ``(mean_pct, members)`` where ``members`` is the per-member list stored in
+    ``grade_breakdown["squad"]["members"]``. ``(None, [])`` when nobody has passed yet.
+    """
+    best: dict[int, float] = {}
+    for a in attempts:
+        if not a.is_passed or a.student_id is None:
+            continue
+        pct = _pct(a.score, a.max_score)
+        if pct is not None and pct > best.get(a.student_id, -1.0):
+            best[a.student_id] = pct
+    if not best:
+        return None, []
+    members = [{"student_id": sid, "quiz_pct": round(p, 2)} for sid, p in sorted(best.items())]
+    return sum(best.values()) / len(best), members
 
 
 async def finalize_grade(db: AsyncSession, submission: Submission) -> GradeBreakdown | None:
