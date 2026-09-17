@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ vocab.teacher.similarity_report }} — {{ assignment.title }}{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.teacher.dashboard_title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}" class="text-indigo-200 hover:text-white text-sm transition">{{ assignment.title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.teacher.similarity_report }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="mb-6 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-bold text-slate-900 mb-1">{{ vocab.teacher.similarity_report }}</h1>
+    <p class="text-slate-500 text-sm">{{ assignment.title }} · {{ compared }} {{ vocab.teacher.similarity_compared }}</p>
+  </div>
+  <form method="GET" class="flex items-center gap-2 text-sm">
+    <label for="min" class="text-slate-600">{{ vocab.teacher.similarity_threshold }}</label>
+    <input id="min" name="min" type="number" min="0" max="1" step="0.05" value="{{ min }}"
+           class="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"/>
+    <button type="submit" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700">OK</button>
+  </form>
+</div>
+
+{% if too_many %}
+<div class="px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">{{ vocab.teacher.similarity_too_many }}</div>
+{% elif not pairs %}
+<div class="text-center py-16 bg-white rounded-xl border border-slate-200 shadow-sm text-slate-500 text-sm">{{ vocab.teacher.similarity_no_pairs }}</div>
+{% else %}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase tracking-wide">
+        <th class="text-left px-5 py-3 font-medium">{{ vocab.teacher.col_student }} A</th>
+        <th class="text-left px-5 py-3 font-medium">{{ vocab.teacher.col_student }} B</th>
+        <th class="text-left px-5 py-3 font-medium">{{ vocab.teacher.col_similarity }}</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for p in pairs %}
+      <tr class="hover:bg-slate-50">
+        <td class="px-5 py-3 font-medium text-slate-900">{{ p.a }}</td>
+        <td class="px-5 py-3 font-medium text-slate-900">{{ p.b }}</td>
+        <td class="px-5 py-3">
+          <span class="text-sm font-semibold {% if p.pct >= 80 %}text-red-600{% elif p.pct >= 60 %}text-amber-600{% else %}text-slate-600{% endif %}">{{ p.pct }}%</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

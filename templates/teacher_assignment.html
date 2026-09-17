@@ -66,6 +66,8 @@
       {% endif %}
     </span>
     <span>{{ vocab.teacher.grade_range }} <strong class="text-slate-700">{{ assignment.min_grade }}–{{ assignment.max_grade }}</strong></span>
+    <a href="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/similarity"
+       class="text-indigo-600 hover:text-indigo-800 underline underline-offset-2">{{ vocab.teacher.similarity_report }}</a>
   </div>
 </div>
 

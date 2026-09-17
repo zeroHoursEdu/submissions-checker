@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import secrets
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import bcrypt
-from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import Select, and_, cast, false, func, nullsfirst, select, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -62,6 +63,7 @@ from submissions_checker.services.gradebook import (
     fetch_grid_rows,
 )
 from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
 from submissions_checker.services.storage import StorageService
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
@@ -553,6 +555,106 @@ async def teacher_assignment(
             "ai_flags": ai_flags,
             "stuck_ids": stuck_ids,
             "bulk_result": bulk_result,
+        },
+    )
+
+
+# Above this many submissions the pairwise report is refused rather than computed.
+_SIMILARITY_MAX_ITEMS = 300
+
+
+@router.get("/subjects/{subject_id}/assignments/{sa_id}/similarity", response_class=HTMLResponse)
+async def teacher_similarity_report(
+    request: Request,
+    subject_id: int,
+    sa_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    min_score: float = Query(0.5, alias="min"),
+) -> HTMLResponse:
+    """Who matches whom: pairwise token similarity across the latest ZIP per student."""
+    await require_subject_access(db, subject_id, current_user)
+    assignment = (
+        await db.execute(
+            select(SubjectsAssignment).where(
+                SubjectsAssignment.id == sa_id, SubjectsAssignment.subject_id == subject_id
+            )
+        )
+    ).scalar_one_or_none()
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    latest_sub_sq = (
+        select(
+            Submission.students_assignment_id,
+            func.max(Submission.created_at).label("max_created_at"),
+        )
+        .group_by(Submission.students_assignment_id)
+        .subquery()
+    )
+    rows = await db.execute(
+        select(
+            StudentAssignment.id.label("sa_row_id"),
+            Student.full_name,
+            Submission.source_metadata,
+        )
+        .select_from(SubjectsStudents)
+        .join(Student, Student.id == SubjectsStudents.student_id)
+        .join(
+            StudentAssignment,
+            and_(
+                StudentAssignment.student_id == Student.id,
+                StudentAssignment.subjects_assignment_id == sa_id,
+            ),
+        )
+        .join(latest_sub_sq, latest_sub_sq.c.students_assignment_id == StudentAssignment.id)
+        .join(
+            Submission,
+            and_(
+                Submission.students_assignment_id == StudentAssignment.id,
+                Submission.created_at == latest_sub_sq.c.max_created_at,
+            ),
+        )
+        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
+    )
+    names: dict[int, str] = {}
+    paths: dict[int, Path] = {}
+    for r in rows:
+        saved_as = (r.source_metadata or {}).get("saved_as")
+        if not saved_as:
+            continue
+        path = UPLOADS_DIR / saved_as
+        if path.is_file():
+            names[r.sa_row_id] = r.full_name
+            paths[r.sa_row_id] = path
+
+    too_many = len(paths) > _SIMILARITY_MAX_ITEMS
+    pairs: list[dict[str, Any]] = []
+    if not too_many and len(paths) >= 2:
+
+        def _compute() -> list[tuple[int, int, float]]:
+            tokens = {k: token_set_for_zip(p) for k, p in paths.items()}
+            return pairwise_similarity(tokens)
+
+        threshold = max(0.0, min(min_score, 1.0))
+        for a, b, score in await asyncio.to_thread(_compute):
+            if score < threshold:
+                break
+            pairs.append(
+                {"a": names[a], "b": names[b], "pct": int(round(score * 100)), "score": score}
+            )
+
+    return render(
+        request,
+        "teacher_similarity.html",
+        {
+            "current_user": current_user,
+            "assignment": assignment,
+            "subject_id": subject_id,
+            "pairs": pairs,
+            "min": min_score,
+            "compared": len(paths),
+            "too_many": too_many,
         },
     )
 

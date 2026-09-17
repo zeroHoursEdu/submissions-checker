@@ -370,6 +370,11 @@ teacher:
   ai_comment: Коментар для студента
   proctoring_title: Прокторинг
   rerun_checks: Перезапустити перевірку
+  similarity_report: Звіт схожості
+  similarity_threshold: Поріг
+  similarity_compared: робіт порівняно
+  similarity_no_pairs: Пар вище порогу немає
+  similarity_too_many: Забагато робіт для попарного порівняння (понад 300).
   bulk_select_all: Вибрати всі
   bulk_approve_selected: Схвалити вибрані
   bulk_reject_selected: Відхилити вибрані

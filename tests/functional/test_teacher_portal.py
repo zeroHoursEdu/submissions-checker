@@ -1205,3 +1205,57 @@ async def test_resend_credentials_skips_students_outside_scope(
         follow_redirects=False,
     )
     assert r.status_code == 303 and r.headers["location"] == "/teacher/students?resent=0"
+
+
+# ── Similarity report ────────────────────────────────────────────────────────
+
+
+async def test_similarity_report_lists_matching_pair(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    import io
+    import zipfile
+
+    from submissions_checker.api.routes.student_portal import UPLOADS_DIR
+
+    def _zip(name: str, source: str) -> str:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("main.py", source)
+        UPLOADS_DIR.mkdir(exist_ok=True)
+        (UPLOADS_DIR / name).write_bytes(buf.getvalue())
+        return name
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    sources = {
+        "Alice Same": "def solve(x):\n    total = x * 2\n    return total\n",
+        "Bob Same": "def solve(y):\n    total = y * 2\n    return total\n",
+        "Carol Other": "import sys\nprint(sys.argv)\n",
+    }
+    for i, (name, src) in enumerate(sources.items()):
+        student = await make_student(full_name=name, email=f"sim{i}@example.com")
+        await _enroll(db, subject.id, student.id)
+        sub = await _make_submission(db, sa.id, student.id, status=SubmissionStatus.COMPLETED)
+        sub.source_metadata = {"saved_as": _zip(f"sim-test-{i}.zip", src)}
+    await db.commit()
+
+    authenticate(client, teacher)
+    resp = await client.get(
+        f"/teacher/subjects/{subject.id}/assignments/{sa.id}/similarity?min=0.6"
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Alice Same" in body and "Bob Same" in body
+    assert "Carol Other" not in body
+
+
+async def test_similarity_report_requires_subject_access(
+    client: AsyncClient, db, teacher, make_user
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    other = await make_user(role=UserRole.TEACHER, username="sim-other")
+    authenticate(client, other)
+    r = await client.get(f"/teacher/subjects/{subject.id}/assignments/{sa.id}/similarity")
+    assert r.status_code == 403

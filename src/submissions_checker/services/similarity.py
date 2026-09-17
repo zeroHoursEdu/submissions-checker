@@ -56,3 +56,27 @@ def compare_zip_files(path_a: Path, path_b: Path) -> float:
     tokens_a = _extract_tokens(path_a)
     tokens_b = _extract_tokens(path_b)
     return jaccard_similarity(tokens_a, tokens_b)
+
+
+def token_set_for_zip(zip_path: Path) -> frozenset[str]:
+    """The distinct identifier tokens of every code file in a ZIP archive."""
+    return frozenset(_extract_tokens(zip_path))
+
+
+def pairwise_similarity(items: dict[int, frozenset[str]]) -> list[tuple[int, int, float]]:
+    """Jaccard score for every unordered pair of *items*, highest first.
+
+    Quadratic in the number of items; callers cap the input (a few hundred
+    submissions compare in well under a second).
+    """
+    keys = sorted(items)
+    out: list[tuple[int, int, float]] = []
+    for i, a in enumerate(keys):
+        set_a = items[a]
+        for b in keys[i + 1 :]:
+            set_b = items[b]
+            union = len(set_a | set_b)
+            score = len(set_a & set_b) / union if union else 0.0
+            out.append((a, b, score))
+    out.sort(key=lambda t: t[2], reverse=True)
+    return out

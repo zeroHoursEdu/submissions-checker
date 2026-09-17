@@ -127,3 +127,29 @@ def test_missing_zip_yields_zero(tmp_path: Path) -> None:
     missing = tmp_path / "nope.zip"
     # _extract_tokens swallows errors -> empty token list -> jaccard 0
     assert compare_zip_files(a, missing) == 0.0
+
+
+# ── pairwise report ───────────────────────────────────────────────────────────
+
+
+def test_pairwise_returns_sorted_pairs() -> None:
+    from submissions_checker.services.similarity import pairwise_similarity
+
+    items = {1: frozenset({"a", "b", "c"}), 2: frozenset({"a", "b", "d"}), 3: frozenset({"x"})}
+    pairs = pairwise_similarity(items)
+    assert len(pairs) == 3
+    assert pairs[0][:2] == (1, 2) and abs(pairs[0][2] - 0.5) < 1e-9
+    assert all(0.0 <= s <= 1.0 for _, _, s in pairs)
+    assert [s for _, _, s in pairs] == sorted((s for _, _, s in pairs), reverse=True)
+
+
+def test_token_set_for_zip_reads_code_files(tmp_path: Path) -> None:
+    from submissions_checker.services.similarity import token_set_for_zip
+
+    p = tmp_path / "a.zip"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("main.py", "def add(a, b): return a + b")
+        zf.writestr("notes.txt", "ignored words")
+    tokens = token_set_for_zip(p)
+    assert {"def", "add", "return"} <= tokens
+    assert "ignored" not in tokens
