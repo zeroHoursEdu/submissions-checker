@@ -85,14 +85,7 @@ async def max_size(db: AsyncSession, subject_id: int) -> int | None:
 
 
 def _squad_query() -> Select[tuple[Squad]]:
-    # populate_existing: callers (e.g. accept_invite) may already hold this Squad in the
-    # identity map with a stale ``members`` collection loaded before a member was added —
-    # selectinload alone skips re-fetching an already-populated relationship.
-    return (
-        select(Squad)
-        .options(selectinload(Squad.members).selectinload(SquadMember.student))
-        .execution_options(populate_existing=True)
-    )
+    return select(Squad).options(selectinload(Squad.members).selectinload(SquadMember.student))
 
 
 async def squad_of(
@@ -298,7 +291,9 @@ async def create_with_invites(
     size = await max_size(db, subject_id)
     if size is None:
         raise SquadError("disabled")
-    ids = list(dict.fromkeys(invitee_ids))
+    if len(set(invitee_ids)) != len(invitee_ids):
+        raise SquadError("duplicate")
+    ids = list(invitee_ids)
     if creator_id in ids:
         raise SquadError("self_invite")
     if not ids:
@@ -353,6 +348,11 @@ async def accept_invite(db: AsyncSession, invite_id: int, student_id: int) -> Sq
         raise SquadError("not_yours")
     squad = inv.squad
     subject_id = squad.subject_id
+    # Lock the squad row (and force a fresh members count) before deciding capacity: two
+    # concurrent accepts on the same squad must not both observe "not yet full" and both
+    # insert, overshooting squad_max_size. Without this, the `len(squad.members)` read
+    # below could run against a pre-lock snapshot.
+    await db.refresh(squad, attribute_names=["locked_at", "members"], with_for_update=True)
     reason = await eligibility(db, subject_id, student_id)
     size = await max_size(db, subject_id) or 0
     if reason is None and squad.locked_at is not None:
@@ -364,18 +364,18 @@ async def accept_invite(db: AsyncSession, invite_id: int, student_id: int) -> Sq
         await db.flush()
         raise SquadError(reason, student_id)
 
-    db.add(
-        SquadMember(
-            squad_id=squad.id, student_id=student_id, subject_id=subject_id, joined_at=_now()
-        )
-    )
+    student = await db.get(Student, student_id)
+    # Append through the relationship (not a bare db.add with squad_id) so the loaded
+    # ``squad.members`` collection stays consistent in-memory — no stale-collection
+    # re-fetch needed afterwards.
+    squad.members.append(SquadMember(student=student, subject_id=subject_id, joined_at=_now()))
     await db.flush()
     # Other pending invites of this student in the subject die with the join — but not
     # this one, which we mark ACCEPTED right after (the partial unique index on PENDING
     # means we must not flip it to CANCELLED and back).
     await _cancel_pending_of(db, subject_id, student_id, exclude_invite_id=inv.id)
     inv.status = SquadInviteStatus.ACCEPTED
-    if len(squad.members) + 1 >= size:
+    if len(squad.members) >= size:
         squad.locked_at = _now()
         for other in (
             await db.execute(
@@ -394,15 +394,12 @@ async def accept_invite(db: AsyncSession, invite_id: int, student_id: int) -> Sq
         subject_id=subject_id,
         student_id=student_id,
     )
-    if inv.invited_by_student_id is not None:
-        joined_name = await db.scalar(select(Student.full_name).where(Student.id == student_id))
+    if inv.invited_by_student_id is not None and student is not None:
         await _notify_student(
-            db, inv.invited_by_student_id, "accepted", subject_id, name=joined_name
+            db, inv.invited_by_student_id, "accepted", subject_id, name=student.full_name
         )
     await db.flush()
-    refreshed = await squad_of(db, subject_id, student_id)
-    assert refreshed is not None
-    return refreshed
+    return squad
 
 
 async def decline_invite(db: AsyncSession, invite_id: int, student_id: int) -> None:
@@ -441,13 +438,18 @@ async def teacher_assign(
     size = await max_size(db, subject_id)
     if size is None:
         raise SquadError("disabled")
-    ids = list(dict.fromkeys(student_ids))
+    if len(set(student_ids)) != len(student_ids):
+        raise SquadError("duplicate")
+    ids = list(student_ids)
     if len(ids) < 2:
         raise SquadError("too_few")
     if len(ids) > size:
         raise SquadError("too_many")
     for sid in ids:
         await _require_eligible(db, subject_id, sid)
+    students = {
+        s.id: s for s in (await db.execute(select(Student).where(Student.id.in_(ids)))).scalars()
+    }
     squad = Squad(
         subject_id=subject_id,
         created_by_user_id=teacher_user_id,
@@ -455,16 +457,18 @@ async def teacher_assign(
         locked_at=_now(),
     )
     db.add(squad)
+    # Append through the relationship (not a bare db.add with squad_id), and before the
+    # first flush — once squad is persistent, touching an unloaded ``members`` collection
+    # for the first time would issue a lazy-load query, which fails under asyncio. Doing
+    # it here keeps the loaded collection consistent in-memory with no extra query at all.
+    for sid in ids:
+        squad.members.append(
+            SquadMember(student=students[sid], subject_id=subject_id, joined_at=_now())
+        )
     await db.flush()
     for sid in ids:
         await _cancel_pending_of(db, subject_id, sid)
-        db.add(
-            SquadMember(squad_id=squad.id, student_id=sid, subject_id=subject_id, joined_at=_now())
-        )
-    await db.flush()
-    loaded = await squad_of(db, subject_id, ids[0])
-    assert loaded is not None
-    names = await _member_names(db, loaded)
+    names = await _member_names(db, squad)
     for sid in ids:
         await _notify_student(db, sid, "assigned", subject_id, members=names)
     await audit(
@@ -476,7 +480,7 @@ async def teacher_assign(
         subject_id=subject_id,
         student_ids=ids,
     )
-    return loaded
+    return squad
 
 
 def lock_on_submit(squad: Squad) -> None:

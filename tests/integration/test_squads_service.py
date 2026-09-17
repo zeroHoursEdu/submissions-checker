@@ -149,6 +149,19 @@ async def test_create_rejects_too_many_and_self(db_session) -> None:
     assert exc2.value.reason == "self_invite"
 
 
+async def test_create_and_assign_reject_duplicate_ids(db_session) -> None:
+    subject, asg, (a, b, _) = await _subject(db_session)
+    with pytest.raises(SquadError) as exc:
+        await squads.create_with_invites(db_session, subject.id, a.id, [b.id, b.id])
+    assert exc.value.reason == "duplicate"
+    teacher = User(username="t-dup", password_hash="x", role=UserRole.TEACHER)
+    db_session.add(teacher)
+    await db_session.flush()
+    with pytest.raises(SquadError) as exc2:
+        await squads.teacher_assign(db_session, subject.id, teacher.id, [b.id, b.id])
+    assert exc2.value.reason == "duplicate"
+
+
 async def test_teacher_assign_creates_locked_squad(db_session) -> None:
     subject, asg, (a, b, _) = await _subject(db_session)
     teacher = User(username="t", password_hash="x", role=UserRole.TEACHER)
