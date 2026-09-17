@@ -24,7 +24,8 @@ from submissions_checker.api.dependencies import AppSettings, DBSession, Teacher
 from submissions_checker.api.routes.teacher_disputes import count_open_disputes
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
-from submissions_checker.core.security import COOKIE_NAME, create_access_token
+from submissions_checker.core.sealed import seal
+from submissions_checker.core.security import COOKIE_NAME, create_access_token, hash_token
 from submissions_checker.core.state_machine import InvalidTransitionError, transition
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
@@ -65,6 +66,7 @@ from submissions_checker.services.gradebook import (
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
 from submissions_checker.services.storage import StorageService
+from submissions_checker.utils.csv_export import csv_safe
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
 )
@@ -253,9 +255,9 @@ async def provision_test_student(
             )
         )
 
-    db.add(
-        SubjectTestStudent(subject_id=subject_id, student_id=student.id, plain_password=password)
-    )
+    # The password is never stored: the teacher enters the account through the
+    # "enter as test student" button, which mints a session directly.
+    db.add(SubjectTestStudent(subject_id=subject_id, student_id=student.id))
     await db.commit()
 
     return RedirectResponse(f"/teacher/subjects/{subject_id}?test_student=created", status_code=303)
@@ -330,10 +332,7 @@ async def teacher_subject(
         )
         sts_row = sts_result.one_or_none()
         if sts_row is not None:
-            test_student_info = {
-                "username": sts_row.username,
-                "plain_password": sts_row.SubjectTestStudent.plain_password,
-            }
+            test_student_info = {"username": sts_row.username}
 
     test_student_flash = request.query_params.get("test_student")
 
@@ -1008,6 +1007,8 @@ async def teacher_resend_credentials(
             continue
         password = _generate_password()
         user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
+        # The old password is gone; so is any session that was opened with it.
+        user.password_changed_at = datetime.now(UTC)
         db.add(
             OutboxMessage(
                 event_type=OutboxEventType.SEND_CREDENTIALS,
@@ -1016,7 +1017,7 @@ async def teacher_resend_credentials(
                     "student_email": student.email,
                     "full_name": student.full_name,
                     "username": user.username,
-                    "password": password,
+                    "password_sealed": seal(password),
                 },
             )
         )
@@ -1115,7 +1116,7 @@ async def import_students(
                 "student_email": email,
                 "full_name": full_name,
                 "username": username,
-                "password": password,
+                "password_sealed": seal(password),
             },
         )
         db.add(outbox)
@@ -1776,10 +1777,10 @@ async def export_grades_csv(
     for r in rows:
         writer.writerow(
             [
-                r.full_name,
-                r.email,
-                r.group_name,
-                r.assignment_title,
+                csv_safe(r.full_name),
+                csv_safe(r.email),
+                csv_safe(r.group_name),
+                csv_safe(r.assignment_title),
                 r.grade if r.grade is not None else "",
                 r.max_grade,
                 r.submission_status or "",
@@ -1882,7 +1883,7 @@ async def add_student(
                 "student_email": email,
                 "full_name": full_name,
                 "username": username,
-                "password": password,
+                "password_sealed": seal(password),
             },
         )
     )
@@ -1950,23 +1951,23 @@ async def request_feedback(
 
     for student in students:
         token_str = secrets.token_urlsafe(32)
-        db.add(
-            FeedbackToken(
-                feedback_request_id=feedback_request.id,
-                student_id=student.id,
-                token=token_str,
-            )
+        # Only the hash is stored; the raw token travels to the e-mail job sealed and
+        # is scrubbed from the outbox row once the link has been sent.
+        feedback_token = FeedbackToken(
+            feedback_request_id=feedback_request.id,
+            student_id=student.id,
+            token_hash=hash_token(token_str),
         )
+        db.add(feedback_token)
         await db.flush()
-        token_result = await db.execute(
-            select(FeedbackToken).where(FeedbackToken.token == token_str)
-        )
-        saved_token = token_result.scalar_one()
         db.add(
             OutboxMessage(
                 event_type=OutboxEventType.FEEDBACK_REQUEST_SENT,
                 state=OutboxMessageState.PENDING,
-                payload={"feedback_token_id": saved_token.id},
+                payload={
+                    "feedback_token_id": feedback_token.id,
+                    "token_sealed": seal(token_str),
+                },
             )
         )
 
@@ -2063,14 +2064,15 @@ async def export_feedback_csv(
         ]
     )
     for resp, student in rows:
+        # Free text written by students: a leading '=' would run in the teacher's sheet.
         writer.writerow(
             [
-                student.full_name,
-                student.email,
+                csv_safe(student.full_name),
+                csv_safe(student.email),
                 resp.rating,
-                resp.went_well,
-                resp.went_bad,
-                resp.to_change,
+                csv_safe(resp.went_well),
+                csv_safe(resp.went_bad),
+                csv_safe(resp.to_change),
                 resp.submitted_at.isoformat(),
             ]
         )

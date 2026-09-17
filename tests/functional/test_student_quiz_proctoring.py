@@ -374,18 +374,85 @@ async def test_event_unconfigured_type_counts_but_no_action(
     assert attempt.violations["mystery"] == 1
 
 
-async def test_event_empty_type_defaults_to_empty_string_key(
-    student_client: AsyncClient, db, student_user
-) -> None:
-    """Missing 'type' → '' key; handler tolerates it (no rule matches)."""
+async def test_event_missing_type_is_400(student_client: AsyncClient, db, student_user) -> None:
+    """The event type is a JSONB key; an unnamed event has nothing to count."""
     await _consent(db, student_user.student_id)
     _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
     attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"anti_cheat": {"rules": []}})
     r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={})
-    assert r.status_code == 200
-    assert r.json()["violation_count"] == 1
+    assert r.status_code == 400
     await db.refresh(attempt)
-    assert attempt.violations[""] == 1
+    assert attempt.violations == {}
+
+
+@pytest.mark.parametrize("body", [[], "tab_switch", 42, None])
+async def test_event_non_object_body_is_400(
+    student_client: AsyncClient, db, student_user, body
+) -> None:
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"anti_cheat": {"rules": []}})
+    r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json=body)
+    assert r.status_code == 400
+
+
+async def test_event_malformed_json_is_400(student_client: AsyncClient, db, student_user) -> None:
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"anti_cheat": {"rules": []}})
+    r = await student_client.post(
+        f"/portal/quiz/{attempt.id}/event",
+        content=b"{not json",
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("event_type", ["x" * 65, "../tab", "Tab Switch", "", "_force_fail"])
+async def test_event_type_outside_allowed_shape_is_400(
+    student_client: AsyncClient, db, student_user, event_type: str
+) -> None:
+    """Only short snake_case names: they are stored as JSONB keys and rendered to the
+    teacher, and the underscore-prefixed names are the handler's own bookkeeping."""
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"anti_cheat": {"rules": []}})
+    r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": event_type})
+    assert r.status_code == 400
+    await db.refresh(attempt)
+    assert attempt.violations == {}
+
+
+async def test_event_distinct_types_are_capped(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    """A client can invent event names; the violations blob must not grow without bound."""
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    full = {f"ev{i}": 1 for i in range(32)}
+    attempt = await _make_attempt(
+        db, sub.id, cfg, config_snapshot={"anti_cheat": {"rules": []}}, violations=full
+    )
+    r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "mystery"})
+    assert r.status_code == 200
+    assert r.json()["action"] == "none"
+    await db.refresh(attempt)
+    assert "mystery" not in attempt.violations
+    # A known key still counts.
+    r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "ev3"})
+    assert r.status_code == 200
+    await db.refresh(attempt)
+    assert attempt.violations["ev3"] == 2
+
+
+async def test_event_oversized_body_is_413(student_client: AsyncClient, db, student_user) -> None:
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(db, sub.id, cfg, config_snapshot={"anti_cheat": {"rules": []}})
+    r = await student_client.post(
+        f"/portal/quiz/{attempt.id}/event", json={"type": "tab_switch", "pad": "x" * 5000}
+    )
+    assert r.status_code == 413
 
 
 async def test_event_on_unknown_attempt_404(student_client: AsyncClient, db, student_user) -> None:
@@ -603,6 +670,80 @@ async def test_snapshot_bad_content_type_415(student_client: AsyncClient, db, st
             files={"frame": ("f.txt", b"hello", "text/plain")},
         )
     assert r.status_code == 415
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        ("f.jpg", b"\x89PNGxx", "image/jpeg"),  # PNG bytes labelled JPEG
+        ("f.png", b"<html><script>", "image/png"),  # not an image at all
+        ("f.webp", b"RIFFxxxxWAVE", "image/webp"),  # RIFF but not WEBP
+    ],
+)
+async def test_snapshot_bytes_must_match_declared_type_415(
+    student_client: AsyncClient, db, student_user, payload
+) -> None:
+    """The multipart content-type is client-supplied; the bytes decide what is stored."""
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(
+        db, sub.id, cfg, config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}}
+    )
+    async with _storage_enabled() as storage:
+        r = await student_client.post(
+            f"/portal/quiz/{attempt.id}/snapshot?event_type=blur", files={"frame": payload}
+        )
+    assert r.status_code == 415
+    storage.upload_bytes.assert_not_awaited()
+
+
+async def test_snapshot_webp_magic_accepted(student_client: AsyncClient, db, student_user) -> None:
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(
+        db, sub.id, cfg, config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}}
+    )
+    async with _storage_enabled():
+        r = await student_client.post(
+            f"/portal/quiz/{attempt.id}/snapshot?event_type=blur",
+            files={"frame": ("f.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp")},
+        )
+    assert r.status_code == 200
+    assert r.json() == {"stored": True}
+
+
+async def test_snapshot_count_per_attempt_is_capped(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    """One attempt cannot fill object storage: past the cap frames are dropped quietly
+    (200, stored=false) so the best-effort uploader stops rather than retries."""
+    from submissions_checker.api.routes import student_quiz as sq
+
+    await _consent(db, student_user.student_id)
+    _s, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    attempt = await _make_attempt(
+        db, sub.id, cfg, config_snapshot={"anti_cheat": {"camera": {"capture_snapshots": True}}}
+    )
+    now = datetime.now(UTC)
+    for i in range(sq._MAX_SNAPSHOTS_PER_ATTEMPT):
+        db.add(
+            QuizAttemptSnapshot(
+                attempt_id=attempt.id,
+                event_type="blur",
+                s3_key=f"proctoring/attempt-{attempt.id}/{i + 1}-blur.jpg",
+                s3_url=f"https://cdn/{i}.jpg",
+                captured_at=now,
+            )
+        )
+    await db.commit()
+    async with _storage_enabled() as storage:
+        r = await student_client.post(
+            f"/portal/quiz/{attempt.id}/snapshot?event_type=blur",
+            files={"frame": ("f.jpg", b"\xff\xd8\xffdata", "image/jpeg")},
+        )
+    assert r.status_code == 200
+    assert r.json() == {"stored": False, "reason": "limit"}
+    storage.upload_bytes.assert_not_awaited()
 
 
 async def test_snapshot_oversize_413(student_client: AsyncClient, db, student_user) -> None:

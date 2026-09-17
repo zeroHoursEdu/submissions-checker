@@ -20,6 +20,11 @@ UNMATCHED = "unmatched"
 
 
 def route_template_for(scope: Scope) -> str:
+    # FastAPI (0.14x+) records the matched route on the scope, including routes that live
+    # inside included routers, which no longer appear flat in ``app.routes``.
+    matched = scope.get("route")
+    if isinstance(matched, Route):
+        return str(matched.path)
     endpoint = scope.get("endpoint")
     app = scope.get("app")
     if endpoint is None or app is None:

@@ -41,3 +41,24 @@ def test_load_config_accepts_str_path(tmp_path) -> None:
     p = tmp_path / "config.yml"
     p.write_text("a: b\n", encoding="utf-8")
     assert load_config(str(p)) == {"a": "b"}
+
+
+# ── validate_subject_code ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("code", ["demo", "distributedBasics", "os-2026_v2", "a.b"])
+def test_validate_subject_code_accepts_plain_identifiers(code: str) -> None:
+    from submissions_checker.services.subject_config import validate_subject_code
+
+    assert validate_subject_code(code) == code
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["", "../templates", "a/b", "a\\b", ".hidden", "..", "x..y", "a b", "ü", "x" * 65],
+)
+def test_validate_subject_code_rejects_path_like_values(code: str) -> None:
+    from submissions_checker.services.subject_config import validate_subject_code
+
+    with pytest.raises(ValueError):
+        validate_subject_code(code)

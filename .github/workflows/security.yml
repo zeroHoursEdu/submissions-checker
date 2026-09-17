@@ -1,0 +1,143 @@
+# Security gates. Free tooling only; every job blocks on HIGH/CRITICAL findings.
+#
+#   pip-audit   known advisories in the locked runtime dependencies
+#   bandit      static analysis of the Python sources (medium severity and up)
+#   gitleaks    secrets anywhere in the full git history
+#   trivy       filesystem (lock files, Dockerfiles, secrets) and the built app image
+#   CodeQL      semantic analysis of Python and of the workflow files themselves
+#   zizmor      GitHub Actions workflow misconfiguration
+#
+# Accepted findings are recorded next to the tool's config (pyproject [tool.bandit],
+# .gitleaksignore, .trivyignore) with a reason, never silenced with continue-on-error.
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published advisory against an unchanged lock still surfaces.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    name: Dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+      - name: Export the locked runtime dependencies
+        run: uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements-audit.txt
+      - name: pip-audit
+        run: uvx pip-audit --strict --desc on -r requirements-audit.txt
+
+  bandit:
+    name: Static analysis (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: bandit
+        # -ll: medium severity and above; -ii: medium confidence and above.
+        run: uvx bandit -r src -ll -ii -c pyproject.toml
+
+  gitleaks:
+    name: Secrets in git history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
+            detect --source /repo --no-banner --redact --exit-code 1
+
+  trivy-fs:
+    name: Trivy (repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: trivy fs
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  trivy-image:
+    name: Trivy (app image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build the production image (local only, never pushed)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/app/Dockerfile
+          target: prod
+          load: true
+          push: false
+          tags: submissions-checker:scan
+          cache-from: type=gha
+      - name: trivy image
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          scan-type: image
+          image-ref: submissions-checker:scan
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@faaca9a8f6edddba5725ffe5adefdab6669a2eca # v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@faaca9a8f6edddba5725ffe5adefdab6669a2eca # v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  zizmor:
+    name: Workflow lint (zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - name: zizmor
+        run: uvx zizmor --min-severity medium .github/workflows

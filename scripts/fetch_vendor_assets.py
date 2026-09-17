@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Download the browser-side proctoring models into static/vendor/.
+"""Download the third-party browser assets into static/vendor/.
 
-A quiz page must never depend on a third-party CDN at exam time, so the MediaPipe
-Face Landmarker bundle, its wasm runtime and the model file are served from this
-app's own /static. Idempotent: existing files are kept; every file is checked
-against scripts/vendor_assets.sha256 when that pin file exists. Pure stdlib so it
-runs in the slim production image (no curl there).
+No page may depend on a third-party host at runtime: a quiz must not stall on a CDN
+at exam time, and a script fetched from someone else's host on every page load is a
+supply-chain risk on every page. So the MediaPipe Face Landmarker bundle (proctoring)
+and the Tailwind play-CDN build (styling) are served from this app's own /static.
+Idempotent: existing files are kept; every file is checked against
+scripts/vendor_assets.sha256 when that pin file exists. Pure stdlib so it runs in the
+slim production image (no curl there).
 
 Usage: python scripts/fetch_vendor_assets.py            # fetch + verify
        python scripts/fetch_vendor_assets.py --pin      # rewrite the sha256 pin file
@@ -19,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEST = ROOT / "static" / "vendor" / "mediapipe"
+DEST = ROOT / "static" / "vendor"
 PIN_FILE = ROOT / "scripts" / "vendor_assets.sha256"
 
 _MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14"
@@ -27,13 +29,21 @@ _MODEL = (
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/"
     "float16/1/face_landmarker.task"
 )
+# The play-CDN build is a single self-contained script that compiles utility classes
+# in the browser, which is what the templates already rely on (no build step). Pinned
+# to an exact version so the pin file below stays meaningful.
+_TAILWIND = "https://cdn.tailwindcss.com/3.4.17"
+# Keys are paths under static/vendor/.
 ASSETS: dict[str, str] = {
-    "vision_bundle.mjs": f"{_MP}/vision_bundle.mjs",
-    "wasm/vision_wasm_internal.js": f"{_MP}/wasm/vision_wasm_internal.js",
-    "wasm/vision_wasm_internal.wasm": f"{_MP}/wasm/vision_wasm_internal.wasm",
-    "wasm/vision_wasm_nosimd_internal.js": f"{_MP}/wasm/vision_wasm_nosimd_internal.js",
-    "wasm/vision_wasm_nosimd_internal.wasm": f"{_MP}/wasm/vision_wasm_nosimd_internal.wasm",
-    "face_landmarker.task": _MODEL,
+    "mediapipe/vision_bundle.mjs": f"{_MP}/vision_bundle.mjs",
+    "mediapipe/wasm/vision_wasm_internal.js": f"{_MP}/wasm/vision_wasm_internal.js",
+    "mediapipe/wasm/vision_wasm_internal.wasm": f"{_MP}/wasm/vision_wasm_internal.wasm",
+    "mediapipe/wasm/vision_wasm_nosimd_internal.js": f"{_MP}/wasm/vision_wasm_nosimd_internal.js",
+    "mediapipe/wasm/vision_wasm_nosimd_internal.wasm": (
+        f"{_MP}/wasm/vision_wasm_nosimd_internal.wasm"
+    ),
+    "mediapipe/face_landmarker.task": _MODEL,
+    "tailwind/tailwind.js": _TAILWIND,
 }
 
 
@@ -50,7 +60,9 @@ def _fetch(url: str, dest: Path) -> None:
     if dest.exists() and dest.stat().st_size > 0:
         return
     tmp = dest.with_suffix(dest.suffix + ".tmp")
-    with urllib.request.urlopen(url, timeout=120) as resp, tmp.open("wb") as out:  # noqa: S310
+    # cdn.tailwindcss.com answers 403 to urllib's default User-Agent.
+    req = urllib.request.Request(url, headers={"User-Agent": "submissions-checker-vendor/1"})
+    with urllib.request.urlopen(req, timeout=120) as resp, tmp.open("wb") as out:  # noqa: S310
         for chunk in iter(lambda: resp.read(1 << 20), b""):
             out.write(chunk)
     tmp.replace(dest)
@@ -73,16 +85,14 @@ def main(argv: list[str]) -> int:
         _fetch(url, DEST / rel)
 
     if "--pin" in argv:
-        lines = [f"{_sha256(DEST / rel)}  static/vendor/mediapipe/{rel}" for rel in ASSETS]
+        lines = [f"{_sha256(DEST / rel)}  static/vendor/{rel}" for rel in ASSETS]
         PIN_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"wrote {PIN_FILE.relative_to(ROOT)}")
         return 0
 
     pins = _load_pins()
     bad = [
-        rel
-        for rel in ASSETS
-        if pins.get(f"static/vendor/mediapipe/{rel}") not in (None, _sha256(DEST / rel))
+        rel for rel in ASSETS if pins.get(f"static/vendor/{rel}") not in (None, _sha256(DEST / rel))
     ]
     if bad:
         print(

@@ -1,16 +1,16 @@
 """Unit tests for core.security — password hashing and JWT round-trips.
 
 No DB, no network. Settings are read from the project .env (which provides a
-valid SECRET_KEY); expired/wrong-secret tokens are crafted with jose directly.
+valid SECRET_KEY); expired/wrong-secret tokens are crafted with PyJWT directly.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
-from jose import jwt
-from jose.exceptions import JWTError
+from jwt import PyJWTError as JWTError
 
 from submissions_checker.core import security
 from submissions_checker.core.config import get_settings
@@ -121,3 +121,42 @@ def test_decode_rejects_token_signed_with_different_algorithm() -> None:
     )
     with pytest.raises(JWTError):
         security.decode_access_token(token)
+
+
+# ── bcrypt's 72-byte limit ───────────────────────────────────────────────────
+
+
+def test_verify_treats_overlong_password_as_wrong() -> None:
+    """bcrypt 5 raises on >72 bytes; a login attempt must never turn that into a 500."""
+    from submissions_checker.core.security import hash_password, verify_password
+
+    hashed = hash_password("short")
+    assert verify_password("a" * 80, hashed) is False
+
+
+def test_hash_refuses_overlong_password() -> None:
+    from submissions_checker.core.security import hash_password
+
+    with pytest.raises(ValueError):
+        hash_password("a" * 73)
+
+
+def test_password_too_long_counts_bytes_not_characters() -> None:
+    from submissions_checker.core.security import password_too_long
+
+    assert password_too_long("a" * 72) is False
+    assert password_too_long("a" * 73) is True
+    # 3 bytes per character in UTF-8.
+    assert password_too_long("я" * 37) is True  # 2 bytes each: 74
+
+
+def test_token_carries_issue_time() -> None:
+    """`iat` is what lets a password change refuse older sessions."""
+    import time
+
+    from submissions_checker.core.security import create_access_token, decode_access_token
+
+    before = int(time.time())
+    payload = decode_access_token(create_access_token(1, "u", "TEACHER"))
+    assert isinstance(payload["iat"], int)
+    assert before <= payload["iat"] <= int(time.time())

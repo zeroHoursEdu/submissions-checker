@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from httpx import AsyncClient
-from jose import jwt
 
 from submissions_checker.core.security import COOKIE_NAME, JWT_ALGORITHM
 from submissions_checker.db.models.enums import UserRole
@@ -73,6 +73,16 @@ async def test_login_page_shows_demo_credentials_in_development(
 
     assert resp.status_code == 200
     assert "teacher123" in resp.text
+
+
+async def test_every_page_carries_security_headers(client: AsyncClient) -> None:
+    """The headers are set by the app, so a deployment without the Caddy layer is not
+    silently bare."""
+    resp = await client.get("/auth/login")
+    assert resp.status_code == 200
+    assert "frame-ancestors 'self'" in resp.headers["content-security-policy"]
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert "camera=(self)" in resp.headers["permissions-policy"]
 
 
 async def test_health_is_open(client: AsyncClient) -> None:

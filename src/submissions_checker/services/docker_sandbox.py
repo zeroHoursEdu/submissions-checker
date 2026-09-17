@@ -66,6 +66,11 @@ class DockerSandbox:
                 f"--memory={memory}",
                 f"--cpus={cpus}",
                 "--pids-limit=100",
+                # No Linux capabilities, and no way to regain any through setuid binaries
+                # baked into a subject image: the checker only needs to read two mounts
+                # and write /output.
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges",
                 "--read-only",
                 "--tmpfs",
                 "/tmp:rw,size=64m",

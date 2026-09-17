@@ -288,3 +288,21 @@ def test_quiz_under_reachable_modes_is_fine(svc: ConfigApplyService, mode: str) 
         },
     }
     svc._validate_quiz_reachability(cfg)
+
+
+# ── subjectCode is a path component ──────────────────────────────────────────
+
+
+async def test_apply_rejects_path_traversal_subject_code(svc: ConfigApplyService) -> None:
+    """The code becomes ``plugins_dir/<code>`` and is ``os.replace``d into place, so a
+    value like ``../templates`` would overwrite an arbitrary sibling directory. Refused
+    before anything touches the database or the disk."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("config.yml", "subjectCode: '../templates'\nassignments: {}\n")
+
+    with pytest.raises(ValueError, match="subjectCode"):
+        await svc.apply(buf.getvalue(), owner_id=1, db=None)  # type: ignore[arg-type]

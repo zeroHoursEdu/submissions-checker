@@ -4,13 +4,17 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, status
-from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.core.database import get_db
-from submissions_checker.core.security import COOKIE_NAME, decode_access_token
+from submissions_checker.core.security import (
+    COOKIE_NAME,
+    TokenError,
+    decode_access_token,
+    issued_before_password_change,
+)
 from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models.user import User
 from submissions_checker.services.air_raid import AirRaidProvider, build_air_raid_provider
@@ -39,7 +43,7 @@ async def _get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         payload = decode_access_token(access_token)
-    except JWTError as exc:
+    except TokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         ) from exc
@@ -53,6 +57,10 @@ async def _get_current_user(
         )
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive")
+    if issued_before_password_change(payload, user.password_changed_at):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session ended by password change"
+        )
 
     return CurrentUserData(
         user_id=user.id,

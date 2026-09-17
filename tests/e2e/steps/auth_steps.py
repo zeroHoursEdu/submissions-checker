@@ -6,7 +6,7 @@ from pytest_bdd import given, parsers, then, when
 
 from tests.e2e.helpers import (
     TEACHER_USERNAME,
-    get_student_credentials_from_outbox,
+    provision_student_credentials,
 )
 from tests.e2e.pages.login_page import LoginPage
 
@@ -62,7 +62,7 @@ def log_in_as_student(page, app_url: str, e2e_context: dict) -> None:
 
 @given("I have the student's generated credentials")
 def load_student_credentials(e2e_context: dict) -> None:
-    creds = get_student_credentials_from_outbox("e2e.student@test.example")
+    creds = provision_student_credentials("e2e.student@test.example")
     if creds:
         e2e_context["student_username"] = creds["username"]
         e2e_context["student_password"] = creds["password"]

@@ -10,12 +10,14 @@ and that the stored password is a bcrypt hash rather than plaintext).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import bcrypt
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
-from submissions_checker.core.security import COOKIE_NAME, decode_access_token
+from submissions_checker.core.security import COOKIE_NAME, decode_access_token, hash_token
 from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models.password_reset import PasswordResetToken
 from submissions_checker.db.models.user import User
@@ -251,7 +253,9 @@ async def test_reset_password_valid_token_updates_hash_and_consumes_token(
     assert bcrypt.checkpw(new_pw.encode(), fresh.password_hash.encode())
 
     prt = (
-        await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token_str))
+        await db.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(token_str))
+        )
     ).scalar_one()
     await db.refresh(prt)
     assert prt.used is True
@@ -346,7 +350,9 @@ async def test_reset_password_mismatch_rejected_with_422(
     assert resp.status_code == 422
     # Token must remain unused since the change never applied.
     prt = (
-        await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token_str))
+        await db.execute(
+            select(PasswordResetToken).where(PasswordResetToken.token_hash == hash_token(token_str))
+        )
     ).scalar_one()
     await db.refresh(prt)
     assert prt.used is False
@@ -470,3 +476,240 @@ async def test_forgot_password_is_throttled_per_client(client: AsyncClient, monk
     assert (
         await client.post("/auth/forgot-password", data={"username": "nobody"})
     ).status_code == 429
+
+
+# ── Login hardening ──────────────────────────────────────────────────────────
+
+
+async def test_login_with_overlong_password_is_an_ordinary_failure(
+    client: AsyncClient, make_user, monkeypatch
+) -> None:
+    """bcrypt refuses >72 bytes; that must be a 401 that costs throttle budget, not a 500
+    that bypasses the counter."""
+    from submissions_checker.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_login_limiter", rate_limit.SlidingWindowLimiter(2, 900))
+    await make_user(role=UserRole.TEACHER, username="gus", password=PASSWORD)
+    for _ in range(2):
+        r = await client.post("/auth/login", data={"username": "gus", "password": "x" * 100})
+        assert r.status_code == 401
+    r = await client.post("/auth/login", data={"username": "gus", "password": PASSWORD})
+    assert r.status_code == 429
+
+
+async def test_password_spraying_is_throttled_per_client(
+    client: AsyncClient, make_user, monkeypatch
+) -> None:
+    """One client trying one password against many usernames hits a per-IP budget."""
+    from submissions_checker.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_login_limiter", rate_limit.SlidingWindowLimiter(10, 900))
+    monkeypatch.setattr(rate_limit, "_login_ip_limiter", rate_limit.SlidingWindowLimiter(3, 900))
+    await make_user(role=UserRole.TEACHER, username="hal", password=PASSWORD)
+    for name in ("u1", "u2", "u3"):
+        r = await client.post("/auth/login", data={"username": name, "password": "guess"})
+        assert r.status_code == 401
+    r = await client.post("/auth/login", data={"username": "hal", "password": PASSWORD})
+    assert r.status_code == 429
+
+
+async def test_unknown_username_still_pays_for_a_hash_check(
+    client: AsyncClient, monkeypatch
+) -> None:
+    """Without this, response time reveals whether a username exists."""
+    from submissions_checker.api.routes import auth as auth_module
+
+    calls: list[str] = []
+    real = auth_module.verify_password
+
+    def spy(plain: str, hashed: str) -> bool:
+        calls.append(hashed)
+        return real(plain, hashed)
+
+    monkeypatch.setattr(auth_module, "verify_password", spy)
+    r = await client.post("/auth/login", data={"username": "ghost", "password": "whatever"})
+    assert r.status_code == 401
+    assert len(calls) == 1
+
+
+async def test_change_password_rejects_overlong_new_password(
+    client: AsyncClient, make_user, login
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="ida", password=PASSWORD)
+    login(client, user)
+    resp = await client.post(
+        "/auth/change-password",
+        data={
+            "current_password": PASSWORD,
+            "new_password": "n" * 73,
+            "confirm_password": "n" * 73,
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_reset_password_rejects_overlong_new_password(
+    client: AsyncClient, make_user, db
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="jon", password=PASSWORD)
+    db.add(PasswordResetToken.create(user_id=user.id, token="tok-long"))
+    await db.commit()
+    resp = await client.post(
+        "/auth/reset-password",
+        data={"token": "tok-long", "new_password": "n" * 73, "confirm_password": "n" * 73},
+    )
+    assert resp.status_code == 422
+
+
+# ── Sessions end when the password changes ───────────────────────────────────
+
+
+def _token_issued_at(user: User, issued_at: datetime) -> str:
+    """A cookie exactly as login would have minted it at *issued_at*."""
+    import jwt
+
+    from submissions_checker.core.config import get_settings
+    from submissions_checker.core.security import JWT_ALGORITHM
+
+    return jwt.encode(
+        {
+            "sub": str(user.id),
+            "username": user.username,
+            "role": user.role.value,
+            "iat": int(issued_at.timestamp()),
+            "exp": issued_at + timedelta(hours=8),
+        },
+        get_settings().secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+
+
+async def test_session_issued_before_password_change_is_refused(
+    client: AsyncClient, make_user, db
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="kim", password=PASSWORD)
+    old = _token_issued_at(user, datetime.now(UTC) - timedelta(minutes=5))
+    client.cookies.set(COOKIE_NAME, old)
+    assert (await client.get("/teacher")).status_code == 200
+
+    user.password_changed_at = datetime.now(UTC)
+    await db.commit()
+    assert (await client.get("/teacher")).status_code == 401
+
+
+async def test_session_without_issue_time_survives_a_password_change(
+    client: AsyncClient, make_user, db
+) -> None:
+    """Cookies minted before `iat` existed keep working until they expire; the change
+    must not log everyone out on deploy."""
+    import jwt
+
+    from submissions_checker.core.config import get_settings
+    from submissions_checker.core.security import JWT_ALGORITHM
+
+    user = await make_user(role=UserRole.TEACHER, username="lee", password=PASSWORD)
+    user.password_changed_at = datetime.now(UTC)
+    await db.commit()
+    legacy = jwt.encode(
+        {
+            "sub": str(user.id),
+            "username": user.username,
+            "role": user.role.value,
+            "exp": datetime.now(UTC) + timedelta(hours=1),
+        },
+        get_settings().secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+    client.cookies.set(COOKIE_NAME, legacy)
+    assert (await client.get("/teacher")).status_code == 200
+
+
+async def test_change_password_ends_other_sessions_and_keeps_this_one(
+    client: AsyncClient, make_user
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="mia", password=PASSWORD)
+    old = _token_issued_at(user, datetime.now(UTC) - timedelta(minutes=5))
+    client.cookies.set(COOKIE_NAME, old)
+
+    resp = await client.post(
+        "/auth/change-password",
+        data={
+            "current_password": PASSWORD,
+            "new_password": "N3wPassw0rd!",
+            "confirm_password": "N3wPassw0rd!",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    fresh = resp.cookies.get(COOKIE_NAME)
+    assert fresh and fresh != old
+
+    # The response also planted the fresh cookie in the jar; test each cookie alone.
+    client.cookies.clear()
+    client.cookies.set(COOKIE_NAME, old)
+    assert (await client.get("/teacher")).status_code == 401
+    client.cookies.clear()
+    client.cookies.set(COOKIE_NAME, fresh)
+    assert (await client.get("/teacher")).status_code == 200
+
+
+async def test_reset_password_ends_existing_sessions(client: AsyncClient, make_user, db) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="ned", password=PASSWORD)
+    old = _token_issued_at(user, datetime.now(UTC) - timedelta(minutes=5))
+    db.add(PasswordResetToken.create(user_id=user.id, token="tok-ned"))
+    await db.commit()
+
+    resp = await client.post(
+        "/auth/reset-password",
+        data={
+            "token": "tok-ned",
+            "new_password": "N3wPassw0rd!",
+            "confirm_password": "N3wPassw0rd!",
+        },
+    )
+    assert resp.status_code == 200
+    client.cookies.set(COOKIE_NAME, old)
+    assert (await client.get("/teacher")).status_code == 401
+
+
+# ── Reset tokens are stored hashed ───────────────────────────────────────────
+
+
+async def test_forgot_password_stores_only_the_token_hash(
+    client: AsyncClient, make_user, db
+) -> None:
+    """A database read must not yield a working reset link."""
+    user = await make_user(role=UserRole.TEACHER, username="oli", password=PASSWORD)
+    resp = await client.post("/auth/forgot-password", data={"username": "oli"})
+    assert resp.status_code == 200
+    prt = (
+        await db.execute(select(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+    ).scalar_one()
+    assert prt.token is None
+    assert prt.token_hash is not None and len(prt.token_hash) == 64
+
+
+async def test_legacy_plaintext_reset_token_still_works(client: AsyncClient, make_user, db) -> None:
+    """Rows written before hashing keep their token in clear and are still honoured."""
+    from datetime import UTC, datetime, timedelta
+
+    user = await make_user(role=UserRole.TEACHER, username="pat", password=PASSWORD)
+    db.add(
+        PasswordResetToken(
+            user_id=user.id,
+            token="legacy-raw-token",
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+    )
+    await db.commit()
+    resp = await client.post(
+        "/auth/reset-password",
+        data={
+            "token": "legacy-raw-token",
+            "new_password": "N3wPassw0rd!",
+            "confirm_password": "N3wPassw0rd!",
+        },
+    )
+    assert resp.status_code == 200
+    await db.refresh(user)
+    assert bcrypt.checkpw(b"N3wPassw0rd!", user.password_hash.encode())

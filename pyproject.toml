@@ -17,7 +17,9 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "structlog>=24.4.0",
     "python-multipart>=0.0.12",
-    "python-jose[cryptography]>=3.3.0",
+    "pyjwt>=2.10",
+    # Fernet for secrets that wait in a database row (core/sealed.py).
+    "cryptography>=44",
     "bcrypt>=4.0.0",
     "aiosmtplib>=3.0",
     "alembic>=1.14.0",
@@ -130,3 +132,9 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "testcontainers.*"
 ignore_missing_imports = true
+
+[tool.bandit]
+# B108: the sandbox passes a literal "/tmp" as the container's tmpfs mount point, not a
+# host temp path. B103: the ephemeral sandbox output dir is chmod 0o777 so non-root
+# subject images can write result.json; it lives for one check. Both reviewed 2026-09-17.
+skips = ["B108", "B103"]

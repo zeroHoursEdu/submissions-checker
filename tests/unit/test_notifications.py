@@ -202,3 +202,24 @@ def test_build_dispatcher_empty_strings_are_falsy() -> None:
     # empty api key / host -> channel not added
     disp = build_dispatcher(_Cfg(resend_api_key="", brevo_api_key="", smtp_host=""))
     assert disp._channels == []
+
+
+# ── no PII in logs ───────────────────────────────────────────────────────────
+
+
+def test_worker_tasks_never_log_student_email() -> None:
+    """Logs ship to a hosted backend; identify students by id, never by address."""
+    import re
+    from pathlib import Path
+
+    from submissions_checker.workers import tasks
+
+    root = Path(tasks.__file__).parent
+    offenders = []
+    for path in root.glob("*.py"):
+        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+            if re.search(r"logger\.\w+\(.*student_email=", line) or re.fullmatch(
+                r"\s*student_email=.*,", line
+            ):
+                offenders.append(f"{path.name}:{lineno}")
+    assert offenders == []

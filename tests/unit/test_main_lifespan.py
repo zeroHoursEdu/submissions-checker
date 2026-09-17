@@ -110,13 +110,26 @@ async def test_root_redirects_to_login() -> None:
     assert response.headers["location"] == "/auth/login"
 
 
+def _registered_paths(app) -> set[str]:
+    """Every path the app serves: mounts by their mount path, endpoints via the schema.
+
+    Starlette 1.x wraps included routers in an object without a ``path``, so the
+    route list can no longer be read flat.
+    """
+    from starlette.routing import Mount
+
+    paths = {r.path for r in app.routes if isinstance(r, Mount)}
+    paths |= set(app.openapi()["paths"])
+    return paths
+
+
 def test_create_app_registers_routers_and_static(monkeypatch) -> None:
     app = main_module.create_app()
 
     # The app is configured (title set, lifespan attached by FastAPI).
     assert app.title == "Submissions Checker"
     assert app.router.lifespan_context is not None
-    paths = {r.path for r in app.routes}
+    paths = _registered_paths(app)
     # Routers + the static mount are registered (root "/" lives on the global
     # module-level app, not inside create_app, so it is not asserted here).
     assert any(p.startswith("/static") for p in paths)
@@ -125,5 +138,37 @@ def test_create_app_registers_routers_and_static(monkeypatch) -> None:
 
 def test_root_handler_registered_on_global_app() -> None:
     # The "/" redirect is wired onto the module-level ``app`` instance.
-    paths = {r.path for r in main_module.app.routes}
+    paths = _registered_paths(main_module.app)
     assert "/" in paths
+
+
+def _settings_stub(**overrides):
+    from types import SimpleNamespace
+
+    base = {
+        "debug": False,
+        "cors_origins": [],
+        "environment": "development",
+        "is_development": True,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_openapi_ui_is_off_in_production(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "get_settings",
+        lambda: _settings_stub(environment="production", is_development=False),
+    )
+    app = main_module.create_app()
+    assert app.docs_url is None
+    assert app.redoc_url is None
+    assert app.openapi_url is None
+
+
+def test_openapi_ui_is_on_in_development(monkeypatch) -> None:
+    monkeypatch.setattr(main_module, "get_settings", lambda: _settings_stub())
+    app = main_module.create_app()
+    assert app.docs_url == "/docs"
+    assert app.openapi_url == "/openapi.json"

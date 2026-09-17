@@ -1,9 +1,9 @@
 """Application configuration using Pydantic Settings."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, PostgresDsn, field_validator
+from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,8 +23,10 @@ class Settings(BaseSettings):
     secret_key: str = Field(..., min_length=32)
     debug: bool = False
 
-    # Credential-endpoint throttling (per process, per client IP + username).
+    # Credential-endpoint throttling (per process). Failures per (client IP, username),
+    # and a larger budget per client IP alone against password spraying.
     login_max_attempts: int = 10
+    login_ip_max_attempts: int = 50
     login_window_seconds: int = 900
 
     # API
@@ -151,6 +153,13 @@ class Settings(BaseSettings):
                 "Set a strong random key, e.g. `openssl rand -hex 32`."
             )
         return value
+
+    @model_validator(mode="after")
+    def _refuse_debug_in_production(self) -> Self:
+        """FastAPI's debug mode returns tracebacks to the client. Never in production."""
+        if self.environment == "production" and self.debug:
+            raise ValueError("DEBUG must be false when ENVIRONMENT=production")
+        return self
 
     @property
     def cookie_secure(self) -> bool:

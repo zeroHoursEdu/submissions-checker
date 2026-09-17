@@ -168,7 +168,9 @@ async def test_global_import_creates_student_user_group_and_outbox(
     assert len(users) == 2
     assert {u.username for u in users} == {"ivan.petrenko", "olena.kovalenko"}
 
-    # Two SEND_CREDENTIALS outbox rows carrying the plaintext password.
+    # Two SEND_CREDENTIALS outbox rows carrying the password sealed, never in clear.
+    from submissions_checker.core.sealed import unseal
+
     creds = (
         (
             await db.execute(
@@ -183,7 +185,8 @@ async def test_global_import_creates_student_user_group_and_outbox(
     assert len(creds) == 2
     for c in creds:
         assert c.payload["student_email"] in {"ivan@example.com", "olena@example.com"}
-        assert c.payload["password"]
+        assert "password" not in c.payload
+        assert unseal(c.payload["password_sealed"])
         assert c.payload["username"] in {"ivan.petrenko", "olena.kovalenko"}
 
 
@@ -562,13 +565,17 @@ async def test_provision_test_student_creates_entities(client: AsyncClient, db, 
     assert resp.status_code == 303
     assert resp.headers["location"] == f"/teacher/subjects/{subject.id}?test_student=created"
 
-    # SubjectTestStudent row, with a stored plaintext password.
+    # SubjectTestStudent row; the password is never kept.
     sts = (
         await db.execute(
             select(SubjectTestStudent).where(SubjectTestStudent.subject_id == subject.id)
         )
     ).scalar_one()
-    assert sts.plain_password
+    assert sts.plain_password is None
+    # The subject page names the account but shows no password.
+    page = await client.get(f"/teacher/subjects/{subject.id}")
+    assert page.status_code == 200
+    assert "Password" not in page.text.split("Enter as Test Student")[0].split("Username")[-1]
 
     # The backing student is TEST-typed and in the __TEST__ group.
     student = (await db.execute(select(Student).where(Student.id == sts.student_id))).scalar_one()
@@ -871,7 +878,8 @@ async def test_feedback_request_creates_request_tokens_and_outbox(
     )
     assert len(tokens) == 2
     assert {t.student_id for t in tokens} == {s1.id, s2.id}
-    assert all(t.token for t in tokens)
+    # Only the hash is stored; the raw token travels sealed in the outbox payload.
+    assert all(t.token is None and t.token_hash for t in tokens)
 
     # One FEEDBACK_REQUEST_SENT outbox per token.
     ob = (
@@ -888,6 +896,13 @@ async def test_feedback_request_creates_request_tokens_and_outbox(
     assert len(ob) == 2
     token_ids = {t.id for t in tokens}
     assert {m.payload["feedback_token_id"] for m in ob} == token_ids
+    from submissions_checker.core.sealed import unseal
+    from submissions_checker.core.security import hash_token
+
+    by_id = {t.id: t for t in tokens}
+    for m in ob:
+        raw = unseal(m.payload["token_sealed"])
+        assert hash_token(raw) == by_id[m.payload["feedback_token_id"]].token_hash
 
 
 async def test_feedback_request_no_active_semester_redirects_with_error(
@@ -1014,6 +1029,42 @@ async def test_feedback_export_csv_contains_responses(
     assert "Grace Hopper" in resp.text
     assert "grace@example.com" in resp.text
     assert "lectures" in resp.text
+
+
+async def test_feedback_export_csv_neutralises_formula_cells(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """Feedback text is student-written free text; a leading '=' must be escaped."""
+    semester = await _make_active_semester(db)
+    subject = await _make_subject(db, owner_id=teacher.id)
+    student = await make_student(full_name="Grace Hopper", email="grace@example.com")
+    await _enroll(db, subject.id, student.id)
+    fr = FeedbackRequest(
+        subject_id=subject.id, semester_id=semester.id, created_by_teacher_id=teacher.id
+    )
+    db.add(fr)
+    await db.flush()
+    token = FeedbackToken(feedback_request_id=fr.id, student_id=student.id, token="tok-f")
+    db.add(token)
+    await db.flush()
+    db.add(
+        FeedbackResponse(
+            feedback_token_id=token.id,
+            subject_id=subject.id,
+            rating=1,
+            went_well='=HYPERLINK("http://evil")',
+            went_bad="+1",
+            to_change="@x",
+        )
+    )
+    await db.commit()
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}/feedback/export.csv")
+    assert resp.status_code == 200
+    assert "'=HYPERLINK" in resp.text
+    assert ",'+1,'@x," in resp.text
+    assert ",=HYPERLINK" not in resp.text
 
 
 async def test_feedback_export_csv_empty_returns_header_only(

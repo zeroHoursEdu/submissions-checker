@@ -553,6 +553,23 @@ async def test_export_csv_owner_happy_path(client: AsyncClient, db, teacher, mak
     assert "ada@example.com" in resp.text
 
 
+async def test_export_csv_neutralises_formula_cells(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """A name that starts like a formula must not execute when the teacher opens the
+    export in a spreadsheet."""
+    subject = await _make_subject(db, owner_id=teacher.id, name="My Course")
+    await _make_assignment(db, subject.id, title="HW1")
+    student = await make_student(full_name="=cmd|' /C calc'!A0", email="eve@example.com")
+    await _enroll(db, subject.id, student.id)
+    authenticate(client, teacher)
+
+    resp = await client.get(f"/teacher/subjects/{subject.id}/export.csv")
+    assert resp.status_code == 200
+    assert "\n'=cmd|' /C calc'!A0," in resp.text
+    assert "\n=cmd" not in resp.text
+
+
 async def test_export_csv_empty_subject_returns_header_only(
     client: AsyncClient, db, teacher
 ) -> None:
@@ -1187,7 +1204,11 @@ async def test_resend_credentials_rotates_password_and_enqueues_email(
     )
     assert creds[-1].payload["student_email"] == "resend@example.com"
     assert creds[-1].payload["username"] == "resend-me"
-    assert creds[-1].payload["password"]
+    # The password waits in the row sealed, never in clear.
+    from submissions_checker.core.sealed import unseal
+
+    assert "password" not in creds[-1].payload
+    assert unseal(creds[-1].payload["password_sealed"])
 
 
 async def test_resend_credentials_skips_students_outside_scope(

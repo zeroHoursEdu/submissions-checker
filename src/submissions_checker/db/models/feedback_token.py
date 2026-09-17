@@ -20,10 +20,16 @@ class FeedbackToken(Base):
     student_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("students.id", ondelete="CASCADE"), nullable=False
     )
-    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Plaintext, only on rows written before tokens were hashed (revision 0030).
+    token: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    # SHA-256 of the raw token; the raw value exists only in the e-mail that was sent.
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     feedback_request: Mapped[object] = relationship("FeedbackRequest", back_populates="tokens")
     student: Mapped[object] = relationship("Student")
 
-    __table_args__ = (Index("ix_feedback_tokens_feedback_request_id", "feedback_request_id"),)
+    __table_args__ = (
+        Index("ix_feedback_tokens_feedback_request_id", "feedback_request_id"),
+        Index("ix_feedback_tokens_token_hash", "token_hash"),
+    )

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import random
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import ceil
@@ -71,6 +73,20 @@ _TERMINAL_STATUSES = (
 # Proctoring snapshot upload limits
 _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024  # 2 MB
 _ALLOWED_SNAPSHOT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+# The declared content-type is client-supplied; the leading bytes decide what is stored.
+_SNAPSHOT_MAGIC: dict[str, tuple[bytes, ...]] = {
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG",),
+    "image/webp": (b"RIFF",),  # plus "WEBP" at offset 8, checked separately
+}
+# One attempt cannot fill object storage on its own.
+_MAX_SNAPSHOTS_PER_ATTEMPT = 200
+
+# Anti-cheat event names become JSONB keys and teacher-visible labels: short snake_case
+# only, and never the handler's own underscore-prefixed bookkeeping keys.
+_EVENT_TYPE_RE = re.compile(r"[a-z0-9][a-z0-9_]{0,63}")
+_MAX_EVENT_BODY_BYTES = 4096
+_MAX_DISTINCT_EVENT_TYPES = 32
 
 
 # ---------------------------------------------------------------------------
@@ -746,6 +762,35 @@ async def show_quiz(
     )
 
 
+async def _read_event_type(request: Request) -> str:
+    """Parse the anti-cheat event body: a small JSON object with a well-formed ``type``."""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > _MAX_EVENT_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Event body too large")
+    raw = await request.body()
+    if len(raw) > _MAX_EVENT_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Event body too large")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Body must be JSON") from None
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    event_type = data.get("type")
+    if not isinstance(event_type, str) or not _EVENT_TYPE_RE.fullmatch(event_type):
+        raise HTTPException(status_code=400, detail="type must be a short snake_case name")
+    return event_type
+
+
+def _looks_like(content_type: str, data: bytes) -> bool:
+    """Whether the leading bytes match the declared image type."""
+    if not any(data.startswith(magic) for magic in _SNAPSHOT_MAGIC.get(content_type, ())):
+        return False
+    if content_type == "image/webp":
+        return data[8:12] == b"WEBP"
+    return True
+
+
 @router.post("/quiz/{attempt_id}/event")
 async def report_violation(
     attempt_id: int,
@@ -755,8 +800,7 @@ async def report_violation(
     student_id: StudentId,
 ) -> JSONResponse:
     """Receive a client-side anti-cheat event and evaluate configured rules."""
-    data = await request.json()
-    event_type = str(data.get("type", ""))
+    event_type = await _read_event_type(request)
 
     attempt = await db.get(QuizAttempt, attempt_id)
     if attempt is None:
@@ -781,6 +825,12 @@ async def report_violation(
         return JSONResponse({"action": "none", "violation_count": 0, "paused": True})
 
     violations = dict(attempt.violations or {})
+    if event_type not in violations and len(violations) >= _MAX_DISTINCT_EVENT_TYPES:
+        # A client can invent names; the blob must not grow without bound. Nothing is
+        # recorded and no rule can match a name the config never mentions anyway.
+        return JSONResponse(
+            {"action": "none", "seconds_remaining": None, "message": "", "violation_count": 0}
+        )
     violations[event_type] = violations.get(event_type, 0) + 1
     count = int(violations[event_type])
 
@@ -1155,6 +1205,8 @@ async def upload_snapshot(
     data = await frame.read()
     if not data or len(data) > _MAX_SNAPSHOT_BYTES:
         raise HTTPException(status_code=413, detail="Frame missing or too large")
+    if not _looks_like(frame.content_type, data):
+        raise HTTPException(status_code=415, detail="Frame bytes do not match the image type")
 
     storage = StorageService(settings) if settings.s3_endpoint_url else None
     if storage is None:
@@ -1167,6 +1219,9 @@ async def upload_snapshot(
         .select_from(QuizAttemptSnapshot)
         .where(QuizAttemptSnapshot.attempt_id == attempt_id)
     )
+    if (seq or 0) >= _MAX_SNAPSHOTS_PER_ATTEMPT:
+        # Dropped, not refused: 200 keeps the best-effort uploader from retrying.
+        return JSONResponse({"stored": False, "reason": "limit"})
     safe_event = "".join(c for c in event_type if c.isalnum() or c in "_-")[:48] or "event"
     key = f"proctoring/attempt-{attempt_id}/{(seq or 0) + 1}-{safe_event}.{ext}"
     url = await storage.upload_bytes(data, key, frame.content_type)

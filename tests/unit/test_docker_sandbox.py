@@ -80,6 +80,9 @@ async def test_run_builds_isolation_argv(tmp_path: Path) -> None:
     assert "--pids-limit=100" in cmd
     assert "--read-only" in cmd
     assert "--tmpfs" in cmd
+    # no Linux capabilities, and none can be regained via setuid binaries in the image
+    assert "--cap-drop=ALL" in cmd
+    assert "--security-opt=no-new-privileges" in cmd
     # mounts: submission + plugin read-only, output writable
     assert f"{student}:/submission:ro" in cmd
     assert f"{plugin}:/plugin:ro" in cmd

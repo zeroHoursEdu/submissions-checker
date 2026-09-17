@@ -19,7 +19,10 @@ from submissions_checker.workers.tasks.notification_tasks import (
     execute_submission_reviewed_task,
 )
 from submissions_checker.workers.tasks.review_tasks import execute_ai_review_task
-from submissions_checker.workers.tasks.send_credentials_tasks import execute_send_credentials_task
+from submissions_checker.workers.tasks.send_credentials_tasks import (
+    execute_send_credentials_task,
+    redact_credentials,
+)
 
 logger = get_logger(__name__)
 
@@ -167,6 +170,8 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
     # Using await (not asyncio.create_task) to ensure transactional consistency
     if message.event_type == OutboxEventType.SEND_CREDENTIALS:
         await execute_send_credentials_task(db, message.payload)
+        # Delivered (or deliberately not): the row must not keep the credential.
+        message.payload = redact_credentials(message.payload)
 
     elif message.event_type == OutboxEventType.SUBMISSION_REVIEWED:
         await execute_submission_reviewed_task(db, message.payload)
@@ -188,6 +193,8 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
 
     elif message.event_type == OutboxEventType.FEEDBACK_REQUEST_SENT:
         await execute_feedback_request_task(db, message.payload)
+        # The link token was sealed into the row for delivery only.
+        message.payload = redact_credentials(message.payload)
 
     elif message.event_type == OutboxEventType.QUIZ_DISPUTE_RESOLVED:
         await execute_quiz_dispute_resolved_task(db, message.payload)

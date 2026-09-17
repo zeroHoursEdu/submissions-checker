@@ -3,24 +3,33 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from jose import JWTError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from submissions_checker.api.dependencies import CurrentUser, DBSession
 from submissions_checker.core import metrics
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.i18n import get_vocab
-from submissions_checker.core.rate_limit import client_ip, get_login_limiter
+from submissions_checker.core.rate_limit import (
+    client_ip,
+    get_login_ip_limiter,
+    get_login_limiter,
+)
 from submissions_checker.core.security import (
     COOKIE_NAME,
     JWT_EXPIRY_HOURS,
+    MAX_PASSWORD_BYTES,
+    TokenError,
     create_access_token,
     decode_access_token,
+    dummy_password_hash,
     hash_password,
+    hash_token,
+    password_too_long,
     verify_password,
 )
 from submissions_checker.core.templates import render
@@ -69,7 +78,7 @@ async def login_page(request: Request) -> HTMLResponse:
             payload = decode_access_token(token)
             role = UserRole(payload["role"])
             return RedirectResponse(url=_redirect_by_role(role), status_code=302)  # type: ignore[return-value]
-        except (JWTError, KeyError, ValueError):
+        except (TokenError, KeyError, ValueError):
             pass
     return render(request, "login.html", {"current_user": None, "error": None})
 
@@ -82,8 +91,10 @@ async def login(
     password: str = Form(...),
 ) -> Response:
     limiter = get_login_limiter()
-    throttle_key = f"{client_ip(request)}|{username.strip().lower()}"
-    if limiter.is_blocked(throttle_key):
+    ip_limiter = get_login_ip_limiter()
+    ip = client_ip(request)
+    throttle_key = f"{ip}|{username.strip().lower()}"
+    if limiter.is_blocked(throttle_key) or ip_limiter.is_blocked(ip):
         return render(
             request,
             "login.html",
@@ -96,8 +107,12 @@ async def login(
     )
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(password, user.password_hash):
+    # Always run one bcrypt check, so an unknown username costs the same time as a
+    # wrong password. An over-long password is simply wrong (bcrypt caps at 72 bytes).
+    hashed = user.password_hash if user is not None else dummy_password_hash()
+    if not verify_password(password, hashed) or user is None:
         limiter.record_failure(throttle_key)
+        ip_limiter.record_failure(ip)
         return render(
             request,
             "login.html",
@@ -187,14 +202,26 @@ async def forgot_password(
     )
 
 
+async def _find_reset_token(db: DBSession, raw: str) -> PasswordResetToken | None:
+    """Match by hash; rows from before hashing (revision 0030) still match by value."""
+    result = await db.execute(
+        select(PasswordResetToken).where(
+            or_(
+                PasswordResetToken.token_hash == hash_token(raw),
+                PasswordResetToken.token == raw,
+            )
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 @router.get("/reset-password", response_class=HTMLResponse)
 async def reset_password_page(
     request: Request,
     token: str,
     db: DBSession,
 ) -> HTMLResponse:
-    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
-    prt = result.scalar_one_or_none()
+    prt = await _find_reset_token(db, token)
     valid = prt is not None and prt.is_valid()
     return render(
         request,
@@ -225,7 +252,7 @@ async def reset_password(
             status_code=422,
         )
 
-    if len(new_password) < 8:
+    if len(new_password) < 8 or password_too_long(new_password):
         return render(
             request,
             "reset_password.html",
@@ -233,14 +260,13 @@ async def reset_password(
                 "current_user": None,
                 "token": token,
                 "valid": True,
-                "error": "Password must be at least 8 characters.",
+                "error": (f"Password must be between 8 characters and {MAX_PASSWORD_BYTES} bytes."),
                 "success": False,
             },
             status_code=422,
         )
 
-    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token == token))
-    prt = result.scalar_one_or_none()
+    prt = await _find_reset_token(db, token)
     if prt is None or not prt.is_valid():
         return render(
             request,
@@ -254,6 +280,8 @@ async def reset_password(
         raise HTTPException(status_code=404)
 
     user.password_hash = hash_password(new_password)
+    # A reset is the moment a stolen session must stop working.
+    user.password_changed_at = datetime.now(UTC)
     prt.used = True
     await db.commit()
 
@@ -315,6 +343,8 @@ async def change_password(
         error = vocab.get("error_mismatch", "Passwords do not match.")
     elif len(new_password) < _MIN_PASSWORD_LEN:
         error = vocab.get("error_too_short", "Password must be at least 8 characters.")
+    elif password_too_long(new_password):
+        error = vocab.get("error_too_long", f"Password must be at most {MAX_PASSWORD_BYTES} bytes.")
     elif new_password == current_password:
         error = vocab.get("error_same_as_current", "Choose a different password.")
     if error is not None:
@@ -322,7 +352,11 @@ async def change_password(
             request, current_user, error=error, changed=False, status_code=422
         )
 
+    now = datetime.now(UTC)
     user.password_hash = hash_password(new_password)
+    # Every other session ends here; this one continues on a cookie minted at the
+    # same instant, so the person changing the password is not logged out.
+    user.password_changed_at = now
     await audit(
         db,
         action="change_password",
@@ -330,6 +364,10 @@ async def change_password(
         actor_username=current_user.username,
     )
     await db.commit()
-    return RedirectResponse(
+    response = RedirectResponse(
         url="/auth/change-password?changed=1", status_code=status.HTTP_303_SEE_OTHER
     )
+    _set_auth_cookie(
+        response, create_access_token(user.id, user.username, user.role.value, issued_at=now)
+    )
+    return response

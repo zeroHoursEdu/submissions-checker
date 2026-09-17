@@ -214,3 +214,21 @@ async def test_thanks_page_renders(client: AsyncClient) -> None:
     # Thanks page is a static render and does not validate the token.
     resp = await client.get("/feedback/anything/thanks")
     assert resp.status_code == 200
+
+
+# ── Hashed tokens ────────────────────────────────────────────────────────────
+
+
+async def test_feedback_form_opens_with_a_hashed_token(client: AsyncClient, db, teacher) -> None:
+    """New rows hold only the hash; the raw token from the e-mail still opens the form."""
+    from submissions_checker.core.security import hash_token
+
+    tok = await _make_feedback_token(db, teacher_id=teacher.id, token="placeholder")
+    tok.token = None
+    tok.token_hash = hash_token("raw-abc")
+    await db.commit()
+
+    assert (await client.get("/feedback/raw-abc")).status_code == 200
+    assert (await client.get("/feedback/raw-abd")).status_code == 404
+    resp = await client.post("/feedback/raw-abc", data=_VALID_FORM, follow_redirects=False)
+    assert resp.status_code == 303

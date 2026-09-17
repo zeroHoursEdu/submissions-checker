@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.api.dependencies import AdminUser, DBSession
+from submissions_checker.core.security import MAX_PASSWORD_BYTES, password_too_long
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import AuditLog, OutboxMessage, Semester, User
 from submissions_checker.db.models.enums import UserRole
@@ -85,11 +86,14 @@ async def create_teacher(
     password: str = Form(...),
 ) -> HTMLResponse | RedirectResponse:
     username = username.strip()
-    if len(password) < 8:
+    if len(password) < 8 or password_too_long(password):
         return render(
             request,
             "admin_create_teacher.html",
-            {"current_user": current_user, "error": "Password must be at least 8 characters."},
+            {
+                "current_user": current_user,
+                "error": f"Password must be between 8 characters and {MAX_PASSWORD_BYTES} bytes.",
+            },
             status_code=422,
         )
     existing = await db.execute(select(User.id).where(User.username == username))
