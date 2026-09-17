@@ -251,6 +251,47 @@
     </form>
   </div>
 
+  {% if subject.squad_max_size %}
+  {% if squad_flash == "assigned" %}
+  <div class="mb-4 px-4 py-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">{{ vocab.squad.teacher_flash_assigned }}</div>
+  {% elif squad_error %}
+  <div class="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{{ vocab.squad.teacher_flash_error.format(reason=vocab.squad.get("error_" ~ squad_error, squad_error)) }}</div>
+  {% endif %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6" data-squads>
+    <h2 class="font-semibold text-slate-900 mb-1">👥 {{ vocab.squad.teacher_section }}</h2>
+    <p class="text-sm text-slate-500 mb-4">{{ vocab.squad.teacher_assign_hint.format(n=subject.squad_max_size) }}</p>
+    {% if squads %}
+    <table class="w-full text-sm mb-5">
+      <thead><tr class="text-left text-xs uppercase text-slate-500">
+        <th class="py-1 pr-4">{{ vocab.squad.teacher_col_squad }}</th><th class="py-1 pr-4">{{ vocab.squad.teacher_col_members }}</th><th class="py-1">{{ vocab.squad.teacher_col_state }}</th>
+      </tr></thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for sq in squads %}
+        <tr>
+          <td class="py-2 pr-4 font-medium text-slate-900">{{ squad_display_name(sq) }}</td>
+          <td class="py-2 pr-4 text-slate-700">{{ sq.members | map(attribute="student.full_name") | sort | join(", ") }}</td>
+          <td class="py-2 text-xs">{% if sq.locked_at %}<span class="text-green-700">{{ vocab.squad.teacher_state_locked }}</span>{% else %}<span class="text-amber-700">{{ vocab.squad.teacher_state_pending }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-sm text-slate-400 mb-4">{{ vocab.squad.teacher_no_squads }}</p>
+    {% endif %}
+    {% if squad_candidates | length >= 2 %}
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/squads/assign" class="flex flex-col gap-3 max-w-md">
+      <select name="student_ids" multiple size="{{ [squad_candidates | length, 8] | min }}" class="text-sm border border-slate-300 rounded-lg px-3 py-2">
+        {% for s in squad_candidates %}<option value="{{ s.id }}">{{ s.full_name }}</option>{% endfor %}
+      </select>
+      <label class="text-xs font-medium text-slate-500">{{ vocab.squad.teacher_name_label }}
+        <input type="text" name="name" maxlength="100" class="block mt-1 text-sm border border-slate-300 rounded-lg px-3 py-1.5 w-full" />
+      </label>
+      <button type="submit" class="self-start px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">{{ vocab.squad.teacher_assign_button }}</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if current_user.user_id == subject.owner_id %}
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">

@@ -56,6 +56,7 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.group import Group
+from submissions_checker.services import squads
 from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
@@ -65,6 +66,7 @@ from submissions_checker.services.gradebook import (
 )
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
+from submissions_checker.services.squads import SquadError
 from submissions_checker.services.storage import StorageService
 from submissions_checker.utils.csv_export import csv_safe
 from submissions_checker.workers.tasks.notification_tasks import (
@@ -369,9 +371,40 @@ async def teacher_subject(
                 task_pending_counts.get(row.assignment_id, 0) + 1
             )
 
+    squad_list = []
+    squad_candidates: list[Student] = []
+    if subject.squad_max_size is not None:
+        squad_list = await squads.list_squads(db, subject_id)
+        enrolled = (
+            (
+                await db.execute(
+                    select(Student)
+                    .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
+                    .where(
+                        SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL
+                    )
+                    .order_by(Student.full_name)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for s in enrolled:
+            if await squads.eligibility(db, subject_id, s.id) is None:
+                squad_candidates.append(s)
+    squad_flash = request.query_params.get("squad")
+    squad_error = request.query_params.get("squad_error")
+
     default_tab = (
         "operations"
-        if (enroll_result or test_student_flash or feedback_sent or feedback_error)
+        if (
+            enroll_result
+            or test_student_flash
+            or feedback_sent
+            or feedback_error
+            or squad_flash
+            or squad_error
+        )
         else "panel"
     )
 
@@ -393,6 +426,11 @@ async def teacher_subject(
             "student_grid": student_grid,
             "task_pending_counts": task_pending_counts,
             "default_tab": default_tab,
+            "squads": squad_list,
+            "squad_candidates": squad_candidates,
+            "squad_flash": squad_flash,
+            "squad_error": squad_error,
+            "squad_display_name": squads.display_name,
         },
     )
 
@@ -1715,6 +1753,27 @@ async def unenroll_student(
         )
         await db.commit()
     return RedirectResponse(url=f"/teacher/subjects/{subject_id}", status_code=303)
+
+
+@router.post("/subjects/{subject_id}/squads/assign")
+async def assign_squad(
+    subject_id: int, request: Request, db: DBSession, current_user: TeacherUser
+) -> RedirectResponse:
+    await require_subject_access(db, subject_id, current_user)
+    form = await request.form()
+    student_ids = [
+        int(v) for v in form.getlist("student_ids") if isinstance(v, str) and v.isdigit()
+    ]
+    name = str(form.get("name") or "")
+    try:
+        await squads.teacher_assign(db, subject_id, current_user.user_id, student_ids, name)
+    except SquadError as exc:
+        await db.rollback()
+        return RedirectResponse(
+            url=f"/teacher/subjects/{subject_id}?squad_error={exc.reason}", status_code=303
+        )
+    await db.commit()
+    return RedirectResponse(url=f"/teacher/subjects/{subject_id}?squad=assigned", status_code=303)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
