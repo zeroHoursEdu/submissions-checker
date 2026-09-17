@@ -565,13 +565,17 @@ async def test_provision_test_student_creates_entities(client: AsyncClient, db, 
     assert resp.status_code == 303
     assert resp.headers["location"] == f"/teacher/subjects/{subject.id}?test_student=created"
 
-    # SubjectTestStudent row, with a stored plaintext password.
+    # SubjectTestStudent row; the password is never kept.
     sts = (
         await db.execute(
             select(SubjectTestStudent).where(SubjectTestStudent.subject_id == subject.id)
         )
     ).scalar_one()
-    assert sts.plain_password
+    assert sts.plain_password is None
+    # The subject page names the account but shows no password.
+    page = await client.get(f"/teacher/subjects/{subject.id}")
+    assert page.status_code == 200
+    assert "Password" not in page.text.split("Enter as Test Student")[0].split("Username")[-1]
 
     # The backing student is TEST-typed and in the __TEST__ group.
     student = (await db.execute(select(Student).where(Student.id == sts.student_id))).scalar_one()

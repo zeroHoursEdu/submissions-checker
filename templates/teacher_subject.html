@@ -263,15 +263,11 @@
 
     <div class="px-5 py-4">
       {% if test_student_info %}
-      <p class="text-sm text-slate-500 mb-4">Use these credentials to log in as the test student and verify your assignment setup. Stats and enrollment counts exclude this account.</p>
+      <p class="text-sm text-slate-500 mb-4">Enter the test student's account to verify your assignment setup. Stats and enrollment counts exclude this account.</p>
       <div class="flex flex-col sm:flex-row gap-3 mb-4">
         <div class="flex-1 bg-slate-50 rounded-lg border border-slate-200 px-4 py-3">
           <p class="text-xs text-slate-400 mb-1">Username</p>
           <p class="text-sm font-mono font-medium text-slate-800 select-all">{{ test_student_info.username }}</p>
-        </div>
-        <div class="flex-1 bg-slate-50 rounded-lg border border-slate-200 px-4 py-3">
-          <p class="text-xs text-slate-400 mb-1">Password</p>
-          <p class="text-sm font-mono font-medium text-slate-800 select-all">{{ test_student_info.plain_password }}</p>
         </div>
       </div>
       <form method="POST" action="/teacher/subjects/{{ subject.id }}/test-student/enter"

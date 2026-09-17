@@ -255,9 +255,9 @@ async def provision_test_student(
             )
         )
 
-    db.add(
-        SubjectTestStudent(subject_id=subject_id, student_id=student.id, plain_password=password)
-    )
+    # The password is never stored: the teacher enters the account through the
+    # "enter as test student" button, which mints a session directly.
+    db.add(SubjectTestStudent(subject_id=subject_id, student_id=student.id))
     await db.commit()
 
     return RedirectResponse(f"/teacher/subjects/{subject_id}?test_student=created", status_code=303)
@@ -332,10 +332,7 @@ async def teacher_subject(
         )
         sts_row = sts_result.one_or_none()
         if sts_row is not None:
-            test_student_info = {
-                "username": sts_row.username,
-                "plain_password": sts_row.SubjectTestStudent.plain_password,
-            }
+            test_student_info = {"username": sts_row.username}
 
     test_student_flash = request.query_params.get("test_student")
 
