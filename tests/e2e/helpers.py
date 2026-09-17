@@ -49,24 +49,40 @@ def wait_for_submission_status(submission_id: int, expected: str, timeout: int =
         conn.close()
 
 
-def get_student_credentials_from_outbox(email: str) -> dict | None:
-    """Read student credentials from outbox_messages (plaintext password stored in payload)."""
+def provision_student_credentials(email: str) -> dict | None:
+    """Give the student account behind *email* a fresh known password and return it.
+
+    Credentials are e-mailed once and never kept readable in the database (the
+    outbox row holds them sealed until sent, then a placeholder), so a test cannot
+    read them back. It can do what a teacher would: rotate the password. Returns
+    None when no account exists for the address yet.
+    """
+    import secrets
+
+    import bcrypt
+
     conn = db_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT payload
-                FROM outbox_messages
-                WHERE event_type = 'SEND_CREDENTIALS'
-                  AND payload->>'student_email' = %s
-                ORDER BY id DESC
-                LIMIT 1
+                SELECT u.id, u.username
+                FROM users u JOIN students s ON s.id = u.student_id
+                WHERE s.email = %s
                 """,
                 (email,),
             )
             row = cur.fetchone()
-            return row[0] if row else None
+            if row is None:
+                return None
+            user_id, username = row
+            password = secrets.token_urlsafe(9)
+            password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(4)).decode()
+            cur.execute(
+                "UPDATE users SET password_hash = %s WHERE id = %s", (password_hash, user_id)
+            )
+        conn.commit()
+        return {"username": username, "password": password}
     finally:
         conn.close()
 

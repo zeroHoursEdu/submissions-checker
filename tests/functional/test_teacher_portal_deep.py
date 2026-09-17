@@ -168,7 +168,9 @@ async def test_global_import_creates_student_user_group_and_outbox(
     assert len(users) == 2
     assert {u.username for u in users} == {"ivan.petrenko", "olena.kovalenko"}
 
-    # Two SEND_CREDENTIALS outbox rows carrying the plaintext password.
+    # Two SEND_CREDENTIALS outbox rows carrying the password sealed, never in clear.
+    from submissions_checker.core.sealed import unseal
+
     creds = (
         (
             await db.execute(
@@ -183,7 +185,8 @@ async def test_global_import_creates_student_user_group_and_outbox(
     assert len(creds) == 2
     for c in creds:
         assert c.payload["student_email"] in {"ivan@example.com", "olena@example.com"}
-        assert c.payload["password"]
+        assert "password" not in c.payload
+        assert unseal(c.payload["password_sealed"])
         assert c.payload["username"] in {"ivan.petrenko", "olena.kovalenko"}
 
 

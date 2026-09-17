@@ -24,6 +24,7 @@ from submissions_checker.api.dependencies import AppSettings, DBSession, Teacher
 from submissions_checker.api.routes.teacher_disputes import count_open_disputes
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
+from submissions_checker.core.sealed import seal
 from submissions_checker.core.security import COOKIE_NAME, create_access_token
 from submissions_checker.core.state_machine import InvalidTransitionError, transition
 from submissions_checker.core.templates import render
@@ -1017,7 +1018,7 @@ async def teacher_resend_credentials(
                     "student_email": student.email,
                     "full_name": student.full_name,
                     "username": user.username,
-                    "password": password,
+                    "password_sealed": seal(password),
                 },
             )
         )
@@ -1116,7 +1117,7 @@ async def import_students(
                 "student_email": email,
                 "full_name": full_name,
                 "username": username,
-                "password": password,
+                "password_sealed": seal(password),
             },
         )
         db.add(outbox)
@@ -1883,7 +1884,7 @@ async def add_student(
                 "student_email": email,
                 "full_name": full_name,
                 "username": username,
-                "password": password,
+                "password_sealed": seal(password),
             },
         )
     )

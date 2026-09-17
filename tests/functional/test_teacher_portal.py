@@ -1204,7 +1204,11 @@ async def test_resend_credentials_rotates_password_and_enqueues_email(
     )
     assert creds[-1].payload["student_email"] == "resend@example.com"
     assert creds[-1].payload["username"] == "resend-me"
-    assert creds[-1].payload["password"]
+    # The password waits in the row sealed, never in clear.
+    from submissions_checker.core.sealed import unseal
+
+    assert "password" not in creds[-1].payload
+    assert unseal(creds[-1].payload["password_sealed"])
 
 
 async def test_resend_credentials_skips_students_outside_scope(

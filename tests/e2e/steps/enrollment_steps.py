@@ -8,7 +8,7 @@ from pytest_bdd import given, parsers, then, when
 
 from tests.e2e.helpers import (
     STUDENT_EMAIL,
-    get_student_credentials_from_outbox,
+    provision_student_credentials,
 )
 from tests.e2e.helpers import (
     db_conn as _db_conn,
@@ -66,7 +66,7 @@ def ensure_student_enrolled(page, app_url: str, e2e_context: dict, teacher_accou
     assert subject_id, "subject_id not in context"
 
     # Try to get credentials first (enrollment may have already happened in a prior test)
-    creds = get_student_credentials_from_outbox(STUDENT_EMAIL)
+    creds = provision_student_credentials(STUDENT_EMAIL)
     if creds:
         e2e_context["student_username"] = creds["username"]
         e2e_context["student_password"] = creds["password"]
@@ -83,7 +83,7 @@ def ensure_student_enrolled(page, app_url: str, e2e_context: dict, teacher_accou
         lp.login(teacher_account["username"], teacher_account["password"])
         _do_enrollment(page, app_url, subject_id)
         time.sleep(1)
-        creds = get_student_credentials_from_outbox(STUDENT_EMAIL)
+        creds = provision_student_credentials(STUDENT_EMAIL)
         if creds:
             e2e_context["student_username"] = creds["username"]
             e2e_context["student_password"] = creds["password"]
@@ -97,7 +97,7 @@ def student_enrolled_via_csv(
 ) -> None:
     subject_id = e2e_context.get("subject_id")
     assert subject_id, "subject_id not in context"
-    if not get_student_credentials_from_outbox(email):
+    if not provision_student_credentials(email):
         from tests.e2e.pages.login_page import LoginPage
 
         lp = LoginPage(page, app_url)
@@ -138,8 +138,8 @@ def assert_student_in_enrolled_list(page, app_url: str, e2e_context: dict, full_
 
 @then("I can retrieve their login credentials from the system")
 def retrieve_credentials(e2e_context: dict) -> None:
-    creds = get_student_credentials_from_outbox(STUDENT_EMAIL)
-    assert creds is not None, f"No credentials found in outbox for {STUDENT_EMAIL}"
+    creds = provision_student_credentials(STUDENT_EMAIL)
+    assert creds is not None, f"No student account found for {STUDENT_EMAIL}"
     e2e_context["student_username"] = creds["username"]
     e2e_context["student_password"] = creds["password"]
 

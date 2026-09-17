@@ -714,13 +714,16 @@ async def test_send_credentials_dispatches_email(
     dispatcher = _FakeDispatcher()
     _patch_dispatcher(monkeypatch, send_credentials_tasks, dispatcher)
 
+    from submissions_checker.core import sealed
+
+    monkeypatch.setattr(sealed, "_secret_key", lambda: test_settings.secret_key)
     message = OutboxMessage(
         event_type=OutboxEventType.SEND_CREDENTIALS,
         payload={
             "student_email": "newbie@e.com",
             "full_name": "New Bie",
             "username": "newbie",
-            "password": "s3cret",
+            "password_sealed": sealed.seal("s3cret"),
         },
     )
     message = await _process(db_session, monkeypatch, message)
@@ -730,6 +733,58 @@ async def test_send_credentials_dispatches_email(
     recipient, _subject, body = dispatcher.sent[0]
     assert recipient == "newbie@e.com"
     assert "newbie" in body and "s3cret" in body
+    # Once delivered, the row no longer holds the secret in any form.
+    assert message.payload["password_sealed"] == "<sent>"
+    assert "password" not in message.payload
+
+
+@pytest.mark.asyncio
+async def test_send_credentials_legacy_plaintext_is_sent_then_redacted(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    """A row written before sealing still delivers, and is scrubbed afterwards."""
+    monkeypatch.setattr(send_credentials_tasks, "get_settings", lambda: test_settings)
+    dispatcher = _FakeDispatcher()
+    _patch_dispatcher(monkeypatch, send_credentials_tasks, dispatcher)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.SEND_CREDENTIALS,
+        payload={
+            "student_email": "old@e.com",
+            "full_name": "Old Row",
+            "username": "oldrow",
+            "password": "legacy-pw",
+        },
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    assert "legacy-pw" in dispatcher.sent[0][2]
+    assert message.payload["password"] == "<sent>"
+
+
+@pytest.mark.asyncio
+async def test_send_credentials_unopenable_seal_fails_the_message(
+    db_session: AsyncSession, test_settings, monkeypatch
+) -> None:
+    """Sealed under another key: nothing is sent and the message goes to ERROR for retry."""
+    monkeypatch.setattr(send_credentials_tasks, "get_settings", lambda: test_settings)
+    dispatcher = _FakeDispatcher()
+    _patch_dispatcher(monkeypatch, send_credentials_tasks, dispatcher)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.SEND_CREDENTIALS,
+        payload={
+            "student_email": "x@e.com",
+            "full_name": "X",
+            "username": "x",
+            "password_sealed": "sealed:not-openable",
+        },
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.ERROR
+    assert dispatcher.sent == []
 
 
 @pytest.mark.asyncio
@@ -740,6 +795,10 @@ async def test_send_credentials_no_channel_is_silent(
     monkeypatch.setattr(send_credentials_tasks, "get_settings", lambda: test_settings)
     dispatcher = _FakeDispatcher(with_channel=False)
     _patch_dispatcher(monkeypatch, send_credentials_tasks, dispatcher)
+    from submissions_checker.core import sealed
+
+    monkeypatch.setattr(sealed, "_secret_key", lambda: test_settings.secret_key)
+    sealed_pw = sealed.seal("pw")
 
     message = OutboxMessage(
         event_type=OutboxEventType.SEND_CREDENTIALS,
@@ -747,13 +806,15 @@ async def test_send_credentials_no_channel_is_silent(
             "student_email": "nobody@e.com",
             "full_name": "No Body",
             "username": "nobody",
-            "password": "pw",
+            "password_sealed": sealed_pw,
         },
     )
     message = await _process(db_session, monkeypatch, message)
 
     assert message.state == OutboxMessageState.FINISHED
     assert dispatcher.sent == []
+    # Not delivered, but not kept either: the row is an audit trail, not a vault.
+    assert message.payload["password_sealed"] == "<sent>"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
