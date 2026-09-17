@@ -14,7 +14,7 @@
 # Docker CLI only (the daemon is the host's, reached over the mounted socket).
 FROM docker:29-cli AS dockercli
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Debian security fixes published after the base image was cut.
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
