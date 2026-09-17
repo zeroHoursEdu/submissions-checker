@@ -102,6 +102,7 @@ async def test_invite_accept_locks_at_max_and_cancels_other_invites(db_session) 
     locked = await squads.accept_invite(db_session, inv.id, b.id)
     assert locked.locked_at is not None
     assert {m.student_id for m in locked.members} == {a.id, b.id}
+    assert {m.student.full_name for m in locked.members} == {"S0", "S1"}
     other_inv = (
         await db_session.execute(
             SquadInvite.__table__.select().where(SquadInvite.squad_id == other.id)

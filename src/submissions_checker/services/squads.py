@@ -335,7 +335,11 @@ async def _load_invite(db: AsyncSession, invite_id: int) -> SquadInvite:
     inv = await db.get(
         SquadInvite,
         invite_id,
-        options=[selectinload(SquadInvite.squad).selectinload(Squad.members)],
+        options=[
+            selectinload(SquadInvite.squad)
+            .selectinload(Squad.members)
+            .selectinload(SquadMember.student)
+        ],
     )
     if inv is None or inv.status != SquadInviteStatus.PENDING:
         raise SquadError("not_pending")
