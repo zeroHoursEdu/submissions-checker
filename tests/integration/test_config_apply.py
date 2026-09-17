@@ -763,8 +763,10 @@ async def test_reapplying_an_older_config_is_accepted(
     assert title == "Lab 1"
 
 
-async def test_apply_writes_and_clears_squad_max_size(db_session: AsyncSession) -> None:
-    svc = ConfigApplyService(storage=None, plugins_dir=Path("/tmp/plugins-test"))
+async def test_apply_writes_and_clears_squad_max_size(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
     owner = User(username="own", password_hash="x", role=UserRole.TEACHER, is_active=True)
     db_session.add(owner)
     await db_session.flush()
