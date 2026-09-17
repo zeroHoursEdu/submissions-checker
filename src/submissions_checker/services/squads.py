@@ -188,12 +188,22 @@ async def eligible_classmates(db: AsyncSession, subject_id: int, student_id: int
     return list(result.scalars().all())
 
 
-async def in_forming_squad(db: AsyncSession, subject_id: int, student_id: int) -> bool:
-    """True when the student is a member of a squad that has not yet locked — the
-    window where accepting/cancelling an invite could still change who a solo upload
-    would cover, so uploads are blocked outright."""
+async def squad_has_pending_invites(db: AsyncSession, subject_id: int, student_id: int) -> bool:
+    """True when the student's own squad (locked or still forming) has ANY PENDING
+    invite outstanding, whoever it's between — accepting or declining it could still
+    change who the squad's next submission covers, so uploads are blocked until it
+    resolves. Unlike `has_pending_invites`, this catches an invite the student is
+    neither the sender nor the recipient of (e.g. A invited B and C; B joined; C's
+    invite is still pending — B's own squad is still unsettled)."""
     squad = await squad_of(db, subject_id, student_id)
-    return squad is not None and squad.locked_at is None
+    if squad is None:
+        return False
+    count = await db.scalar(
+        select(func.count(SquadInvite.id)).where(
+            SquadInvite.squad_id == squad.id, SquadInvite.status == SquadInviteStatus.PENDING
+        )
+    )
+    return bool(count)
 
 
 async def has_pending_invites(db: AsyncSession, subject_id: int, student_id: int) -> bool:
@@ -302,6 +312,12 @@ async def _cancel_pending_of(
         inv.status = SquadInviteStatus.CANCELLED
         affected[inv.squad_id] = inv.squad
 
+    # The app session is autoflush=False (core/database.py) — without an explicit
+    # flush here, `_delete_if_empty`'s plain SELECT COUNT of PENDING invites below
+    # would still see the CANCELLED-in-memory-only rows as PENDING at the DB level,
+    # and never delete anything.
+    await db.flush()
+
     # The squad behind exclude_invite_id is mid-transaction in the caller (e.g. the
     # member just joined it, or it is being formed) — its membership hasn't settled,
     # so it is never safe to judge empty or delete from inside this sweep.
@@ -313,8 +329,11 @@ async def _cancel_pending_of(
     for squad_id, squad in affected.items():
         if squad_id == excluded_squad_id:
             continue
-        if await _delete_if_empty(db, squad) and squad.created_by_student_id is not None:
-            await _notify_student(db, squad.created_by_student_id, "cancelled", subject_id)
+        # Captured before _delete_if_empty, which may db.delete(squad) — read the
+        # attribute off a row still known-live rather than a possibly-deleted one.
+        creator_id = squad.created_by_student_id
+        if await _delete_if_empty(db, squad) and creator_id is not None:
+            await _notify_student(db, creator_id, "cancelled", subject_id)
 
 
 async def _delete_if_empty(db: AsyncSession, squad: Squad) -> bool:

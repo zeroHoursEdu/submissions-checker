@@ -129,12 +129,18 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
     This fixture provides a database session for each test and automatically
     rolls back changes after the test completes.
 
+    ``autoflush=False`` matches the production session factory
+    (``core.database.get_session_factory``) — a test running against the default
+    autoflush=True would not catch a service function that relies on an implicit
+    flush to see its own in-memory writes via a later plain SELECT (see the squads
+    I4 fix wave: ``_cancel_pending_of`` needed an explicit flush for exactly this).
+
     Args:
         test_engine: Test database engine
 
     Yields:
         Database session
     """
-    async with AsyncSession(test_engine, expire_on_commit=False) as session:
+    async with AsyncSession(test_engine, expire_on_commit=False, autoflush=False) as session:
         yield session
         await session.rollback()

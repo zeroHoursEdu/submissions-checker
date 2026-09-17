@@ -253,3 +253,47 @@ async def test_member_of_unlocked_squad_cannot_upload_solo(
             files={"file": ("r.zip", _zip(), "application/zip")},
         )
         assert r.status_code == 409
+
+
+async def test_settled_unlocked_squad_can_upload_and_locks(
+    db, make_user, make_student, teacher
+) -> None:
+    """I3 follow-up: A invites B and C into a squad_max_size=3 squad; B accepts
+    (2/3, unlocked); C then declines — the squad settles at 2 members with no
+    pending invites left, but never fills to 3 so it never locks on its own. It
+    must not be stuck forever: B's upload succeeds and locks it at that moment."""
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(
+        db, make_user, make_student, teacher, max_size=3
+    )
+    uc_student = await make_student(full_name="Carla C")
+    uc = await make_user(role=UserRole.STUDENT, username="carla", student=uc_student)
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=uc.student_id))
+    db.add(StudentAssignment(student_id=uc.student_id, subjects_assignment_id=asg.id))
+    await db.commit()
+
+    await squads.create_with_invites(db, subject.id, ua.student_id, [ub.student_id, uc.student_id])
+    await db.commit()
+    inv_b_id = await db.scalar(
+        select(SquadInvite.id).where(SquadInvite.invited_student_id == ub.student_id)
+    )
+    inv_c_id = await db.scalar(
+        select(SquadInvite.id).where(SquadInvite.invited_student_id == uc.student_id)
+    )
+    await squads.accept_invite(db, inv_b_id, ub.student_id)
+    await db.commit()
+    await squads.decline_invite(db, inv_c_id, uc.student_id)
+    await db.commit()
+
+    squad = await squads.squad_of(db, subject.id, ub.student_id)
+    assert squad is not None and squad.locked_at is None  # settled at 2, still unlocked
+
+    async with _client(ub) as cb:
+        r = await cb.post(
+            f"/portal/subjects/{subject.id}/assignments/{sa_b.id}/submit",
+            files={"file": ("r.zip", _zip(), "application/zip")},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+
+    await db.refresh(squad)
+    assert squad.locked_at is not None

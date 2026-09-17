@@ -531,12 +531,15 @@ async def submit_assignment(
                 status_code=409,
                 detail="Squad invitation pending; answer or cancel it before submitting.",
             )
-        if await squads.in_forming_squad(db, subjects_assignment.subject_id, student_id):
+        if await squads.squad_has_pending_invites(db, subjects_assignment.subject_id, student_id):
             raise HTTPException(
                 status_code=409,
-                detail="Squad not yet locked; wait until it fills before submitting.",
+                detail="Squad invitation pending; answer or cancel it before submitting.",
             )
-        squad = await squads.active_squad(db, subjects_assignment.subject_id, student_id)
+        # Any lock state, not just locked: an unlocked squad with no pending invites
+        # left is settled (nothing can still change who it covers) and may submit —
+        # lock_on_submit() below locks it at the moment of that first upload.
+        squad = await squads.squad_of(db, subjects_assignment.subject_id, student_id)
     scope = await squads.member_sa_ids(db, squad, subjects_assignment.id) if squad else [sa_id]
 
     # Block re-submission once the assignment is already passed
