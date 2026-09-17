@@ -76,6 +76,9 @@ def ensure_student_enrolled(page, app_url: str, e2e_context: dict, teacher_accou
         from tests.e2e.pages.login_page import LoginPage
 
         lp = LoginPage(page, app_url)
+        # The subject step may have left a teacher session on this page; a signed-in
+        # visitor is redirected away from the login form, so clear it first.
+        lp.logout()
         lp.navigate()
         lp.login(teacher_account["username"], teacher_account["password"])
         _do_enrollment(page, app_url, subject_id)
@@ -98,6 +101,9 @@ def student_enrolled_via_csv(
         from tests.e2e.pages.login_page import LoginPage
 
         lp = LoginPage(page, app_url)
+        # The subject step may have left a teacher session on this page; a signed-in
+        # visitor is redirected away from the login form, so clear it first.
+        lp.logout()
         lp.navigate()
         lp.login(teacher_account["username"], teacher_account["password"])
         _do_enrollment(page, app_url, subject_id)
