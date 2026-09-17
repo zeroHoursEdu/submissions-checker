@@ -136,6 +136,28 @@ async def test_decline_and_cancel(db, make_user, make_student) -> None:
         assert (await db.execute(select(Squad))).scalars().all() == []
 
 
+async def test_pending_card_and_error_banner_render(db, make_user, make_student) -> None:
+    subject, asg = await _subject(db)
+    ua, ub = await _pair(db, make_user, make_student, subject, asg)
+    async with _client(ua) as ca:
+        page = await ca.post(
+            f"/portal/subjects/{subject.id}/squad/create",
+            data={"invitee_ids": [str(ub.student_id)]},
+            follow_redirects=True,
+        )
+        assert "Очікуємо відповіді:" in page.text
+        assert "Bohdan B" in page.text
+        assert "Скасувати запрошення" in page.text
+        assert "Здача заблокована" in page.text
+
+        page2 = await ca.post(
+            f"/portal/subjects/{subject.id}/squad/create",
+            data={"invitee_ids": [str(ub.student_id)]},
+            follow_redirects=True,
+        )
+        assert "Ви вже у сквaді" in page2.text
+
+
 async def test_card_absent_when_subject_has_no_squads(db, make_user, make_student) -> None:
     subject, asg = await _subject(db, max_size=None)
     ua, _ = await _pair(db, make_user, make_student, subject, asg)

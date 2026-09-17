@@ -74,9 +74,11 @@
     <p class="text-sm text-amber-700 mt-2">{{ vocab.squad.waiting_for }}
       {% for inv in pending.outgoing %}
         {{ inv.invited_student.full_name }}
+        {% if pending.squad.created_by_student_id == student.id %}
         <form method="POST" action="/portal/subjects/{{ subject.id }}/squad/invites/{{ inv.id }}/cancel" class="inline">
           <button type="submit" class="text-xs underline text-slate-500 hover:text-red-700">{{ vocab.squad.cancel }}</button>
-        </form>{% if not loop.last %}, {% endif %}
+        </form>
+        {% endif %}{% if not loop.last %}, {% endif %}
       {% endfor %}
     </p>
     <p class="text-xs text-slate-400 mt-1">{{ vocab.squad.submit_blocked_pending }}</p>
