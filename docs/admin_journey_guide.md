@@ -24,7 +24,7 @@ The system has three account roles. Yours is the most privileged.
 |---|---|
 | **STUDENT** | The student portal only — see [student_journey_guide.md](student_journey_guide.md). |
 | **TEACHER** | Subject-scoped teaching features, but only on subjects they own — see [teacher_journey_guide.md](teacher_journey_guide.md). |
-| **ADMIN** | Everything a teacher can do on **any** subject, **plus** account management (create teachers, activate/deactivate accounts, read the audit log) **plus** the platform analytics and anti-cheat / fraud dashboards. |
+| **ADMIN** | Everything a teacher can do on **any** subject, **plus** account management (create teachers, activate/deactivate accounts, read the audit log) **plus** the semester calendar. |
 
 ### Two privileges that are unique to ADMIN
 
@@ -36,17 +36,14 @@ The system has three account roles. Yours is the most privileged.
    profile, regardless of who owns it. This is intentional — an admin is the platform-wide
    operator — but it means you should treat that power carefully.
 
-2. **The aggregate analytics dashboards.** The platform-overview and fraud dashboards
-   (described below) query across **every** teacher's subjects and students. They are
-   locked to ADMIN today precisely because the queries are not yet scoped per teacher.
+2. **Platform-wide configuration.** Teacher accounts and the semester calendar (which gates
+   course feedback) are created and edited only here.
 
 ### How role checks are enforced
 
 Every admin page depends on the `AdminUser` guard (`_require_admin` in
 `api/dependencies.py`). It first authenticates you from the session cookie, then checks
-`role == ADMIN`; anyone who is not an admin gets **403 "Admin access required"**. The two
-analytics dashboards reuse the same `AdminUser` guard; the single-student profile uses the
-looser `TeacherUser` guard with an extra ownership check (see §6.3).
+`role == ADMIN`; anyone who is not an admin gets **403 "Admin access required"**.
 
 > **There is no public admin sign-up**, just as there is none for teachers. Admin accounts
 > are seeded directly in the database / at deployment. From an admin account you create the
@@ -63,13 +60,8 @@ looser `TeacherUser` guard with an extra ownership check (see §6.3).
 | 3 | Activate / deactivate a user | `POST /admin/users/{id}/toggle-active` | — | ADMIN | `toggle_user_active` (target user id + new state) | Account's `is_active` flips; inactive accounts can no longer log in |
 | 4 | Create teacher account | `GET` then `POST /admin/teachers/create` | username + password (≥ 8 chars) | ADMIN | `create_teacher` (new username) | A new TEACHER account is created |
 | 5 | Read the audit log | `GET /admin/audit` | — | ADMIN | — | Up to 200 most recent recorded actions, newest first |
-| 6 | Platform analytics overview | `GET /teacher/analytics` | — | **ADMIN only** | — | Headline stats, grade histogram, per-subject + difficulty tables, exhausted-quiz failures |
-| 7 | Fraud / anti-cheat dashboard | `GET /teacher/analytics/fraud` | — | **ADMIN only** | — | Risk-scored integrity signals + login-activity overview |
-| 8 | Single-student profile | `GET /teacher/analytics/students/{id}` | — | TEACHER (own students) / ADMIN (any) | — | One student's cross-subject grades, timeline, login stats |
+| 6 | Semesters | `GET /admin/semesters`, `POST /admin/semesters`, `POST /admin/semesters/{id}` | name, season, start/end dates | ADMIN | `create_semester`, `update_semester` | Calendar that gates course feedback; overlaps refused |
 | — | *All teacher features* | `…/teacher/*` etc. | as per the teacher guide | inherited, on **any** subject | as per teacher guide | object-level ownership check is bypassed for you |
-
-> The analytics dashboards (#6, #7) being **ADMIN only** is a current limitation, not a
-> deliberate design — see [the note on per-teacher scoping](#a-note-on-per-teacher-scoping).
 
 ---
 
@@ -206,76 +198,17 @@ refused with a message. Every change is audited (`create_semester`, `update_seme
 
 ---
 
-## 7. Platform analytics and academic-integrity reports
+## 7. Where the numbers live now
 
-These three reports live under the `/teacher/analytics` prefix but, today, **two of the
-three require an ADMIN account**. They are the same pages referenced in the teacher guide;
-this section documents them from the admin's seat, which is the only seat that can open the
-aggregate two.
+The in-app analytics pages were removed in favour of two things that already exist:
 
-### 6.1 Platform overview — `GET /teacher/analytics` (ADMIN only)
-
-**What it does.** Platform-wide performance reporting, aggregated across **all** teachers'
-subjects. It includes:
-
-- **Headline scalars:** total distinct enrolled students, count of subjects, overall
-  average grade (rounded), and pass rate (the share of graded student-assignments whose
-  grade meets the assignment's `min_grade`).
-- **Per-subject table:** for each subject — enrolled count, graded count, average grade,
-  and number of assignments.
-- **Assignment-difficulty ranking:** every assignment with enrolled/submitted counts,
-  average grade, and min/max achieved — ordered **hardest first** (lowest average grade,
-  nulls last).
-- **Grade distribution histogram:** graded results bucketed into 10-point bands
-  (0–9, 10–19, … 100).
-- **Exhausted-quiz failures:** students who used up **all** their allowed quiz attempts
-  (`max_quiz_attempts` from each attempt's config snapshot) without ever passing — with the
-  student, group, assignment, subject, attempts used, and last-attempt timestamp.
-
-**Permission.** **ADMIN only** (the route's `current_user` is the `AdminUser` guard, with a
-`TODO security` noting it will be scoped per teacher later).
-
-### 6.2 Fraud / anti-cheat dashboard — `GET /teacher/analytics/fraud` (ADMIN only)
-
-**What it does.** Surfaces **risk-scored integrity signals** across all students. These are
-*signals, not proof* — they highlight patterns worth a human look.
-
-| Flag | Trigger | Risk points |
-|---|---|---|
-| **Late first login + high grade** | A student's first-ever login falls within the 24 hours **before** an assignment deadline (and at or before it), and their grade is ≥ 80% of the assignment max. | +3 |
-| **Few logins + high average grade** | Fewer than **3** total logins, yet an average grade ≥ **75**. | +2 |
-| **Single-day submission burst** | **3 or more** submissions, all on the **same** calendar day. | +2 |
-
-Risk points accumulate per student into a score; the template renders bands such as
-**Low (1–2)**, **Medium (3–4)**, **High (5+)**. The page also shows a **login-activity
-overview** of every student (login count, first and last login) — students who have
-**never logged in** float to the top.
-
-**Permission.** **ADMIN only** (same `AdminUser` guard and `TODO security` as the
-overview).
-
-### 6.3 Single-student profile — `GET /teacher/analytics/students/{id}` (teachers allowed)
-
-**What it does.** One student's cross-subject profile: per-subject summaries
-(enrolled date, total/graded assignments, average grade, submission count), a **grade
-timeline** chart (graded assignments by deadline, with min/max bands), a full
-all-assignments table, and **login statistics** (count, first and last login).
-
-**Permission and authorization.** This page uses the looser **`TeacherUser`** guard, so a
-non-admin teacher *can* open it — **but only for a student enrolled in at least one subject
-that teacher owns**; otherwise they get **403 "Not authorized for this student"**. **As an
-admin, that object-level check is skipped** — you can open *any* student's profile by id
-(a missing id gives 404).
-
-### A note on per-teacher scoping
-
-The overview and fraud dashboards (§6.1, §6.2) intentionally query across **every**
-teacher's data, which is why they are gated to ADMIN until the queries are scoped to the
-requesting teacher's own subjects. The code carries a tracked `TODO security` for exactly
-this. In the meantime: the aggregate dashboards are an **admin-only** tool, while any
-individual student profile (§6.3) is reachable by the owning teacher as well as by you.
-
----
+- **Per subject, in the app:** the teacher's **Панель** tab shows the cached stat cards
+  (average mark, pass %, pending review, cheating %), the assignment board shows integrity
+  flags, AI-review badges and evidence thumbnails, the review page shows the full AI verdict
+  and every proctoring frame, and **Звіт схожості** lists who matches whom. As ADMIN you see
+  all of this on every subject.
+- **Platform-wide, in Grafana:** request, outbox, check, AI-review and email counters plus
+  DB-derived gauges (`docs/observability.md`).
 
 ## 8. Everything a teacher can do — on any subject
 

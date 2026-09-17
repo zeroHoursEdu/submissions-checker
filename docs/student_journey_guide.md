@@ -42,7 +42,7 @@ A few things that are true throughout the system, and matter to you:
 |---|---|---|---|
 | Log in | `/auth/login` | You, with your account | A signed-in session (lasts 8 hours) |
 | Reset a forgotten password | `/auth/forgot-password` → emailed link | Anyone with an account | A new password you choose |
-| Choose interface language | language switch (`/set-language`) | Anyone | English or Ukrainian UI, remembered for a year |
+| Change password | header → Пароль (`/auth/change-password`) | Signed-in student | current password + new one twice; audited |
 | Give proctoring consent | `/portal/consent` | You (once) | Permission to take proctored quizzes |
 | See all your subjects | `/portal` | You | A grid of enrolled subjects with progress |
 | See your overall standing | `/portal/summary` | You | Average grade, upcoming and overdue work |
@@ -83,16 +83,16 @@ suspicious patterns (for example, the same account logging in from many places a
    not match, or the password is too short, you are asked to try again.
 5. On success you can log in with the new password.
 
+### Changing your password
+
+You receive a generated password by email. Once signed in, open **Пароль** in the header
+(`/auth/change-password`), enter the current password and a new one (at least 8 characters,
+typed twice). The change is immediate and audited. Ten wrong passwords in fifteen minutes
+lock the login form for that username for the rest of the window.
+
 ---
 
-## 2. Choosing your language (optional)
-
-The interface is available in **English** and **Ukrainian**. Use the language switcher to
-change it. Your choice is stored in your browser for a year, so you only set it once.
-
----
-
-## 3. Proctoring consent (one-time)
+## 2. Proctoring consent (one-time)
 
 The first time you open your portal, you are asked to read and accept a **recording /
 proctoring notice** (`/portal/consent`). This explains that, for quizzes, the system may
@@ -105,7 +105,7 @@ monitor for cheating and — if your teacher enables it — capture webcam frame
 
 ---
 
-## 4. Finding your subjects and assignments
+## 3. Finding your subjects and assignments
 
 ### Your subjects (`/portal`)
 
@@ -146,7 +146,7 @@ This is the main working page for a task. It shows:
 
 ---
 
-## 5. Submitting your work (ZIP upload)
+## 4. Submitting your work (ZIP upload)
 
 You submit work as a single **ZIP file**.
 
@@ -178,7 +178,7 @@ background worker, which runs the actual checks.
 
 ---
 
-## 6. Watching your submission get checked
+## 5. Watching your submission get checked
 
 Refresh the assignment page to follow your submission through these stages. The exact path
 depends on how the teacher configured the assignment (its *review mode*):
@@ -205,7 +205,7 @@ others show only pass/fail. If a check explains *why* it failed, that reason is 
 
 ---
 
-## 7. Taking a quiz (when an assignment requires one)
+## 6. Taking a quiz (when an assignment requires one)
 
 Some assignments require you to pass a short quiz after your code passes its tests.
 
@@ -263,7 +263,7 @@ teacher enabled that option** for the quiz.
 
 ---
 
-## 8. Seeing results and grades
+## 7. Seeing results and grades
 
 - A final grade appears on the subject and assignment pages once your submission reaches
   **completed**, or once a teacher assigns a grade by hand.
@@ -271,7 +271,11 @@ teacher enabled that option** for the quiz.
 
 ---
 
-## 9. Notifications
+## 8. Notifications
+
+A **deadline reminder** email goes out once per assignment, two days before the deadline, to
+every enrolled student who has not submitted yet. Turn it off per account under
+**Налаштування → Deadline Reminder**.
 
 ### Your inbox (`/notifications`)
 
@@ -297,7 +301,7 @@ always available regardless of the email setting.
 
 ---
 
-## 10. Giving course feedback
+## 9. Giving course feedback
 
 At the end of a course (or whenever the teacher asks), you may receive a **feedback link** by
 email.

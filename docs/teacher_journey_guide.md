@@ -18,7 +18,7 @@ The system has three account roles. Your capabilities depend on your role.
 | Role | What it can do |
 |---|---|
 | **TEACHER** | Everything in this guide that is scoped to *subjects you own*: apply subject configs, enroll students, review and grade submissions, send feedback requests, export grades, view a student's profile. |
-| **ADMIN** | Everything a teacher can do on *any* subject, **plus** account management (create teachers, deactivate accounts, audit log) **plus** the cross-platform analytics and fraud dashboards. |
+| **ADMIN** | Everything a teacher can do on *any* subject, **plus** account management (create teachers, deactivate accounts, audit log) **plus** the semester calendar. |
 | **STUDENT** | The student portal only (submit work, take quizzes) — see [student-journey.md](student-journey.md). |
 
 > **Ownership rule.** A teacher only sees and acts on subjects they own
@@ -55,27 +55,27 @@ The system has three account roles. Your capabilities depend on your role.
 | 6 | Review a submission | `GET /teacher/submissions/{id}/review` | — | owner / ADMIN | test results, AI review, submitted code |
 | 6 | Act on a submission | `POST /teacher/submissions/{id}/review` | approve / reject (+ reason) | owner / ADMIN | submission advanced; student emailed |
 | 7 | Export grades | `GET /teacher/subjects/{id}/export.csv` | — | owner / ADMIN | CSV of grades; **no UI button** — endpoint only |
-| 8 | Analytics overview | `GET /teacher/analytics` | — | **ADMIN only** | platform-wide stats and charts; **no dashboard link** — enter the URL |
-| 8 | Fraud detection | `GET /teacher/analytics/fraud` | — | **ADMIN only** | risk-scored integrity flags |
-| 8 | Student profile | `GET /teacher/analytics/students/{id}` | — | TEACHER (own students) / ADMIN | one student's grades + login history |
+| 8 | Integrity signals | Панель tab, assignment board, review page, `…/similarity` | — | Owner / ADMIN | stat cards, violation + AI badges, evidence frames, similarity pairs |
 | 9 | Request course feedback | `POST /teacher/subjects/{id}/feedback/request` | — | owner / ADMIN | tokenized links emailed to enrolled students |
 | 9 | View feedback | `GET /teacher/subjects/{id}/feedback` | — | owner / ADMIN | responses + average rating |
 | 9 | Export feedback | `GET /teacher/subjects/{id}/feedback/export.csv` | — | owner / ADMIN | CSV of responses |
 | 10 | In-app notifications | `GET /notifications` (+ read/read-all) | — | any account | your unread review/submission alerts |
 
-> Cells marked **ADMIN only** are a current limitation, not a design choice — see
-> [the analytics note](#a-note-on-who-can-see-analytics).
 
 ---
 
 ## 1. Log in
+
+Once signed in you can change your password under **Пароль** in the header
+(`/auth/change-password`); ten failed logins in fifteen minutes lock the form for that
+username for the rest of the window.
 
 **What it does.** Authenticates you and gives you a session.
 
 **How.** Go to `GET /auth/login` and submit your username and password
 (`POST /auth/login`). On success a JSON Web Token is stored in an HTTP-only,
 strict-same-site cookie that lasts **8 hours**. Teachers are redirected to `/teacher`;
-students to `/portal`. Every successful login is recorded (used later by fraud analytics).
+students to `/portal`. Every successful login is recorded (first-login shows on the roster page).
 
 **Forgot your password?**
 - `GET /auth/forgot-password` → enter your username → `POST`. If the account exists and
@@ -308,6 +308,34 @@ written to the **audit log**, and you are returned to the assignment board. (Not
 no free-text "set this exact grade" field on this endpoint — outcomes are approve/reject;
 grade values come from the automated score and config grade range.)
 
+### Getting a stuck submission moving
+
+The assignment board offers, next to the status badge:
+
+- **Перезапустити перевірку** on any failed submission (`VALIDATION_FAILED`, `TEST_FAILED`,
+  `FAILED`, `AI_REVIEW_FAILED`) and on anything that has sat in `VALIDATING`, `TESTING` or an
+  AI-review state for more than 30 minutes. It sends the submission back to `PENDING`,
+  drops the config pin (so a fixed config is picked up) and queues the checks again.
+- **Повторити AI-рецензію** and **На ручну перевірку** on `AI_REVIEW_FAILED`: retry the model
+  (the next step is derived from the review mode) or take the submission into your queue.
+
+Every action is audited (`rerun_checks`, `retry_ai_review`, `ai_review_skip_to_teacher`).
+
+### Bulk actions
+
+Tick rows on the board (the header checkbox selects all) and use **Схвалити вибрані**,
+**Відхилити вибрані** (a reason is required) or **Перезапустити перевірку для вибраних**.
+Rows that are not eligible — already graded, belonging to another assignment — are skipped
+and counted in the flash message. On the roster page the same pattern sends **new
+credentials** to the selected students (a fresh password is generated and emailed).
+
+### Similarity report
+
+**Звіт схожості** on the board compares the latest ZIP of every enrolled student pairwise
+(identifier-token Jaccard, comments and strings stripped) and lists pairs above the `min`
+threshold (default 0.5). The per-row number on the board is that student's best match; the
+report shows who it was.
+
 ---
 
 ## 7. Exporting grades
@@ -321,46 +349,23 @@ only.
 
 ---
 
-## 8. Analytics and academic-integrity reports
+## 8. Integrity signals and where to read them
 
-Three reports exist. **Two of them are currently restricted to ADMIN accounts.**
+There is no separate analytics page. Everything you need is on the pages you already use:
 
-### 8.1 Overview dashboard — `GET /teacher/analytics` (ADMIN only)
+- **Панель tab** — cached stat cards per subject: average mark, pass %, pending review,
+  cheating % (share of latest quiz attempts with a violation or an anomalous duration).
+  Recomputed every five minutes by a scheduled job.
+- **Assignment board** — per student: similarity to the closest classmate, quiz violation
+  badge (auto-failed / N events), **AI ·** badge when the AI review flagged the work, and
+  up to six evidence thumbnails. Bulk actions and the unstick controls live here too (§6).
+- **Submission review page** — the full AI verdict (cheating / AI-generated with confidence
+  and reason, code mark, the comment) and every quiz attempt with its event counts and
+  evidence frames in order.
+- **Звіт схожості** — pairwise similarity across the latest ZIP of every student, above a
+  threshold you choose (§6).
+- **Grafana** — platform-wide counters and gauges for operators (`docs/observability.md`).
 
-Platform-wide headline numbers (total students, subjects, average grade, pass rate), a
-**grade-distribution histogram** (10-point buckets), a **per-subject performance** table,
-an **assignment-difficulty** ranking (hardest first), and a list of students who **failed a
-quiz after exhausting all attempts**.
-
-### 8.2 Fraud detection — `GET /teacher/analytics/fraud` (ADMIN only)
-
-Risk-scored integrity signals (these are *signals, not proof*):
-- **Late first login + high grade** — first-ever login within 24h before a deadline, grade
-  ≥ 80% of max (+3 risk points).
-- **Few logins + high average grade** — fewer than 3 logins, average grade ≥ 75
-  (+2 points).
-- **Single-day submission burst** — 3+ submissions all on one calendar day (+2 points).
-
-Plus a login-activity overview of all students (never-logged-in students float to the top).
-Risk levels: 0 none, 1–2 Low, 3–4 Medium, 5+ High.
-
-### 8.3 Student profile — `GET /teacher/analytics/students/{id}` (TEACHER allowed)
-
-A single student's cross-subject profile: per-subject grade summaries, a **grade timeline**
-chart, an all-assignments table, and login statistics. **This page is open to teachers**,
-with object-level authorization: a non-admin teacher may only open a student who is enrolled
-in at least one subject they own — otherwise a 403.
-
-### A note on who can see analytics
-
-The overview and fraud pages query data across **every** teacher's subjects, so they are
-deliberately locked to ADMIN until the queries are scoped per-owner (there is a tracked
-`TODO security` in the code). As a teacher you can always see any individual student's
-profile (§8.3); for the aggregate dashboards, ask an admin. (The older
-[teacher-journey.md](teacher-journey.md) describes these as "gated accordingly" — this
-guide states the gate explicitly: dashboard + fraud = ADMIN only today.)
-
----
 
 ## 9. Collecting course feedback
 
@@ -432,8 +437,7 @@ So you don't go looking for features that aren't there:
   ZIP (§3). The legacy on-screen Subject/Assignment CRUD forms were removed.
 - **No GitHub/GitLab ingestion.** Submissions are **ZIP uploads only**; the old
   GitHub-PR / Google-Forms pipeline has been retired (see git history before 2026-06-19).
-- **No per-teacher aggregate analytics yet.** The overview and fraud dashboards are ADMIN
-  only (§8).
+- **No platform-wide analytics in the app.** Per-subject numbers are on the Панель tab; cross-platform counters live in Grafana (`docs/observability.md`).
 - **No manual numeric grade entry on the review screen.** Review actions are
   approve/reject; the numeric grade comes from the automated check and the config's grade
   range.

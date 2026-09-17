@@ -612,3 +612,14 @@ a public ACL, MinIO is not published or proxied, and frames are served only thro
 `/teacher/proctoring/snapshots/<id>`, which checks subject authorization before
 returning a single byte. If you ever expose MinIO directly or restore a public-read ACL,
 every student's webcam image becomes readable by anyone holding the object key.
+
+### Login throttling and the origin check
+
+- The login / forgot-password limiter (`LOGIN_MAX_ATTEMPTS`, `LOGIN_WINDOW_SECONDS`) is
+  **per application process**. With two replicas an attacker gets at most twice the
+  configured budget; that is accepted rather than adding Redis. The client address is the
+  first `X-Forwarded-For` hop, which Caddy sets — do not put another proxy in front that
+  rewrites it without forwarding the original.
+- Cross-site `POST`s are refused by comparing `Origin` with `Host` (and `Sec-Fetch-Site`
+  when present). Caddy passes both headers through untouched; a proxy that rewrote `Host`
+  to an internal name would make every browser form submission fail with 403.

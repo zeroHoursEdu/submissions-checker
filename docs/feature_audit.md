@@ -178,7 +178,7 @@ posted to `/snapshot` and served back via the authenticated
    noisy. Decide keep-or-drop; if kept, document the false-positive rate honestly in
    `anti-cheat.md` §"Limitations".
 
-### B3. Deadline reminders — backend only, never fires — P2
+### ✅ B3. Deadline reminders — backend only, never fires — P2 (job added 2026-09-17)
 
 `OutboxEventType.DEADLINE_REMINDER`, `execute_deadline_reminder_task`,
 `deadline_reminder_template`, the outbox dispatch branch, and the `SUBMISSION_CHECKED`-style
@@ -196,7 +196,7 @@ when `available_languages | length <= 1`, so `/set-language` and the whole
 "English / Ukrainian". Either ship `en.yml` (the loader already supports it) or delete the
 route + selector and keep only the vocab loader.
 
-### B5. Endpoints with no UI — P2
+### ✅ B5. Endpoints with no UI — P2 (Операції tab, 2026-09-17)
 
 Deliberately unlinked by `config-only-subject-management`, still live and authorized:
 
@@ -213,7 +213,7 @@ Answers are stored, `is_correct` is `None`, nothing scores them, no teacher UI g
 100 %). Either build a manual-grading panel (teacher enters points per answer, re-runs
 `finalize_grade`) or reject the type in `config_apply` validation and drop it from docs.
 
-### B7. Semesters have no management surface — P3
+### ✅ B7. Semesters have no management surface — P3 (`/admin/semesters`, 2026-09-17)
 
 `0016_add_semesters.py` seeds Feb–Jun / Sep–Jan rows through Fall 2035. No route creates,
 edits, or lists them. Course feedback (`/feedback/request`) hard-fails with
@@ -221,7 +221,7 @@ edits, or lists them. Course feedback (`/feedback/request`) hard-fails with
 admin page listing semesters with add/edit. Alternative: drop the semester FK and key
 feedback requests by `(subject_id, year)`.
 
-### B8. Known bugs still open (from `docs/known_bugs.md`) — P2
+### ✅ B8. Known bugs still open (from `docs/known_bugs.md`) — P2 (#1, #13, #16 fixed 2026-09-17; #11 note stays)
 
 - **#1** `owner_id = NULL` subjects never self-heal: `config_apply._execute_plan` update
   branch still never writes `owner_id`. One-line fix: claim ownership on update when
@@ -238,7 +238,7 @@ An attempt paused and never resumed stays `IN_PROGRESS` forever (documented in
 `feature_catalog.md`). Add a scheduled job that closes attempts paused > N hours as
 `TIMED_OUT`, or accept and document as policy.
 
-### B10. Stuck-state recovery has no operator path — P2
+### ✅ B10. Stuck-state recovery has no operator path — P2 (re-run / retry-AI / send-to-teacher, 2026-09-17)
 
 - `AI_REVIEW_FAILED` after `outbox_max_retries` (5): the outbox row goes `ERROR`, the
   submission stays `AI_REVIEW_FAILED`, and no route lets a teacher retry or skip to manual
@@ -270,27 +270,27 @@ AI/teacher/quiz review), how to run (`make up`, `make test`), and links to
 
 Ordered by how often a teacher or student would hit the gap.
 
-1. **Password change for a logged-in user.** Only forgot/reset-by-email exists. Students
+1. ✅ **Password change for a logged-in user.** Only forgot/reset-by-email exists. Students
    get generated credentials by email and have no way to set their own password without
    the reset dance. `GET/POST /auth/change-password` (old + new twice). P1.
-2. **Deadline reminder emails** — see B3. P2.
+2. ✅ **Deadline reminder emails** — see B3. P2.
 3. **Show the AI flags and comment to the teacher** — see B1. P1.
-4. **`tests_then_teacher_then_quiz` review mode** (or `send_quiz_after_teacher_approval`).
+4. ✅ (documented, no new mode needed) **`tests_then_teacher_then_quiz` review mode** (or `send_quiz_after_teacher_approval`).
    Today a quiz configured alongside `tests_then_teacher` only fires if the teacher
    remembers to pick "send quiz" on approval. Carried over from `missing_features.md`;
    still true — `_advance_after_tests` in `check_tasks.py` dispatches on one mode. P2.
-5. **Teacher-side retry / unstick controls** — see B10. P2.
+5. ✅ **Teacher-side retry / unstick controls** — see B10. P2.
 6. **Manual grading for `SHORT_ANSWER`** — see B6. P2.
-7. **Bulk actions on the assignment board**: approve/reject several submissions, resend
+7. ✅ **Bulk actions on the assignment board**: approve/reject several submissions, resend
    credentials to a whole group, re-run checks for an assignment after a config fix.
    Everything today is one row at a time. P2.
-8. **Cross-student similarity report.** Similarity is computed at upload against every
+8. ✅ **Cross-student similarity report.** Similarity is computed at upload against every
    other student's ZIP for the same assignment (`student_portal.py:478–503`) and shown as
    one number per row. There is no "who matches whom" view, no threshold flag, no link to
    the integrity tab. P2.
-9. **Subject archive / delete in the UI** — see B5. P3.
-10. **Semester admin** — see B7. P3.
-11. **Rate limiting and CSRF** on `POST /auth/login`, `/auth/forgot-password`, and every
+9. ✅ **Subject archive / delete in the UI** — see B5. P3.
+10. ✅ **Semester admin** — see B7. P3.
+11. ✅ **Rate limiting and CSRF** on `POST /auth/login`, `/auth/forgot-password`, and every
     form (deferred in the 2026-06-18 security pass; still absent). P1 for login
     throttling, P2 for CSRF given the strict-same-site cookie.
 12. ✅ **Config validation for the two recurring authoring mistakes** (done 2026-09-17): identical

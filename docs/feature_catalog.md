@@ -35,12 +35,14 @@ detail.
 | Log out (clears the cookie) | Any account | `POST /auth/logout` |
 | Forgot password (emails a single-use, ~2h reset link; response is uniform to avoid leaking which usernames exist) | Any account | `GET /auth/forgot-password`, `POST /auth/forgot-password` |
 | Reset password (≥ 8 chars, typed twice; token single-use) | Any account | `GET /auth/reset-password`, `POST /auth/reset-password` |
+| Change own password while signed in (current + new twice; audited `change_password`) | Any account | `GET /auth/change-password`, `POST /auth/change-password` |
+| Login and forgot-password throttling (10 failures / 15 min per client + username → 429; per replica) | — | middleware in `core/rate_limit.py` |
+| Cross-site POST refusal (Fetch Metadata / Origin vs Host → 403) | — | `core/csrf_middleware.py` |
 | Create teacher account (username + password ≥ 8 chars; bcrypt-hashed) — audited `create_teacher` | ADMIN only | `GET /admin/teachers/create`, `POST /admin/teachers/create` |
 | List all accounts | ADMIN only | `GET /admin/users` |
 | Activate / deactivate an account (cannot deactivate self; inactive accounts can't authenticate) — audited `toggle_user_active` | ADMIN only | `POST /admin/users/{id}/toggle-active` |
 | Create student account in bulk / singly | TEACHER/ADMIN | see §3 Enrollment |
 | Health / readiness probes | Public (infra) | `GET /health`, `GET /health/ready` |
-| Internal user API (skeleton CRUD) | API | `POST /api/v1/users`, `GET /api/v1/users/{id}` |
 
 > Deactivated accounts are rejected by the session guard (`_get_current_user`) with
 > 401 "User inactive" on their next request.
@@ -73,6 +75,7 @@ detail.
 | Global student import (creates accounts only, no enrollment) | TEACHER/ADMIN | `POST /teacher/students/import`, sample `GET /teacher/students/sample.csv` |
 | Add a single student — audited `add_student` | TEACHER/ADMIN | `GET /teacher/students/add`, `POST /teacher/students/add` |
 | Browse the full roster (account/email/login status) | TEACHER/ADMIN | `GET /teacher/students` |
+| Resend credentials to selected students (new password generated, `SEND_CREDENTIALS` queued; audited `resend_credentials`) | TEACHER (own students) / ADMIN | `POST /teacher/students/resend-credentials` |
 | Enroll a student into a subject — audited `enroll_student` | Owner / ADMIN | `POST /teacher/subjects/{id}/enroll/{student_id}` |
 | Unenroll a student — audited `unenroll_student` | Owner / ADMIN | `POST /teacher/subjects/{id}/unenroll/{student_id}` |
 | One-time proctoring consent (required before any quiz) | STUDENT | `GET /portal/consent`, `POST /portal/consent` |
@@ -90,6 +93,10 @@ detail.
 | Assignment review board (per-student latest submission, grade, integrity flags) | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}` |
 | Review one submission (test results, AI verdict when the mode ran one, proctoring evidence, submitted archive) | Owner / ADMIN | `GET /teacher/submissions/{id}/review` |
 | Approve / reject a submission (emails the student) — audited `teacher_approve_submission` / `teacher_reject_submission` | Owner / ADMIN | `POST /teacher/submissions/{id}/review` |
+| Bulk approve / reject / re-run for selected rows on the board (ineligible rows skipped; audited `bulk_review`) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/bulk` |
+| Re-run checks (any non-terminal or failed status → PENDING, config pin dropped; audited `rerun_checks`) | Owner / ADMIN | `POST /teacher/submissions/{id}/rerun-checks` |
+| Retry a failed AI review / hand it to manual review (from `AI_REVIEW_FAILED`; audited) | Owner / ADMIN | `POST /teacher/submissions/{id}/retry-ai-review`, `POST /teacher/submissions/{id}/send-to-teacher` |
+| Similarity report: pairwise token similarity of the latest ZIP per student, threshold `?min=` | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}/similarity` |
 | Export grades CSV (Операції tab) | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
 
 ### The submission state machine
@@ -243,8 +250,9 @@ questions they have seen. Per-question (stepper) mode bounds that to one questio
 | Mark one notification read | Any account | `POST /notifications/{id}/read` |
 | Mark all read | Any account | `POST /notifications/read-all` |
 | Unread count (for the badge) | Any account | `GET /notifications/unread-count` |
-| Email preferences (per-case EMAIL on/off: `SUBMISSION_CHECKED`, `FEEDBACK_REQUEST`) | STUDENT | `GET /portal/notification-preferences`, `POST /portal/notification-preferences/{case}/{method}/toggle` |
+| Email preferences (per-case EMAIL on/off: `SUBMISSION_CHECKED`, `FEEDBACK_REQUEST`, `DEADLINE_REMINDER`) | STUDENT | `GET /portal/notification-preferences`, `POST /portal/notification-preferences/{case}/{method}/toggle` |
 | Coalesced teacher review digest (background job batches a teacher's pending review notices into one email) | TEACHER/ADMIN (automatic) | — (no route; `teacher_notification_queue` + background job) |
+| Deadline reminder email (scheduled job; assignments due within `DEADLINE_REMINDER_DAYS_BEFORE`, students with no submission, opt-out via `DEADLINE_REMINDER` preference) | STUDENT (automatic) | — (`workers/scheduled/deadline_reminders.py`) |
 
 ## 8. Admin
 
