@@ -378,6 +378,18 @@ teacher:
   attempt_label: Спроба
   no_violations: Порушень не зафіксовано
 admin:
+  semesters_title: Семестри
+  semesters_hint: Опитування про курс прив'язане до поточного семестру. Періоди не можуть перетинатися.
+  semester_name: Назва
+  semester_season: Сезон
+  semester_start: Початок
+  semester_end: Кінець
+  semester_add: Додати семестр
+  semester_save: Зберегти
+  semester_current: поточний
+  semester_error_invalid: Заповніть усі поля коректно.
+  semester_error_inverted: Дата кінця має бути пізніше за дату початку.
+  semester_error_overlap: Період перетинається з іншим семестром.
   dashboard_title: Панель адміністратора
   system_overview: Огляд системи та управління
   users: Користувачі

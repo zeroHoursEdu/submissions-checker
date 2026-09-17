@@ -195,7 +195,18 @@ no update path. Treat it as evidence.
 
 ---
 
-## 6. Platform analytics and academic-integrity reports
+## 6. Semesters
+
+`GET /admin/semesters` lists every semester with its season and dates and marks the current
+one. Course feedback (`POST /teacher/subjects/{id}/feedback/request`) is keyed by the
+semester whose dates contain today, so a term outside the seeded calendar needs a row here
+first. `POST /admin/semesters` adds one, `POST /admin/semesters/{id}` edits one (inline form
+per row). The end date must be after the start date and periods may not overlap; both are
+refused with a message. Every change is audited (`create_semester`, `update_semester`).
+
+---
+
+## 7. Platform analytics and academic-integrity reports
 
 These three reports live under the `/teacher/analytics` prefix but, today, **two of the
 three require an ADMIN account**. They are the same pages referenced in the teacher guide;
@@ -266,7 +277,7 @@ individual student profile (§6.3) is reachable by the owning teacher as well as
 
 ---
 
-## 7. Everything a teacher can do — on any subject
+## 8. Everything a teacher can do — on any subject
 
 Because ADMIN passes every `require_subject_access` / ownership check, you inherit the full
 teacher surface from [teacher_journey_guide.md](teacher_journey_guide.md) **without the

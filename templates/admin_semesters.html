@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ vocab.admin.semesters_title }} — Admin{% endblock %}
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/admin" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.nav.admin_link }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.admin.semesters_title }}</span>
+{% endblock %}
+{% block content %}
+{% macro fields(sem) %}
+  <input name="name" value="{{ sem.name if sem else '' }}" required placeholder="{{ vocab.admin.semester_name }}"
+         class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm w-36"/>
+  <select name="season" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+    {% for s in seasons %}<option value="{{ s }}" {% if sem and sem.season == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <input name="start_date" type="date" value="{{ sem.start_date if sem else '' }}" required class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"/>
+  <input name="end_date" type="date" value="{{ sem.end_date if sem else '' }}" required class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"/>
+{% endmacro %}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-slate-900">{{ vocab.admin.semesters_title }}</h1>
+</div>
+<p class="text-sm text-slate-500 mb-4">{{ vocab.admin.semesters_hint }}</p>
+
+{% if error %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+  {% if error == "inverted" %}{{ vocab.admin.semester_error_inverted }}
+  {% elif error == "overlap" %}{{ vocab.admin.semester_error_overlap }}
+  {% else %}{{ vocab.admin.semester_error_invalid }}{% endif %}
+</div>
+{% endif %}
+
+<form method="POST" action="/admin/semesters" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6 flex flex-wrap items-center gap-2">
+  {{ fields(none) }}
+  <button type="submit" class="inline-flex items-center px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+    {{ vocab.admin.semester_add }}
+  </button>
+</form>
+
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide">
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.semester_name }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.semester_season }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.semester_start }}</th>
+          <th class="px-5 py-3 text-left font-medium">{{ vocab.admin.semester_end }}</th>
+          <th class="px-5 py-3 text-left font-medium"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for sem in semesters %}
+        <tr class="hover:bg-slate-50">
+          <td class="px-5 py-3 font-medium text-slate-900">
+            {{ sem.name }}
+            {% if sem.start_date <= today <= sem.end_date %}
+            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">{{ vocab.admin.semester_current }}</span>
+            {% endif %}
+          </td>
+          <td class="px-5 py-3 text-slate-600">{{ sem.season }}</td>
+          <td class="px-5 py-3 text-slate-600">{{ sem.start_date }}</td>
+          <td class="px-5 py-3 text-slate-600">{{ sem.end_date }}</td>
+          <td class="px-5 py-3">
+            <form method="POST" action="/admin/semesters/{{ sem.id }}" class="flex flex-wrap items-center gap-2">
+              {{ fields(sem) }}
+              <button type="submit" class="text-xs text-slate-500 hover:text-slate-800 hover:underline">{{ vocab.admin.semester_save }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

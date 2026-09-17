@@ -255,6 +255,7 @@ questions they have seen. Per-question (stepper) mode bounds that to one questio
 | Activate / deactivate accounts | ADMIN only | `POST /admin/users/{id}/toggle-active` |
 | Create teacher accounts | ADMIN only | `GET`/`POST /admin/teachers/create` |
 | Audit log (append-only, up to 200 recent) | ADMIN only | `GET /admin/audit` |
+| Semesters: list, add, edit (no overlaps; audited) | ADMIN only | `GET /admin/semesters`, `POST /admin/semesters`, `POST /admin/semesters/{id}` |
 | All teacher features on any subject (object-level authz bypass) | ADMIN | the `/teacher/*` routes above |
 
 See the [Admin Journey guide](admin_journey_guide.md) for full detail, including which

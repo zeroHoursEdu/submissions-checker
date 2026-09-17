@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 
 from submissions_checker.db.models.audit_log import AuditLog
 from submissions_checker.db.models.enums import UserRole
+from submissions_checker.db.models.semester import Semester
 from submissions_checker.db.models.user import User
 
 pytestmark = pytest.mark.asyncio
@@ -27,10 +28,15 @@ ADMIN_GET_ENDPOINTS = [
     "/admin/users",
     "/admin/teachers/create",
     "/admin/audit",
+    "/admin/semesters",
 ]
 ADMIN_POST_ENDPOINTS = [
     ("/admin/teachers/create", {"username": "x", "password": "longenough1"}),
     ("/admin/users/1/toggle-active", {}),
+    (
+        "/admin/semesters",
+        {"name": "S", "season": "FALL", "start_date": "2040-09-01", "end_date": "2041-01-31"},
+    ),
 ]
 
 
@@ -231,3 +237,87 @@ async def test_toggle_active_self_rejected(admin_client: AsyncClient, admin, db)
         )
     ).scalar_one()
     assert count == 0
+
+
+# ── Semesters ─────────────────────────────────────────────────────────────────
+
+
+async def _seed_semester(db, name: str, start: str, end: str) -> Semester:
+    from datetime import date
+
+    row = Semester(
+        name=name,
+        season="FALL",
+        start_date=date.fromisoformat(start),
+        end_date=date.fromisoformat(end),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def test_admin_creates_semester(admin_client: AsyncClient, db) -> None:
+    r = await admin_client.post(
+        "/admin/semesters",
+        data={
+            "name": "Summer 2036",
+            "season": "SPRING",
+            "start_date": "2036-07-01",
+            "end_date": "2036-08-31",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    row = (await db.execute(select(Semester).where(Semester.name == "Summer 2036"))).scalar_one()
+    assert row.season == "SPRING"
+    assert (
+        await db.execute(
+            select(func.count()).select_from(AuditLog).where(AuditLog.action == "create_semester")
+        )
+    ).scalar_one() == 1
+
+
+async def test_admin_semester_rejects_inverted_and_overlapping_dates(
+    admin_client: AsyncClient, db
+) -> None:
+    await _seed_semester(db, "Fall 2026", "2026-09-01", "2027-01-31")
+    r = await admin_client.post(
+        "/admin/semesters",
+        data={"name": "X", "season": "FALL", "start_date": "2036-09-01", "end_date": "2036-08-01"},
+    )
+    assert r.status_code == 422
+    r = await admin_client.post(
+        "/admin/semesters",
+        data={
+            "name": "Overlap",
+            "season": "FALL",
+            "start_date": "2026-10-01",
+            "end_date": "2026-11-01",
+        },
+    )
+    assert r.status_code == 422
+    assert (await db.execute(select(func.count()).select_from(Semester))).scalar_one() == 1
+
+
+async def test_admin_updates_semester(admin_client: AsyncClient, db) -> None:
+    sem = await _seed_semester(db, "Fall 2026", "2026-09-01", "2027-01-31")
+    r = await admin_client.post(
+        f"/admin/semesters/{sem.id}",
+        data={
+            "name": "Fall 2026",
+            "season": "FALL",
+            "start_date": "2026-09-01",
+            "end_date": "2027-02-15",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    await db.refresh(sem)
+    assert str(sem.end_date) == "2027-02-15"
+
+
+async def test_admin_semesters_page_lists_rows(admin_client: AsyncClient, db) -> None:
+    await _seed_semester(db, "Fall 2031", "2031-09-01", "2032-01-31")
+    r = await admin_client.get("/admin/semesters")
+    assert r.status_code == 200 and "Fall 2031" in r.text

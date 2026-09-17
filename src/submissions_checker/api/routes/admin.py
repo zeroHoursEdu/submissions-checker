@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.api.dependencies import AdminUser, DBSession
 from submissions_checker.core.templates import render
-from submissions_checker.db.models import AuditLog, OutboxMessage, User
+from submissions_checker.db.models import AuditLog, OutboxMessage, Semester, User
 from submissions_checker.db.models.enums import UserRole
 from submissions_checker.services.audit import audit
 
@@ -145,3 +148,127 @@ async def admin_audit_log(
     result = await db.execute(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(200))
     logs = result.scalars().all()
     return render(request, "admin_audit.html", {"current_user": current_user, "logs": logs})
+
+
+# ── Semesters ─────────────────────────────────────────────────────────────────
+
+_SEASONS = ("SPRING", "FALL")
+
+
+def _parse_semester_form(
+    name: str, season: str, start_date: str, end_date: str
+) -> tuple[str, str, date, date] | str:
+    """Return the parsed fields, or an error code the template maps to a message."""
+    name = name.strip()
+    season = season.strip().upper()
+    if not name or season not in _SEASONS:
+        return "invalid"
+    try:
+        start, end = date.fromisoformat(start_date), date.fromisoformat(end_date)
+    except ValueError:
+        return "invalid"
+    if end <= start:
+        return "inverted"
+    return name, season, start, end
+
+
+async def _semester_overlaps(
+    db: AsyncSession, start: date, end: date, *, exclude_id: int | None
+) -> bool:
+    q = select(Semester.id).where(Semester.start_date <= end, Semester.end_date >= start)
+    if exclude_id is not None:
+        q = q.where(Semester.id != exclude_id)
+    return (await db.execute(q)).first() is not None
+
+
+async def _render_semesters(
+    request: Request,
+    db: AsyncSession,
+    current_user: AdminUser,
+    *,
+    error: str | None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    rows = (await db.execute(select(Semester).order_by(Semester.start_date.desc()))).scalars().all()
+    return render(
+        request,
+        "admin_semesters.html",
+        {
+            "current_user": current_user,
+            "semesters": rows,
+            "today": date.today(),
+            "error": error,
+            "seasons": _SEASONS,
+        },
+        status_code=status_code,
+    )
+
+
+@router.get("/semesters", response_class=HTMLResponse)
+async def admin_semesters(request: Request, db: DBSession, current_user: AdminUser) -> HTMLResponse:
+    return await _render_semesters(request, db, current_user, error=None)
+
+
+@router.post("/semesters", response_model=None)
+async def admin_create_semester(
+    request: Request,
+    db: DBSession,
+    current_user: AdminUser,
+    name: str = Form(...),
+    season: str = Form(...),
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+) -> HTMLResponse | RedirectResponse:
+    parsed = _parse_semester_form(name, season, start_date, end_date)
+    if isinstance(parsed, str):
+        return await _render_semesters(request, db, current_user, error=parsed, status_code=422)
+    clean_name, clean_season, start, end = parsed
+    if await _semester_overlaps(db, start, end, exclude_id=None):
+        return await _render_semesters(request, db, current_user, error="overlap", status_code=422)
+    db.add(Semester(name=clean_name, season=clean_season, start_date=start, end_date=end))
+    await audit(
+        db,
+        action="create_semester",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        name=clean_name,
+        start_date=str(start),
+        end_date=str(end),
+    )
+    await db.commit()
+    return RedirectResponse(url="/admin/semesters", status_code=303)
+
+
+@router.post("/semesters/{semester_id}", response_model=None)
+async def admin_update_semester(
+    request: Request,
+    semester_id: int,
+    db: DBSession,
+    current_user: AdminUser,
+    name: str = Form(...),
+    season: str = Form(...),
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+) -> HTMLResponse | RedirectResponse:
+    semester = await db.get(Semester, semester_id)
+    if semester is None:
+        raise HTTPException(status_code=404)
+    parsed = _parse_semester_form(name, season, start_date, end_date)
+    if isinstance(parsed, str):
+        return await _render_semesters(request, db, current_user, error=parsed, status_code=422)
+    clean_name, clean_season, start, end = parsed
+    if await _semester_overlaps(db, start, end, exclude_id=semester_id):
+        return await _render_semesters(request, db, current_user, error="overlap", status_code=422)
+    semester.name, semester.season = clean_name, clean_season
+    semester.start_date, semester.end_date = start, end
+    await audit(
+        db,
+        action="update_semester",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        semester_id=semester_id,
+        start_date=str(start),
+        end_date=str(end),
+    )
+    await db.commit()
+    return RedirectResponse(url="/admin/semesters", status_code=303)
