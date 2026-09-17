@@ -5,9 +5,9 @@ Tools run locally: `gitleaks` (167 commits), `pip-audit` (runtime lock), `bandit
 `trivy fs` (vuln + secret + misconfig). Everything else is a manual read of the routes,
 config, sandbox, storage and templates.
 
-Tag per finding: **DIRECT** = fixed in this pass, no data/schema/auth impact.
-**NEEDS-OK** = touches persistence, auth/session, schema or requires rotation; waits for
-the owner's go-ahead.
+Tag per finding: **DIRECT** = fixed in the first pass, no data/schema/auth impact.
+**NEEDS-OK** = touched persistence, auth/session or schema; the owner approved every one
+on 2026-09-17 and they are fixed in the second pass (see "Second pass" at the end).
 
 Baseline that is already right (not findings): bcrypt(12) hashing; JWT in an
 HttpOnly + SameSite=Strict + Secure cookie; every route carries a role dependency; object
@@ -215,3 +215,23 @@ Two things surfaced on the way that were not security findings:
   metrics middleware now reads the matched route from the scope.
 - The e2e "student is enrolled" step re-logged in as teacher without logging out first,
   which only fails on a fresh DB volume (`make e2e` never drops it). Fixed in the step.
+
+
+---
+
+## Second pass (owner approved every NEEDS-OK item)
+
+| finding | what changed | migration |
+|---|---|---|
+| H2 outbox passwords | password waits in the row sealed (Fernet keyed from SECRET_KEY), opened in memory by the e-mail job, replaced by `<sent>` after delivery. Rows written before still deliver and are scrubbed. | none (owner: no pending or historical rows) |
+| M4 sessions vs password change | `iat` claim + `users.password_changed_at`; older tokens refused; own change re-issues the cookie; credential resend counts as a change. Tokens without `iat` keep working until expiry. | **0029** add nullable column |
+| M5 tokens at rest | reset + feedback rows store `token_hash` (SHA-256), `token` stays NULL; old plaintext rows still honoured. Feedback e-mail job gets the raw token sealed in the outbox payload, scrubbed after send. | **0030** add nullable `token_hash` + unique index on both tables; drop NOT NULL on `token` |
+| M6 `plain_password` | never written, never rendered; column stays, nullable. | **0031** drop NOT NULL |
+| M7 Tailwind CDN | vendored by `scripts/fetch_vendor_assets.py` at image build (pinned 3.4.17, sha256 in `vendor_assets.sha256`); CSP names no external host. | none |
+| M9 >72-byte password | wrong password at login (counts toward throttle); 422 wherever a password is set. | none |
+| M10 spraying | second login budget keyed per client IP (`LOGIN_IP_MAX_ATTEMPTS`, default 50 / 15 min). | none |
+| L3 timing | unknown username verified against a fixed dummy bcrypt hash. | none |
+
+All three migrations are additive (new nullable column, new index, NOT NULL dropped);
+none rewrites or deletes a row. Note that the application runs `alembic upgrade head` at
+startup, so they apply on the first deploy of this branch: review them before merging.
