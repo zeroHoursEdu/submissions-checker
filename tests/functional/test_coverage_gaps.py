@@ -158,7 +158,14 @@ async def test_forgot_password_token_in_email_matches_persisted_token(
 
     assert len(channel.sent) == 1
     _, _, body = channel.sent[0]
-    assert f"token={prt.token}" in body
+    # Only the hash is persisted; the raw token in the mail must be its preimage.
+    import re
+
+    from submissions_checker.core.security import hash_token
+
+    raw = re.search(r"token=([A-Za-z0-9_\-]+)", body).group(1)
+    assert prt.token is None
+    assert hash_token(raw) == prt.token_hash
 
 
 async def test_forgot_password_no_channels_configured_sends_nothing(
