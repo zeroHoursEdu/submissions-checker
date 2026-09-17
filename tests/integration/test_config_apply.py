@@ -761,3 +761,20 @@ async def test_reapplying_an_older_config_is_accepted(
         )
     ).scalar_one()
     assert title == "Lab 1"
+
+
+async def test_apply_writes_and_clears_squad_max_size(db_session: AsyncSession) -> None:
+    svc = ConfigApplyService(storage=None, plugins_dir=Path("/tmp/plugins-test"))
+    owner = User(username="own", password_hash="x", role=UserRole.TEACHER, is_active=True)
+    db_session.add(owner)
+    await db_session.flush()
+    cfg = {"subjectCode": "sq", "name": "Sq", "squads": {"maxAllowedSize": 3}, "assignments": {}}
+    await svc.apply(_make_zip(cfg), owner.id, db_session)
+    subject = (await db_session.execute(select(Subject).where(Subject.code == "sq"))).scalar_one()
+    assert subject.squad_max_size == 3
+
+    cfg.pop("squads")
+    cfg["description"] = "changed so the zip hash differs"
+    await svc.apply(_make_zip(cfg), owner.id, db_session)
+    await db_session.refresh(subject)
+    assert subject.squad_max_size is None

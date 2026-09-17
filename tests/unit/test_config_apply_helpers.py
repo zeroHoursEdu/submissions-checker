@@ -162,6 +162,7 @@ class _FakeSubject:
         self.description = kw.get("description")
         self.grid_picture_url = kw.get("grid_picture_url")
         self.main_picture_url = kw.get("main_picture_url")
+        self.squad_max_size = kw.get("squad_max_size")
 
 
 def test_compute_plan_create_when_subject_is_none(svc: ConfigApplyService, tmp_path: Path) -> None:
@@ -306,3 +307,23 @@ async def test_apply_rejects_path_traversal_subject_code(svc: ConfigApplyService
 
     with pytest.raises(ValueError, match="subjectCode"):
         await svc.apply(buf.getvalue(), owner_id=1, db=None)  # type: ignore[arg-type]
+
+
+# ── _parse_squad_max_size ────────────────────────────────────────────────────
+
+
+def test_squads_block_absent_means_disabled(svc: ConfigApplyService) -> None:
+    assert svc._parse_squad_max_size({"subjectCode": "x"}) is None
+
+
+def test_squads_max_size_is_read(svc: ConfigApplyService) -> None:
+    assert svc._parse_squad_max_size({"squads": {"maxAllowedSize": 2}}) == 2
+
+
+@pytest.mark.parametrize(
+    "block",
+    [{"maxAllowedSize": 1}, {"maxAllowedSize": 7}, {"maxAllowedSize": "2"}, {}, "yes", 3],
+)
+def test_squads_block_is_validated(svc: ConfigApplyService, block) -> None:
+    with pytest.raises(ValueError, match="squads.maxAllowedSize"):
+        svc._parse_squad_max_size({"squads": block})

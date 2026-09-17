@@ -134,6 +134,7 @@ class ConfigApplyService:
         self._validate_quiz_questions(new_cfg)
         self._validate_check_commands(new_cfg)
         self._validate_quiz_reachability(new_cfg)
+        self._parse_squad_max_size(new_cfg)
 
         sha256 = hashlib.sha256(zip_bytes).hexdigest()
 
@@ -199,6 +200,17 @@ class ConfigApplyService:
                     f"assignment '{code}' has a quiz but review_mode '{mode}' never sends it; "
                     f"use one of: {', '.join(sorted(_QUIZ_REACHABLE_MODES))}"
                 )
+
+    @staticmethod
+    def _parse_squad_max_size(new_cfg: dict[str, Any]) -> int | None:
+        """``squads.maxAllowedSize`` → int in 2..6, or None when the block is absent."""
+        block = new_cfg.get("squads")
+        if block is None:
+            return None
+        size = block.get("maxAllowedSize") if isinstance(block, dict) else None
+        if not isinstance(size, int) or isinstance(size, bool) or not 2 <= size <= 6:
+            raise ValueError("squads.maxAllowedSize must be an integer between 2 and 6")
+        return size
 
     def _validate_quiz_questions(self, new_cfg: dict[str, Any]) -> None:
         """Reject question types the grader cannot score.
@@ -334,6 +346,7 @@ class ConfigApplyService:
         meta_map = {
             "name": ("name", new_cfg.get("name", new_cfg.get("subjectCode", ""))),
             "description": ("description", new_cfg.get("description") or None),
+            "squad_max_size": ("squad_max_size", self._parse_squad_max_size(new_cfg)),
         }
         for field_name, (attr, new_val) in meta_map.items():
             current_val = getattr(subject, attr, None) if subject else None
@@ -517,6 +530,7 @@ class ConfigApplyService:
                 description=new_cfg.get("description") or None,
                 owner_id=owner_id,
                 status=SubjectStatus.ACTIVE,
+                squad_max_size=self._parse_squad_max_size(new_cfg),
             )
             db.add(subject)
             await db.flush()
@@ -635,6 +649,7 @@ class ConfigApplyService:
         field_to_cfg: dict[str, Any] = {
             "name": new_cfg.get("name", subject_code),
             "description": new_cfg.get("description") or None,
+            "squad_max_size": self._parse_squad_max_size(new_cfg),
         }
         for f in plan.subject_fields_changed:
             if f in field_to_cfg:
