@@ -650,10 +650,10 @@ async def test_subject_page_has_no_content_mutating_links(client: AsyncClient, d
     body = (await client.get(f"/teacher/subjects/{subject.id}")).text
 
     assert f"/teacher/subjects/{subject.id}/edit" not in body
-    assert f"/teacher/subjects/{subject.id}/export.csv" not in body
-    assert f"/teacher/subjects/{subject.id}/delete" not in body
     assert f"/teacher/subjects/{subject.id}/assignments/create" not in body
-    # ...but the retained affordances are still there.
+    assert "/quiz/import" not in body
+    # ...but the retained affordances are still there. Export and delete do not
+    # mutate content and live on the Операції tab (see test_operations_tab_offers_export_and_delete).
     assert f"/teacher/subjects/{subject.id}/feedback" in body
     assert f"/teacher/subjects/{subject.id}/test-student" in body
 
@@ -941,3 +941,107 @@ async def test_operations_tab_offers_export_and_delete(client: AsyncClient, db, 
     assert resp.status_code == 200
     assert f"/teacher/subjects/{subject.id}/export.csv" in resp.text
     assert f'action="/teacher/subjects/{subject.id}/delete"' in resp.text
+
+
+# ── Unstick controls ─────────────────────────────────────────────────────────
+
+
+async def _sub_with_config(db, teacher, make_student, *, status, review_mode="tests_only"):
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    sa.config = {"review_mode": review_mode}
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    sub = await _make_submission(db, sa.id, student.id, status=status)
+    sub.test_results = {"tests": []}
+    await db.commit()
+    return subject, sa, sub
+
+
+async def test_rerun_checks_requeues_and_unpins_config(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, sa, sub = await _sub_with_config(
+        db, teacher, make_student, status=SubmissionStatus.TEST_FAILED
+    )
+    authenticate(client, teacher)
+    r = await client.post(f"/teacher/submissions/{sub.id}/rerun-checks", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/teacher/subjects/{subject.id}/assignments/{sa.id}"
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.PENDING
+    assert sub.plugin_config_id is None and sub.test_results is None
+    rows = (
+        (
+            await db.execute(
+                select(OutboxMessage).where(OutboxMessage.event_type == OutboxEventType.RUN_CHECKS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows and rows[-1].payload["submission_id"] == sub.id
+
+
+async def test_send_failed_ai_review_to_teacher(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    _subject, _sa, sub = await _sub_with_config(
+        db, teacher, make_student, status=SubmissionStatus.AI_REVIEW_FAILED
+    )
+    authenticate(client, teacher)
+    r = await client.post(f"/teacher/submissions/{sub.id}/send-to-teacher", follow_redirects=False)
+    assert r.status_code == 303
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
+async def test_retry_ai_review_enqueues_with_derived_next_step(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    _subject, _sa, sub = await _sub_with_config(
+        db,
+        teacher,
+        make_student,
+        status=SubmissionStatus.AI_REVIEW_FAILED,
+        review_mode="tests_then_ai_then_teacher",
+    )
+    authenticate(client, teacher)
+    r = await client.post(f"/teacher/submissions/{sub.id}/retry-ai-review", follow_redirects=False)
+    assert r.status_code == 303
+    rows = (
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.RUN_AI_REVIEW
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows[-1].payload == {"submission_id": sub.id, "next_step": "teacher"}
+
+
+async def test_unstick_routes_refuse_wrong_status(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    _subject, _sa, sub = await _sub_with_config(
+        db, teacher, make_student, status=SubmissionStatus.COMPLETED
+    )
+    authenticate(client, teacher)
+    for path in ("rerun-checks", "retry-ai-review", "send-to-teacher"):
+        r = await client.post(f"/teacher/submissions/{sub.id}/{path}", follow_redirects=False)
+        assert r.status_code == 409, path
+
+
+async def test_other_teacher_cannot_unstick(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    _subject, _sa, sub = await _sub_with_config(
+        db, teacher, make_student, status=SubmissionStatus.TEST_FAILED
+    )
+    other = await make_user(role=UserRole.TEACHER, username="other-t")
+    authenticate(client, other)
+    r = await client.post(f"/teacher/submissions/{sub.id}/rerun-checks", follow_redirects=False)
+    assert r.status_code == 403

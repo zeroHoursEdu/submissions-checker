@@ -27,9 +27,9 @@ A teacher who is the `owner_id` of a subject SHALL be able to soft-delete it via
 
 Soft-delete SHALL set `status = DELETED`; the row is NOT removed from the database.
 
-The endpoint SHALL remain available to API callers and SHALL continue to enforce ownership, but
-the teacher subject page SHALL NOT present a "Remove Subject" button, because deleting a subject
-is a destructive action that belongs with the same deliberate, reviewed process as creating it.
+The Операції tab of the teacher subject page SHALL present a "Видалити предмет" form guarded
+by a checkbox confirmation, and a "Експорт оцінок (CSV)" link; both are subject-level
+operations, not content edits, and ownership is enforced by the endpoints (2026-09-17).
 
 #### Scenario: Owner soft-deletes subject via the endpoint
 - **WHEN** the owner POSTs to `/teacher/subjects/{subject_id}/delete`
