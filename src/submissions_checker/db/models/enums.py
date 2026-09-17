@@ -92,6 +92,18 @@ class QuizDisputeStatus(enum.StrEnum):
         return self.value
 
 
+class SquadInviteStatus(enum.StrEnum):
+    """Lifecycle of one student's invitation into a squad."""
+
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    DECLINED = "DECLINED"
+    CANCELLED = "CANCELLED"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 class NotificationCase(enum.StrEnum):
     SUBMISSION_CHECKED = "SUBMISSION_CHECKED"
     FEEDBACK_REQUEST = "FEEDBACK_REQUEST"

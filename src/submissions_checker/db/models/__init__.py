@@ -10,6 +10,7 @@ from submissions_checker.db.models.enums import (
     QuizAttemptStatus,
     QuizDisputeStatus,
     QuizQuestionType,
+    SquadInviteStatus,
     SubjectStatus,
     SubmissionSourceType,
     SubmissionStatus,
@@ -31,6 +32,7 @@ from submissions_checker.db.models.quiz_dispute import (
 )
 from submissions_checker.db.models.quiz_template import QuizAnswer, QuizAttempt
 from submissions_checker.db.models.semester import Semester
+from submissions_checker.db.models.squad import Squad, SquadInvite, SquadMember
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
@@ -72,6 +74,10 @@ __all__ = [
     "UserRole",
     "Group",
     "OutboxMessage",
+    "Squad",
+    "SquadInvite",
+    "SquadInviteStatus",
+    "SquadMember",
     "Student",
     "StudentAssignment",
     "Subject",

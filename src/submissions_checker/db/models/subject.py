@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,6 +63,8 @@ class Subject(Base, TimestampMixin):
         default=SubjectStatus.ACTIVE,
         server_default="ACTIVE",
     )
+    # From config.yml `squads.maxAllowedSize`; NULL = squads disabled on this subject.
+    squad_max_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     assignments: Mapped[list[SubjectsAssignment]] = relationship(
         "SubjectsAssignment", back_populates="subject"

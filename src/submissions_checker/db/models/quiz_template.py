@@ -45,6 +45,11 @@ class QuizAttempt(Base, TimestampMixin):
         index=True,
     )
     plugin_config_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Which student took this attempt. NULL only on rows older than migration 0032; new
+    # attempts always set it, and a squad submission has attempts from several students.
+    student_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("students.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     questions_snapshot: Mapped[Any] = mapped_column(JSONB, nullable=False)
     config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

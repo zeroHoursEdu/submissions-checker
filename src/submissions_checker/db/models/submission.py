@@ -54,6 +54,11 @@ class Submission(Base, TimestampMixin):
     plugin_config_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("subject_plugin_configs.id", ondelete="SET NULL"), nullable=True
     )
+    # Set at creation when the submitter is in a locked squad; never changed afterwards.
+    # Every member of that squad reads this row as "their" submission (services.squads).
+    squad_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("squads.id", ondelete="SET NULL"), nullable=True
+    )
 
     students_assignment: Mapped[StudentAssignment] = relationship(
         "StudentAssignment", back_populates="submissions"
@@ -69,4 +74,5 @@ class Submission(Base, TimestampMixin):
         Index("ix_submissions_students_assignment_id", "students_assignment_id"),
         Index("ix_submissions_status", "status"),
         Index("ix_submissions_plugin_config_id", "plugin_config_id"),
+        Index("ix_submissions_squad_id", "squad_id"),
     )
