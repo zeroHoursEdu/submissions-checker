@@ -8,7 +8,7 @@ Status legend: 🔴 open · 🟡 open, low impact · ✅ fixed. Update as these 
 
 ---
 
-## 1. 🔴 Plugin-autoloaded subjects get a permanently unclaimable `owner_id = NULL`
+## 1. ✅ Plugin-autoloaded subjects get a permanently unclaimable `owner_id = NULL`
 
 **Where:** `src/submissions_checker/services/plugin_loader.py` (`_upsert_subject`, ~line 165)
 creates `Subject(...)` on first load with no `owner_id` at all. Every ownership check in
@@ -43,6 +43,9 @@ never touches `owner_id` — only the create branch sets it. This bug's effect o
 is unresolved; fixing it needs an explicit backfill (e.g. a one-off `UPDATE` per the workaround
 above, or a small follow-up change teaching `_execute_plan` to claim `owner_id` on update when it
 is currently `NULL`). Out of scope for `disable-plugin-autoloading`.
+
+**Fixed (2026-09-17):** re-applying the config claims ownership when `owner_id` is NULL
+(`_execute_plan`, update branch).
 
 ---
 
@@ -337,7 +340,7 @@ question on screen. Set `question_time_default_seconds` (or a per-question
 
 ---
 
-## 16. 🟡 Re-applying a config ZIP that was applied before is silently refused
+## 16. ✅ Re-applying a config ZIP that was applied before is silently refused
 
 **Where:** `src/submissions_checker/services/config_apply.py` (`_check_duplicate`) plus the
 `uq_subject_plugin_configs_subject_hash` constraint on `subject_plugin_configs`.
@@ -354,3 +357,6 @@ so it was left out of the fix that made a changed ZIP report as applied.
 
 **Workaround:** make any trivial edit to the archive (a comment in `config.yml` is enough);
 the new bytes hash differently and the apply goes through.
+
+**Fixed (2026-09-17):** dedup compares the latest version only; migration 0028 dropped the
+`(subject_id, content_hash)` uniqueness so a rollback inserts a new version.

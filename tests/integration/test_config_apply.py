@@ -702,3 +702,62 @@ async def test_reapply_edited_content_file_is_reuploaded(
     )
 
     assert uploaded == [("subjects/demo101/assignments/lab1/task.md", b"# Task v2, typo fixed")]
+
+
+# ---------------------------------------------------------------------------
+# Known bugs #1 and #16
+# ---------------------------------------------------------------------------
+
+
+async def test_apply_claims_ownerless_subject(db_session: AsyncSession, tmp_path: Path) -> None:
+    """A subject with owner_id=NULL (pre-ownership era) is claimed by the next applier."""
+    owner = await _make_owner(db_session, "claimer")
+    db_session.add(Subject(code="demo101", name="Old", owner_id=None, status=SubjectStatus.ACTIVE))
+    await db_session.commit()
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+
+    await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
+
+    subject = (
+        await db_session.execute(select(Subject).where(Subject.code == "demo101"))
+    ).scalar_one()
+    assert subject.owner_id == owner.id
+
+
+async def test_reapplying_an_older_config_is_accepted(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Rolling back to a previously applied ZIP creates a new version (dedup is
+    against the latest version only, known bug #16)."""
+    owner = await _make_owner(db_session)
+    await db_session.commit()
+    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+
+    cfg_a = _base_config()
+    cfg_b = _base_config()
+    cfg_b["assignments"]["lab1"]["title"] = "Lab 1 (broken)"
+    zip_a, zip_b = _make_zip(cfg_a), _make_zip(cfg_b)
+
+    await svc.apply(zip_a, owner_id=owner.id, db=db_session)
+    await svc.apply(zip_b, owner_id=owner.id, db=db_session)
+    result = await svc.apply(zip_a, owner_id=owner.id, db=db_session)
+
+    assert result.changed is True
+    subject = (
+        await db_session.execute(select(Subject).where(Subject.code == "demo101"))
+    ).scalar_one()
+    versions = (
+        await db_session.execute(
+            select(SubjectPluginConfig.version, SubjectPluginConfig.content_hash)
+            .where(SubjectPluginConfig.subject_id == subject.id)
+            .order_by(SubjectPluginConfig.version)
+        )
+    ).all()
+    assert [v for v, _ in versions] == [1, 2, 3]
+    assert versions[0][1] == versions[2][1]
+    title = (
+        await db_session.execute(
+            select(SubjectsAssignment.title).where(SubjectsAssignment.subject_id == subject.id)
+        )
+    ).scalar_one()
+    assert title == "Lab 1"

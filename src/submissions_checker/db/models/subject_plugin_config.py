@@ -39,8 +39,5 @@ class SubjectPluginConfig(Base, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("subject_id", "version", name="uq_subject_plugin_configs_subject_version"),
-        UniqueConstraint(
-            "subject_id", "content_hash", name="uq_subject_plugin_configs_subject_hash"
-        ),
         Index("ix_subject_plugin_configs_subject_version", "subject_id", "version"),
     )

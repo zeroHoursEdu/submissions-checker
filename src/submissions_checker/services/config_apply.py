@@ -259,22 +259,22 @@ class ConfigApplyService:
         subject_code: str,
         zip_bytes: bytes,
     ) -> ApplyResult | None:
-        """Return ApplyResult(changed=False) if this exact ZIP was already applied.
+        """Return ApplyResult(changed=False) if this ZIP is the one currently live.
 
-        A hash match means the content truly hasn't changed, so no new SubjectPluginConfig
-        version is ever inserted here (that would violate the (subject_id, content_hash)
-        unique constraint). But if the extracted plugin tree is missing from disk despite the
-        matching hash — a prior apply's disk extraction never completed (e.g. crashed after the
-        DB commit) — self-heal by re-extracting before returning, rather than leaving the
-        subject permanently uncheckable while the DB claims success.
+        Only the *latest* version is compared: re-uploading an older archive is a
+        rollback and must create a new version (known bug #16). If the extracted
+        plugin tree is missing from disk despite the matching hash — a prior apply's
+        disk extraction never completed (e.g. crashed after the DB commit) —
+        self-heal by re-extracting before returning, rather than leaving the subject
+        permanently uncheckable while the DB claims success.
         """
-        result = await db.execute(
-            select(SubjectPluginConfig.id).where(
-                SubjectPluginConfig.subject_id == subject_id,
-                SubjectPluginConfig.content_hash == sha256,
-            )
+        latest_hash = await db.scalar(
+            select(SubjectPluginConfig.content_hash)
+            .where(SubjectPluginConfig.subject_id == subject_id)
+            .order_by(SubjectPluginConfig.version.desc())
+            .limit(1)
         )
-        if result.scalar_one_or_none() is None:
+        if latest_hash != sha256:
             return None
 
         if not (self._plugins_dir / subject_code).is_dir():
@@ -519,6 +519,10 @@ class ConfigApplyService:
             subject_created = True
         else:
             subject_created = False
+            if subject.owner_id is None:
+                # A subject created before ownership existed (or by the removed plugin
+                # autoloader) is claimed by the first teacher who re-applies its config.
+                subject.owner_id = owner_id
             # Apply only changed subject fields
             self._apply_subject_fields(plan, new_cfg, subject, url_map, subject_code)
 
