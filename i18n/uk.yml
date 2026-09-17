@@ -370,6 +370,16 @@ teacher:
   ai_comment: Коментар для студента
   proctoring_title: Прокторинг
   rerun_checks: Перезапустити перевірку
+  bulk_select_all: Вибрати всі
+  bulk_approve_selected: Схвалити вибрані
+  bulk_reject_selected: Відхилити вибрані
+  bulk_rerun_selected: Перезапустити перевірку для вибраних
+  bulk_reason_placeholder: Причина відхилення
+  bulk_result_applied: Застосовано
+  bulk_result_skipped: Пропущено
+  resend_credentials_selected: Надіслати доступи повторно
+  resend_credentials_hint: Вибраним студентам буде згенеровано новий пароль і надіслано листа.
+  resent_result: Надіслано нові доступи
   retry_ai_review: Повторити AI-рецензію
   send_to_teacher: На ручну перевірку
   data_title: Дані

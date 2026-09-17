@@ -87,11 +87,33 @@
   </div>
 </div>
 
+{% if bulk_result %}
+<div class="mb-4 px-4 py-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 text-sm">
+  {{ vocab.teacher.bulk_result_applied }}: <strong>{{ bulk_result.applied }}</strong> ·
+  {{ vocab.teacher.bulk_result_skipped }}: <strong>{{ bulk_result.skipped }}</strong>
+</div>
+{% endif %}
+
 {% if rows %}
+<form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/bulk" id="bulk-form">
+<div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+  <button type="submit" name="action" value="approve"
+          class="px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors">{{ vocab.teacher.bulk_approve_selected }}</button>
+  <button type="submit" name="action" value="reject"
+          class="px-3 py-1.5 rounded-lg bg-white text-red-600 border border-red-200 text-xs font-medium hover:bg-red-50 transition-colors">{{ vocab.teacher.bulk_reject_selected }}</button>
+  <input type="text" name="reason" placeholder="{{ vocab.teacher.bulk_reason_placeholder }}"
+         class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs w-56"/>
+  <button type="submit" name="action" value="rerun"
+          class="px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-300 text-xs font-medium hover:bg-slate-50 transition-colors">{{ vocab.teacher.bulk_rerun_selected }}</button>
+</div>
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
   <table class="w-full text-sm">
     <thead>
       <tr class="bg-slate-50 border-b border-slate-200">
+        <th class="px-3 py-3">
+          <input type="checkbox" title="{{ vocab.teacher.bulk_select_all }}" class="rounded border-slate-300"
+                 onclick="document.querySelectorAll('#bulk-form input[name=submission_ids]').forEach(c => { if (!c.disabled) c.checked = this.checked; })">
+        </th>
         <th class="text-left px-5 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_student }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_status }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_grade }}</th>
@@ -103,6 +125,10 @@
     <tbody class="divide-y divide-slate-100">
       {% for row in rows %}
       <tr class="hover:bg-slate-50 transition-colors">
+        <td class="px-3 py-3.5">
+          <input type="checkbox" name="submission_ids" value="{{ row.submission_id or '' }}" class="rounded border-slate-300"
+                 {% if not row.submission_id %}disabled{% endif %}>
+        </td>
         <td class="px-5 py-3.5 font-medium text-slate-900">{{ row.full_name }}</td>
         <td class="px-4 py-3.5">
           {{ status_badge(row.submission_status) }}
@@ -208,6 +234,7 @@
     </tbody>
   </table>
 </div>
+</form>
 {% else %}
 <div class="text-center py-20 bg-white rounded-xl border border-slate-200 shadow-sm">
   <div class="text-4xl mb-3">📭</div>

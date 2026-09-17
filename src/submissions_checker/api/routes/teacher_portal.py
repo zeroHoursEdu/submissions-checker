@@ -403,8 +403,18 @@ async def teacher_assignment(
     sa_id: int,
     db: DBSession,
     current_user: TeacherUser,
+    bulk: str = "",
 ) -> HTMLResponse:
     await require_subject_access(db, subject_id, current_user)
+
+    # "?bulk=applied,skipped" is the flash from the bulk action redirect.
+    bulk_result: dict[str, int] | None = None
+    if bulk:
+        try:
+            applied_s, skipped_s = bulk.split(",", 1)
+            bulk_result = {"applied": int(applied_s), "skipped": int(skipped_s)}
+        except ValueError:
+            bulk_result = None
 
     assignment_result = await db.execute(
         select(SubjectsAssignment)
@@ -542,6 +552,7 @@ async def teacher_assignment(
             "snapshot_flags": snapshot_flags,
             "ai_flags": ai_flags,
             "stuck_ids": stuck_ids,
+            "bulk_result": bulk_result,
         },
     )
 
@@ -810,6 +821,7 @@ async def teacher_students(
     current_user: TeacherUser,
     imported: int = 0,
     skipped: int = 0,
+    resent: int = -1,
 ) -> HTMLResponse:
     """Student registration overview: list students with account/email/login status,
     scoped to students enrolled in subjects the current teacher owns (ADMIN sees all)."""
@@ -857,8 +869,67 @@ async def teacher_students(
             "students": students,
             "imported": imported,
             "skipped": skipped,
+            "resent": resent,
         },
     )
+
+
+@router.post("/students/resend-credentials")
+async def teacher_resend_credentials(
+    db: DBSession,
+    current_user: TeacherUser,
+    student_ids: list[int] = Form(default=[]),
+) -> RedirectResponse:
+    """Rotate the password of each selected student and email the new credentials.
+
+    Scope is the same as the roster page: students enrolled in a subject this teacher
+    owns (ADMIN: anyone). Out-of-scope ids are ignored, not errors.
+    """
+    scope = select(Student.id).where(Student.id.in_(student_ids))
+    if current_user.role != UserRole.ADMIN:
+        scope = scope.join(SubjectsStudents, SubjectsStudents.student_id == Student.id).join(
+            Subject,
+            and_(
+                Subject.id == SubjectsStudents.subject_id,
+                Subject.owner_id == current_user.user_id,
+            ),
+        )
+    visible_ids = {row[0] for row in await db.execute(scope)}
+
+    resent = 0
+    for student_id in visible_ids:
+        student = await db.get(Student, student_id)
+        user = (
+            await db.execute(select(User).where(User.student_id == student_id))
+        ).scalar_one_or_none()
+        if student is None or user is None:
+            continue
+        password = _generate_password()
+        user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
+        db.add(
+            OutboxMessage(
+                event_type=OutboxEventType.SEND_CREDENTIALS,
+                state=OutboxMessageState.PENDING,
+                payload={
+                    "student_email": student.email,
+                    "full_name": student.full_name,
+                    "username": user.username,
+                    "password": password,
+                },
+            )
+        )
+        resent += 1
+
+    await audit(
+        db,
+        action="resend_credentials",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        student_ids=sorted(visible_ids),
+        resent=resent,
+    )
+    await db.commit()
+    return RedirectResponse(url=f"/teacher/students?resent={resent}", status_code=303)
 
 
 @router.post("/students/import")
@@ -1086,33 +1157,20 @@ async def teacher_download_submission(
     )
 
 
-@router.post("/submissions/{submission_id}/review")
-async def teacher_review_submission_action(
-    submission_id: int,
+async def _apply_review_decision(
     db: DBSession,
+    submission: Submission,
+    action: str,
+    reason: str,
     current_user: TeacherUser,
-    action: str = Form(...),
-    reason: str = Form(""),
-) -> RedirectResponse:
-    result = await db.execute(
-        select(Submission)
-        .where(Submission.id == submission_id)
-        .options(
-            selectinload(Submission.students_assignment).selectinload(
-                StudentAssignment.subjects_assignment
-            ),
-            selectinload(Submission.plugin_config),
-        )
-    )
-    submission = result.scalar_one_or_none()
-    if submission is None or submission.status != SubmissionStatus.AWAITING_TEACHER_REVIEW:
-        raise HTTPException(status_code=404)
+) -> str:
+    """Approve or reject one AWAITING_TEACHER_REVIEW submission; returns the event applied.
 
-    sa = submission.students_assignment
-    subjects_assignment = sa.subjects_assignment
-
-    await require_subject_access(db, subjects_assignment.subject_id, current_user)
-
+    Shared by the single review form and the board's bulk action so both take the
+    same path: quiz routing, grade finalization, the SUBMISSION_REVIEWED email and
+    the audit row. Does not commit.
+    """
+    subjects_assignment = submission.students_assignment.subjects_assignment
     clean_reason = reason.strip()
     if action == "approve":
         has_quiz = False
@@ -1149,33 +1207,133 @@ async def teacher_review_submission_action(
     if event == "teacher_approve":
         await finalize_grade(db, submission)
 
-    # Queue email notification to student
     db.add(
         OutboxMessage(
             event_type=OutboxEventType.SUBMISSION_REVIEWED,
             state=OutboxMessageState.PENDING,
             payload={
-                "submission_id": submission_id,
+                "submission_id": submission.id,
                 "action": action,
                 "reason": clean_reason,
             },
         )
     )
-
     await audit(
         db,
         action=f"teacher_{action}_submission",
         actor_id=current_user.user_id,
         actor_username=current_user.username,
         target_type="submission",
-        target_id=submission_id,
+        target_id=submission.id,
         reason=clean_reason,
     )
+    return event
 
+
+@router.post("/submissions/{submission_id}/review")
+async def teacher_review_submission_action(
+    submission_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    action: str = Form(...),
+    reason: str = Form(""),
+) -> RedirectResponse:
+    result = await db.execute(
+        select(Submission)
+        .where(Submission.id == submission_id)
+        .options(
+            selectinload(Submission.students_assignment).selectinload(
+                StudentAssignment.subjects_assignment
+            ),
+            selectinload(Submission.plugin_config),
+        )
+    )
+    submission = result.scalar_one_or_none()
+    if submission is None or submission.status != SubmissionStatus.AWAITING_TEACHER_REVIEW:
+        raise HTTPException(status_code=404)
+
+    subjects_assignment = submission.students_assignment.subjects_assignment
+    await require_subject_access(db, subjects_assignment.subject_id, current_user)
+
+    await _apply_review_decision(db, submission, action, reason, current_user)
     await db.commit()
 
     return RedirectResponse(
         url=f"/teacher/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}",
+        status_code=303,
+    )
+
+
+@router.post("/subjects/{subject_id}/assignments/{sa_id}/bulk")
+async def teacher_bulk_board_action(
+    subject_id: int,
+    sa_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    action: str = Form(...),
+    submission_ids: list[int] = Form(default=[]),
+    reason: str = Form(""),
+) -> RedirectResponse:
+    """Apply approve / reject / rerun to every selected row that is eligible.
+
+    Rows in the wrong status or belonging to another assignment are counted as
+    skipped, never errors — a teacher selecting a whole page should not be stopped
+    by one already-graded row.
+    """
+    await require_subject_access(db, subject_id, current_user)
+    if action not in ("approve", "reject", "rerun"):
+        raise HTTPException(status_code=400, detail="Invalid action")
+    if action == "reject" and not reason.strip():
+        raise HTTPException(status_code=422, detail="A reason is required to reject")
+
+    subs = (
+        (
+            await db.execute(
+                select(Submission)
+                .where(Submission.id.in_(submission_ids))
+                .options(
+                    selectinload(Submission.students_assignment).selectinload(
+                        StudentAssignment.subjects_assignment
+                    ),
+                    selectinload(Submission.plugin_config),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    applied = skipped = 0
+    for sub in subs:
+        if sub.students_assignment.subjects_assignment_id != sa_id:
+            skipped += 1
+            continue
+        if action == "rerun":
+            try:
+                _requeue_checks(db, sub)
+            except InvalidTransitionError:
+                skipped += 1
+                continue
+        elif sub.status != SubmissionStatus.AWAITING_TEACHER_REVIEW:
+            skipped += 1
+            continue
+        else:
+            await _apply_review_decision(db, sub, action, reason, current_user)
+        applied += 1
+
+    await audit(
+        db,
+        action="bulk_review",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        subject_id=subject_id,
+        sa_id=sa_id,
+        bulk_action=action,
+        applied=applied,
+        skipped=skipped,
+    )
+    await db.commit()
+    return RedirectResponse(
+        url=f"/teacher/subjects/{subject_id}/assignments/{sa_id}?bulk={applied},{skipped}",
         status_code=303,
     )
 

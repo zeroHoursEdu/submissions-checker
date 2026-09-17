@@ -1045,3 +1045,163 @@ async def test_other_teacher_cannot_unstick(
     authenticate(client, other)
     r = await client.post(f"/teacher/submissions/{sub.id}/rerun-checks", follow_redirects=False)
     assert r.status_code == 403
+
+
+# ── Bulk actions ─────────────────────────────────────────────────────────────
+
+
+async def _board_pair(db, teacher, make_student, statuses):
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    subs = []
+    for st in statuses:
+        student = await make_student()
+        await _enroll(db, subject.id, student.id)
+        subs.append(await _make_submission(db, sa.id, student.id, status=st))
+    return subject, sa, subs
+
+
+async def test_bulk_approve_completes_only_reviewable_rows(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, sa, (s1, s2) = await _board_pair(
+        db,
+        teacher,
+        make_student,
+        [SubmissionStatus.AWAITING_TEACHER_REVIEW, SubmissionStatus.COMPLETED],
+    )
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/subjects/{subject.id}/assignments/{sa.id}/bulk",
+        data={"action": "approve", "submission_ids": [str(s1.id), str(s2.id)]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].endswith("?bulk=1,1")
+    await db.refresh(s1)
+    await db.refresh(s2)
+    assert s1.status == SubmissionStatus.COMPLETED
+    assert s2.status == SubmissionStatus.COMPLETED  # untouched
+    reviewed = (
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.SUBMISSION_REVIEWED
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [m.payload["submission_id"] for m in reviewed] == [s1.id]
+
+
+async def test_bulk_reject_requires_reason_and_records_it(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, sa, (s1,) = await _board_pair(
+        db, teacher, make_student, [SubmissionStatus.AWAITING_TEACHER_REVIEW]
+    )
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/subjects/{subject.id}/assignments/{sa.id}/bulk",
+        data={"action": "reject", "submission_ids": [str(s1.id)], "reason": ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 422
+    r = await client.post(
+        f"/teacher/subjects/{subject.id}/assignments/{sa.id}/bulk",
+        data={"action": "reject", "submission_ids": [str(s1.id)], "reason": "no tests"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    await db.refresh(s1)
+    assert s1.status == SubmissionStatus.FAILED
+    assert s1.test_results == {"check_reason": "no tests"}
+
+
+async def test_bulk_rerun_requeues(client: AsyncClient, db, teacher, make_student) -> None:
+    subject, sa, (s1, s2) = await _board_pair(
+        db, teacher, make_student, [SubmissionStatus.TEST_FAILED, SubmissionStatus.COMPLETED]
+    )
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/subjects/{subject.id}/assignments/{sa.id}/bulk",
+        data={"action": "rerun", "submission_ids": [str(s1.id), str(s2.id)]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"].endswith("?bulk=1,1")
+    await db.refresh(s1)
+    assert s1.status == SubmissionStatus.PENDING
+
+
+async def test_bulk_ignores_submissions_of_other_assignments(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, sa, (s1,) = await _board_pair(
+        db, teacher, make_student, [SubmissionStatus.AWAITING_TEACHER_REVIEW]
+    )
+    other_sa = await _make_assignment(db, subject.id, code="a2", title="A2")
+    student = await make_student()
+    foreign = await _make_submission(
+        db, other_sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/subjects/{subject.id}/assignments/{sa.id}/bulk",
+        data={"action": "approve", "submission_ids": [str(s1.id), str(foreign.id)]},
+        follow_redirects=False,
+    )
+    assert r.headers["location"].endswith("?bulk=1,1")
+    await db.refresh(foreign)
+    assert foreign.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
+async def test_resend_credentials_rotates_password_and_enqueues_email(
+    client: AsyncClient, db, teacher, make_student, make_user
+) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    student = await make_student(email="resend@example.com")
+    await _enroll(db, subject.id, student.id)
+    user = await make_user(role=UserRole.STUDENT, username="resend-me", student=student)
+    old_hash = user.password_hash
+    authenticate(client, teacher)
+    r = await client.post(
+        "/teacher/students/resend-credentials",
+        data={"student_ids": [str(student.id)]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"] == "/teacher/students?resent=1"
+    await db.refresh(user)
+    assert user.password_hash != old_hash
+    creds = (
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.event_type == OutboxEventType.SEND_CREDENTIALS
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert creds[-1].payload["student_email"] == "resend@example.com"
+    assert creds[-1].payload["username"] == "resend-me"
+    assert creds[-1].payload["password"]
+
+
+async def test_resend_credentials_skips_students_outside_scope(
+    client: AsyncClient, db, teacher, make_student, make_user
+) -> None:
+    other = await make_user(role=UserRole.TEACHER, username="other-scope")
+    subject = await _make_subject(db, owner_id=other.id)
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    await make_user(role=UserRole.STUDENT, username="not-yours", student=student)
+    authenticate(client, teacher)
+    r = await client.post(
+        "/teacher/students/resend-credentials",
+        data={"student_ids": [str(student.id)]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"] == "/teacher/students?resent=0"

@@ -17,6 +17,12 @@
   </div>
 </div>
 
+{% if resent is defined and resent >= 0 %}
+<div class="mb-6 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 px-5 py-4 text-sm">
+  <span class="font-semibold">{{ vocab.teacher.resent_result }}: {{ resent }}</span>
+</div>
+{% endif %}
+
 {% if imported or skipped %}
 <div class="mb-6 flex items-start gap-3 rounded-xl border px-5 py-4
   {% if imported %}bg-emerald-50 border-emerald-200 text-emerald-800{% else %}bg-slate-50 border-slate-200 text-slate-700{% endif %}">
@@ -113,10 +119,22 @@
   </div>
 
   {% if students %}
+  <form method="POST" action="/teacher/students/resend-credentials" id="resend-form">
+  <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-3">
+    <button type="submit"
+            class="px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-300 text-xs font-medium hover:bg-slate-50 transition-colors">
+      {{ vocab.teacher.resend_credentials_selected }}
+    </button>
+    <span class="text-xs text-slate-400">{{ vocab.teacher.resend_credentials_hint }}</span>
+  </div>
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
         <tr class="bg-slate-50 border-b border-slate-100 text-left">
+          <th class="px-3 py-3">
+            <input type="checkbox" title="{{ vocab.teacher.bulk_select_all }}" class="rounded border-slate-300"
+                   onclick="document.querySelectorAll('#resend-form input[name=student_ids]').forEach(c => { if (!c.disabled) c.checked = this.checked; })">
+          </th>
           <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_name }}</th>
           <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_group }}</th>
           <th class="px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_email }}</th>
@@ -132,6 +150,10 @@
       <tbody class="divide-y divide-slate-100">
         {% for s in students %}
         <tr class="hover:bg-slate-50 transition-colors">
+          <td class="px-3 py-3">
+            <input type="checkbox" name="student_ids" value="{{ s.id }}" class="rounded border-slate-300"
+                   {% if not s.username %}disabled{% endif %}>
+          </td>
           <td class="px-4 py-3 font-medium text-slate-800">{{ s.full_name }}</td>
           <td class="px-4 py-3 text-slate-600">{{ s.group_name }}</td>
           <td class="px-4 py-3 text-slate-600 font-mono text-xs">{{ s.email }}</td>
@@ -165,6 +187,7 @@
       </tbody>
     </table>
   </div>
+  </form>
   {% else %}
   <div class="py-16 text-center">
     <svg class="mx-auto w-10 h-10 text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
