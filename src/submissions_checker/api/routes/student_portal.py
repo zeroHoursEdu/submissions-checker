@@ -321,21 +321,25 @@ async def assignment_detail(
 
     latest_sub = await squads.latest_submission(db, sa)
 
-    # Quiz attempt metadata: count used attempts across all submissions for this sa. Legacy
-    # NULL rows predate per-student attempts and belong to solo submissions by this same
-    # student, so they still count here.
-    attempts_used_result = await db.execute(
-        select(func.count(QuizAttempt.id)).where(
-            and_(
-                QuizAttempt.submission_id.in_(
-                    select(Submission.id).where(Submission.students_assignment_id == sa_id)
-                ),
-                QuizAttempt.status.in_([QuizAttemptStatus.COMPLETED, QuizAttemptStatus.TIMED_OUT]),
-                or_(QuizAttempt.student_id == student_id, QuizAttempt.student_id.is_(None)),
+    # Quiz attempt metadata: count this student's used attempts on the squad-resolved latest
+    # submission — NOT the raw sa_id, since for a squad member who didn't upload, the shared
+    # submission's students_assignment_id belongs to whoever did. Legacy NULL student_id rows
+    # predate per-student attempts and belong to solo submissions by this same student, so
+    # they still count here.
+    quiz_attempts_used = 0
+    if latest_sub is not None:
+        attempts_used_result = await db.execute(
+            select(func.count(QuizAttempt.id)).where(
+                and_(
+                    QuizAttempt.submission_id == latest_sub.id,
+                    QuizAttempt.status.in_(
+                        [QuizAttemptStatus.COMPLETED, QuizAttemptStatus.TIMED_OUT]
+                    ),
+                    or_(QuizAttempt.student_id == student_id, QuizAttempt.student_id.is_(None)),
+                )
             )
         )
-    )
-    quiz_attempts_used: int = attempts_used_result.scalar_one() or 0
+        quiz_attempts_used = attempts_used_result.scalar_one() or 0
 
     # Latest attempt id (for result link) and max_attempts from config
     quiz_attempt_id: int | None = None

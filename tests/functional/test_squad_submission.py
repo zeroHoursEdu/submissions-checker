@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from submissions_checker.db.models import (
+    QuizAttempt,
     StudentAssignment,
     Subject,
     SubjectsAssignment,
@@ -17,7 +18,7 @@ from submissions_checker.db.models import (
     Submission,
     User,
 )
-from submissions_checker.db.models.enums import UserRole
+from submissions_checker.db.models.enums import QuizAttemptStatus, UserRole
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.main import app
 from submissions_checker.services import squads
@@ -129,6 +130,31 @@ async def test_one_upload_unlocks_the_quiz_for_both(db, make_user, make_student,
         assert status_b.json()["status"] == "QUIZ_SENT"
         list_b = await cb.get(f"/portal/subjects/{subject.id}")
         assert "👥" in list_b.text
+
+        # B's own (failed) attempt on the shared submission must count toward B's attempts
+        # used, even though the submission's students_assignment_id belongs to A (the
+        # uploader) — the shared submission's students_assignment_id is A's, not B's.
+        from datetime import UTC, datetime
+
+        db.add(
+            QuizAttempt(
+                submission_id=sub.id,
+                student_id=ub.student_id,
+                questions_snapshot=[],
+                config_snapshot={"max_quiz_attempts": 2},
+                started_at=datetime.now(UTC),
+                status=QuizAttemptStatus.COMPLETED,
+                is_passed=False,
+                score=0,
+                max_score=1,
+            )
+        )
+        await db.commit()
+
+        page_b_after = await cb.get(f"/portal/subjects/{subject.id}/assignments/{sa_b.id}")
+        assert "1/2" in page_b_after.text
+        page_a = await ca.get(f"/portal/subjects/{subject.id}/assignments/{sa_a.id}")
+        assert "0/2" in page_a.text
 
 
 async def test_second_member_cannot_upload_a_second_active_submission(
