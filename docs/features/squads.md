@@ -54,7 +54,7 @@ Omit the block (or remove it on a later upload) to keep every student solo — s
 [Edge cases](#edge-cases) for what happens to squads that already exist.
 
 Once enabled, the subject page's **Операції** tab gains a "Сквади" block: a table of
-existing squads (name, members, locked/pending, submission count) and an assign form —
+existing squads (name, members, locked/pending) and an assign form —
 pick 2..`maxAllowedSize` eligible students from a multi-select, optional squad name,
 "Сформувати сквад". Ineligible picks (already in a squad, already submitted, not
 enrolled, duplicate) come back as a flash naming the student and no squad is created.
@@ -76,7 +76,7 @@ The subject's assignment list shows a squad card above the assignment table, one
 | Card state | What the student sees |
 |---|---|
 | Sizes disabled | no card |
-| Eligible (no submissions, not already in a squad) | "Працювати у сквaді": multi-select of eligible classmates (up to max−1) → "Запросити у сквад" |
+| Eligible (no submissions, not already in a squad) | "Сквад" heading + hint text, multi-select of eligible classmates (up to max−1) → "Запросити у сквад" |
 | Incoming invite(s) | "{name} запрошує вас у сквад" → "Прийняти" / "Відхилити" |
 | Outgoing, still pending | current members + "Очікуємо відповіді: {names}" + "Скасувати запрошення" (creator only — see [Edge cases](#edge-cases)); a note that submitting is blocked until every invite is resolved |
 | Locked | members + `👥` badge, no controls |
@@ -89,12 +89,14 @@ shows a squad panel — one row per member: submitted?, quiz state (не поч�
 ✓ / ✗). The quiz button reads **"Пройти свою частину тесту (k з total питань)"** — only
 that member's slice. While the squad isn't complete, the grade block says "Оцінка
 з'явиться, коли всі учасники сквaду пройдуть тест"; once graded it shows the mark, the
-badge, and a tooltip "середнє по сквaду, округлено вгору".
+badge, and — as a note under the panel, not a tooltip — "Спільна оцінка сквaду — середнє
+по учасниках, округлене вгору."
 
-The quiz page and result page both carry a header line: "Ваша частина: k питань з
-total; партнер(и): {names}" — the result page repeats the "unified mark comes after
-everyone passes" note while the squad is still incomplete. The student summary page
-shows the same badge in the grade column for squad rows.
+The quiz-taking pages (question view and the per-question stepper) carry a header line:
+"Ваша частина: k з total питань · Партнер(и): {names}". The result page does **not**
+repeat that header — while the squad is still incomplete it shows only the same "Оцінка
+з'явиться…" note as the assignment detail page. The student summary page shows the same
+badge in the grade column for squad rows.
 
 ## Common flow
 
@@ -149,7 +151,7 @@ then quiz, then teacher approval), squad of two (A, B):
 | Config's `squads.maxAllowedSize` is lowered, or the `squads:` block is removed | Never touches existing squads or their submissions; only stops new squads from forming (and caps new ones at the new size). Existing locked squads keep working end to end. |
 | Teacher re-runs checks on a squad submission | Resets the submission status as usual; `squad_quiz_draw` in `source_metadata` is untouched, so a re-sent quiz reuses the same draw and slices. |
 | A member is unenrolled from the subject after joining a squad | Their `squad_members` row stays (no FK to enrollment); `quiz_complete` only requires currently-enrolled members to have passed, so the gradebook simply stops listing the unenrolled member. |
-| Панель "На перевірці" count (student dashboard) | Known limitation — counts only the uploader, not every squad member. |
+| Панель "На перевірці" count (teacher's subject Панель tab) | Known limitation — counts only the uploader, not every squad member. |
 | Grid waiting (⏳) tooltip | Known limitation — shows a placeholder, not the actual partner names. |
 | Declining or cancelling an invite | Not written to the audit log (unlike `squad_create` / `squad_join` / `squad_assign`) — known limitation. |
 | Need to undo a locked squad, or drop a member entirely | DB only, by design (no UI/API undoes a lock): `DELETE FROM squad_members WHERE squad_id = … AND student_id = …` to drop a member, or `UPDATE squads SET locked_at = NULL WHERE id = …` to unlock one for further changes. |
