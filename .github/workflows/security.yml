@@ -80,6 +80,8 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
+          # Path-scoped accepted findings with their reasons.
+          trivyignores: .trivyignore.yaml
 
   trivy-image:
     name: Trivy (app image)

@@ -12,9 +12,13 @@
 #           submissions-checker-runner:<ver> run-suite /subject/tests/suite.yml
 
 # Docker CLI only (the daemon is the host's, reached over the mounted socket).
-FROM docker:27-cli AS dockercli
+FROM docker:29-cli AS dockercli
 
 FROM python:3.12-slim
+
+# Debian security fixes published after the base image was cut.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 

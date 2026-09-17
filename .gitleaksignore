@@ -1,0 +1,11 @@
+# Findings reviewed on 2026-09-17: none is a real secret. Format: commit:path:rule:line.
+# Empty GRAFANA_CLOUD_PROM_TOKEN= placeholder lines in an example env file and a plan doc.
+e5a2dc144acda98e7569ac8a7588878e733bd000:.env.prod.example:generic-api-key:150
+290ba206ca930ccf25863ff19dfe9fd8f019ca4a:docs/superpowers/plans/2026-09-15-prometheus-grafana-observability.md:generic-api-key:1943
+# The e2e stack's documented throwaway SECRET_KEY, quoted in the same plan doc.
+290ba206ca930ccf25863ff19dfe9fd8f019ca4a:docs/superpowers/plans/2026-09-15-prometheus-grafana-observability.md:generic-api-key:1956
+# Test fixtures: a literal feedback token and a 64-hex "strong key" used only in unit tests.
+7c328a69ab1cb90863dceb1581e7ed556f179679:tests/functional/test_feedback.py:generic-api-key:175
+a3a9ca024547b3261a317ebf29a31bad6fa1dad6:tests/functional/test_feedback.py:generic-api-key:180
+c7f6127252ffd443f226760f4595e8a45cac48c3:tests/unit/test_ai_provider.py:generic-api-key:21
+a3a9ca024547b3261a317ebf29a31bad6fa1dad6:tests/unit/test_config.py:generic-api-key:15

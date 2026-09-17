@@ -14,7 +14,7 @@
 # The Docker CLI the app shells out to when launching check sandboxes. Copied from the
 # official CLI image rather than installed via apt `docker.io`, which drags in the daemon
 # and roughly 200MB the app never uses. The daemon is the host's, reached over the socket.
-FROM docker:27-cli AS dockercli
+FROM docker:29-cli AS dockercli
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +25,11 @@ FROM python:3.12-slim AS base
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
+
+# The slim base lags Debian's security archive by days to weeks; pick up every fix
+# that has been published since the base image was cut.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 
@@ -89,6 +94,11 @@ ARG APP_REVISION=unknown
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     APP_REVISION=${APP_REVISION}
+
+# Same as the base stage: Debian security fixes published after the base image was
+# cut. The security workflow scans this image and fails on any fixed HIGH/CRITICAL.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=builder /install /usr/local

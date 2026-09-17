@@ -1,0 +1,13 @@
+# Reviewed 2026-09-17. Scoped by path so the same check still guards the app image,
+# which does run as an unprivileged user.
+misconfigurations:
+  - id: DS-0002
+    paths:
+      # Drives the host Docker daemon through a mounted socket; the socket is owned
+      # by the host's docker group, whose id is host-specific, so a fixed non-root
+      # user in the image could not open it.
+      - docker/runner/Dockerfile
+      # pg_dump / mc clients writing into a host bind mount owned by the host; the
+      # container's only privilege is over that directory.
+      - docker/backup/Dockerfile
+    statement: Both images need host-granted access that a fixed image user cannot hold.
