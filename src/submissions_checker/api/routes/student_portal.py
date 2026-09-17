@@ -461,7 +461,26 @@ async def assignment_status(
     if sa is None or sa.student_id != student_id:
         raise HTTPException(status_code=404)
 
-    latest = await squads.latest_submission(db, sa) if sa else None
+    # Short-circuit to the plain single query when squads are off for this subject —
+    # this endpoint is polled every few seconds while a check runs, and the squad-aware
+    # path (subject + squad + member lookups) is pure overhead for the common case.
+    subjects_assignment = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
+    squad_max = None
+    if subjects_assignment is not None:
+        subject = await db.get(Subject, subjects_assignment.subject_id)
+        squad_max = subject.squad_max_size if subject is not None else None
+
+    if squad_max is None:
+        latest = (
+            await db.execute(
+                select(Submission)
+                .where(Submission.students_assignment_id == sa_id)
+                .order_by(Submission.created_at.desc(), Submission.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    else:
+        latest = await squads.latest_submission(db, sa)
     status = latest.status if latest else None
     return JSONResponse(
         {
@@ -511,6 +530,11 @@ async def submit_assignment(
             raise HTTPException(
                 status_code=409,
                 detail="Squad invitation pending; answer or cancel it before submitting.",
+            )
+        if await squads.in_forming_squad(db, subjects_assignment.subject_id, student_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Squad not yet locked; wait until it fills before submitting.",
             )
         squad = await squads.active_squad(db, subjects_assignment.subject_id, student_id)
     scope = await squads.member_sa_ids(db, squad, subjects_assignment.id) if squad else [sa_id]

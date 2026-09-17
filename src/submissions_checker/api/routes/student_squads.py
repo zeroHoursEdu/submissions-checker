@@ -60,6 +60,9 @@ async def _answer(
     db: DBSession, subject_id: int, student_id: int, invite_id: int, verb: str
 ) -> RedirectResponse:
     await _require_enrolled(db, subject_id, student_id)
+    inv_subject_id = await squads.invite_subject_id(db, invite_id)
+    if inv_subject_id is None or inv_subject_id != subject_id:
+        return _back(subject_id, error="not_yours")
     try:
         if verb == "accept":
             await squads.accept_invite(db, invite_id, student_id)
@@ -71,9 +74,14 @@ async def _answer(
             await squads.cancel_invite(db, invite_id, student_id)
             flash = "cancelled"
     except SquadError as exc:
-        # An accept refused for eligibility has already flipped the invite to CANCELLED;
-        # keep that write.
-        await db.commit()
+        if verb == "accept":
+            # An accept refused for eligibility has already flipped the invite to
+            # CANCELLED; keep that write.
+            await db.commit()
+        else:
+            # decline/cancel raise before making any change (not_pending, not_yours) —
+            # roll back rather than committing whatever else happens to be pending.
+            await db.rollback()
         return _back(subject_id, error=exc.reason)
     await db.commit()
     return _back(subject_id, flash=flash)

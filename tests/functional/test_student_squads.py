@@ -102,6 +102,34 @@ async def test_only_invitee_can_accept(db, make_user, make_student) -> None:
         assert r.status_code == 303 and "squad_error=not_yours" in r.headers["location"]
 
 
+async def test_answer_rejects_invite_from_a_different_subject(db, make_user, make_student) -> None:
+    """M11: an invite belongs to subject 1's squad; answering it through subject 2's
+    URL (student happens to be enrolled in both) must be refused, not silently applied
+    to the wrong subject's squad."""
+    subject1, asg1 = await _subject(db)
+    subject2, asg2 = await _subject(db)
+    ua, ub = await _pair(db, make_user, make_student, subject1, asg1)
+    db.add(SubjectsStudents(subject_id=subject2.id, student_id=ub.student_id))
+    db.add(StudentAssignment(student_id=ub.student_id, subjects_assignment_id=asg2.id))
+    await db.commit()
+
+    async with _client(ua) as ca, _client(ub) as cb:
+        await ca.post(
+            f"/portal/subjects/{subject1.id}/squad/create",
+            data={"invitee_ids": [str(ub.student_id)]},
+        )
+        inv = (await db.execute(select(SquadInvite))).scalar_one()
+        r = await cb.post(
+            f"/portal/subjects/{subject2.id}/squad/invites/{inv.id}/accept",
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        assert r.headers["location"] == f"/portal/subjects/{subject2.id}?squad_error=not_yours"
+
+        refreshed = await db.get(SquadInvite, inv.id)
+        assert refreshed.status == SquadInviteStatus.PENDING
+
+
 async def test_decline_and_cancel(db, make_user, make_student) -> None:
     subject, asg = await _subject(db)
     ua, ub = await _pair(db, make_user, make_student, subject, asg)

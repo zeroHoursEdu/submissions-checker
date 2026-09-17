@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 
 from submissions_checker.db.models import (
     Group,
@@ -103,13 +104,35 @@ async def test_invite_accept_locks_at_max_and_cancels_other_invites(db_session) 
     assert locked.locked_at is not None
     assert {m.student_id for m in locked.members} == {a.id, b.id}
     assert {m.student.full_name for m in locked.members} == {"S0", "S1"}
-    other_inv = (
+    # B's other pending invite (C's) is cancelled by the join — and since that leaves
+    # C's squad with one member and no pending invites, I4 deletes it outright, taking
+    # the invite row with it via the FK cascade. Nothing left to select.
+    other_invites = (
         await db_session.execute(
             SquadInvite.__table__.select().where(SquadInvite.squad_id == other.id)
         )
-    ).one()
-    assert other_inv.status == SquadInviteStatus.CANCELLED
+    ).all()
+    assert other_invites == []
+    assert await squads.squad_of(db_session, subject.id, c.id) is None
     assert await squads.eligibility(db_session, subject.id, a.id) == "already_in_squad"
+
+
+async def test_accept_elsewhere_deletes_orphaned_single_member_squad(db_session) -> None:
+    """I4: A and C both invite B. B accepts A's invite — the sweep that cancels B's
+    other pending invite (C's) leaves C's squad at one member with no pending
+    invites; it must be deleted rather than left dangling."""
+    subject, asg, (a, b, c) = await _subject(db_session)
+    await squads.create_with_invites(db_session, subject.id, a.id, [b.id])
+    await squads.create_with_invites(db_session, subject.id, c.id, [b.id])
+    inv_a_id = await db_session.scalar(
+        select(SquadInvite.id).where(
+            SquadInvite.invited_student_id == b.id, SquadInvite.invited_by_student_id == a.id
+        )
+    )
+    await squads.accept_invite(db_session, inv_a_id, b.id)
+
+    assert await squads.squad_of(db_session, subject.id, c.id) is None
+    assert await squads.eligibility(db_session, subject.id, c.id) is None
 
 
 async def test_accept_is_refused_after_partner_submitted(db_session) -> None:

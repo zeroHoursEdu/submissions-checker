@@ -19,6 +19,7 @@ from submissions_checker.db.models import (
     User,
 )
 from submissions_checker.db.models.enums import QuizAttemptStatus, UserRole
+from submissions_checker.db.models.squad import SquadInvite
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.main import app
 from submissions_checker.services import squads
@@ -41,12 +42,19 @@ def _client(user: User) -> AsyncClient:
 
 
 async def _arrange(
-    db, make_user, make_student, teacher, *, review_mode: str = "quiz_then_teacher", quiz=None
+    db,
+    make_user,
+    make_student,
+    teacher,
+    *,
+    review_mode: str = "quiz_then_teacher",
+    quiz=None,
+    max_size: int = 2,
 ):
     """Subject with squads on, one quiz-first assignment, two enrolled consented students."""
     from datetime import UTC, datetime
 
-    subject = Subject(name="Sq", owner_id=teacher.id, squad_max_size=2)
+    subject = Subject(name="Sq", owner_id=teacher.id, squad_max_size=max_size)
     db.add(subject)
     await db.commit()
     await db.refresh(subject)
@@ -207,3 +215,41 @@ async def test_solo_student_on_squad_subject_is_unchanged(
         assert sub.squad_id is None
         page = await ca.get(f"/portal/subjects/{subject.id}/assignments/{sa_a.id}")
         assert "Start Quiz" in page.text and "Пройти свою частину" not in page.text
+
+
+async def test_member_of_unlocked_squad_cannot_upload_solo(
+    db, make_user, make_student, teacher
+) -> None:
+    """I3: A invites B and C into a squad_max_size=3 squad; B accepts, leaving the
+    squad at 2/3 (unlocked, since it's not yet full). B uploading solo before the
+    squad locks would let B's submission escape the squad it just joined."""
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(
+        db, make_user, make_student, teacher, max_size=3
+    )
+    uc_student = await make_student(full_name="Carla C")
+    uc = await make_user(role=UserRole.STUDENT, username="carla", student=uc_student)
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=uc.student_id))
+    db.add(StudentAssignment(student_id=uc.student_id, subjects_assignment_id=asg.id))
+    await db.commit()
+
+    await squads.create_with_invites(db, subject.id, ua.student_id, [ub.student_id, uc.student_id])
+    await db.commit()
+    # Select only the id column (not a hydrated SquadInvite) so accept_invite's own
+    # selectinload options actually take effect: db.get() returning an object already
+    # sitting under-loaded in the identity map would ignore them and lazy-load `.squad`
+    # outside the async greenlet.
+    inv_b_id = await db.scalar(
+        select(SquadInvite.id).where(SquadInvite.invited_student_id == ub.student_id)
+    )
+    await squads.accept_invite(db, inv_b_id, ub.student_id)
+    await db.commit()
+
+    squad = await squads.squad_of(db, subject.id, ub.student_id)
+    assert squad is not None and squad.locked_at is None  # 2/3, still forming
+
+    async with _client(ub) as cb:
+        r = await cb.post(
+            f"/portal/subjects/{subject.id}/assignments/{sa_b.id}/submit",
+            files={"file": ("r.zip", _zip(), "application/zip")},
+        )
+        assert r.status_code == 409

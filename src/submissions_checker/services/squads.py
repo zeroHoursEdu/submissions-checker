@@ -147,22 +147,53 @@ async def eligibility(db: AsyncSession, subject_id: int, student_id: int) -> str
     return None
 
 
-async def eligible_classmates(db: AsyncSession, subject_id: int, student_id: int) -> list[Student]:
-    result = await db.execute(
-        select(Student)
-        .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
-        .where(
-            SubjectsStudents.subject_id == subject_id,
-            Student.id != student_id,
-            Student.type == EntityType.REAL,
-        )
-        .order_by(Student.full_name)
+async def eligible_student_ids(db: AsyncSession, subject_id: int) -> set[int]:
+    """Every REAL student in the subject who could join or form a squad right now:
+    enrolled, minus anyone already in a squad, minus anyone with a submission.
+
+    Replaces the old per-student `eligibility()` loop (one that ran three queries per
+    candidate) with three set queries total. Empty when squads are disabled.
+    """
+    if await max_size(db, subject_id) is None:
+        return set()
+    enrolled_rows = await db.execute(
+        select(SubjectsStudents.student_id)
+        .join(Student, Student.id == SubjectsStudents.student_id)
+        .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
     )
-    out = []
-    for s in result.scalars().all():
-        if await eligibility(db, subject_id, s.id) is None:
-            out.append(s)
-    return out
+    enrolled = {sid for (sid,) in enrolled_rows}
+    if not enrolled:
+        return set()
+    in_squad_rows = await db.execute(
+        select(SquadMember.student_id).where(SquadMember.subject_id == subject_id)
+    )
+    in_squad = {sid for (sid,) in in_squad_rows}
+    has_submission_rows = await db.execute(
+        select(StudentAssignment.student_id)
+        .join(SubjectsAssignment, SubjectsAssignment.id == StudentAssignment.subjects_assignment_id)
+        .join(Submission, Submission.students_assignment_id == StudentAssignment.id)
+        .where(SubjectsAssignment.subject_id == subject_id)
+    )
+    has_submission = {sid for (sid,) in has_submission_rows}
+    return enrolled - in_squad - has_submission
+
+
+async def eligible_classmates(db: AsyncSession, subject_id: int, student_id: int) -> list[Student]:
+    ids = (await eligible_student_ids(db, subject_id)) - {student_id}
+    if not ids:
+        return []
+    result = await db.execute(
+        select(Student).where(Student.id.in_(ids)).order_by(Student.full_name)
+    )
+    return list(result.scalars().all())
+
+
+async def in_forming_squad(db: AsyncSession, subject_id: int, student_id: int) -> bool:
+    """True when the student is a member of a squad that has not yet locked — the
+    window where accepting/cancelling an invite could still change who a solo upload
+    would cover, so uploads are blocked outright."""
+    squad = await squad_of(db, subject_id, student_id)
+    return squad is not None and squad.locked_at is None
 
 
 async def has_pending_invites(db: AsyncSession, subject_id: int, student_id: int) -> bool:
@@ -253,6 +284,7 @@ async def _cancel_pending_of(
 ) -> None:
     result = await db.execute(
         select(SquadInvite)
+        .options(selectinload(SquadInvite.squad).selectinload(Squad.members))
         .join(Squad, Squad.id == SquadInvite.squad_id)
         .where(
             Squad.subject_id == subject_id,
@@ -263,17 +295,35 @@ async def _cancel_pending_of(
             ),
         )
     )
+    affected: dict[int, Squad] = {}
     for inv in result.scalars():
         if exclude_invite_id is not None and inv.id == exclude_invite_id:
             continue
         inv.status = SquadInviteStatus.CANCELLED
+        affected[inv.squad_id] = inv.squad
+
+    # The squad behind exclude_invite_id is mid-transaction in the caller (e.g. the
+    # member just joined it, or it is being formed) — its membership hasn't settled,
+    # so it is never safe to judge empty or delete from inside this sweep.
+    excluded_squad_id = (
+        await db.scalar(select(SquadInvite.squad_id).where(SquadInvite.id == exclude_invite_id))
+        if exclude_invite_id is not None
+        else None
+    )
+    for squad_id, squad in affected.items():
+        if squad_id == excluded_squad_id:
+            continue
+        if await _delete_if_empty(db, squad) and squad.created_by_student_id is not None:
+            await _notify_student(db, squad.created_by_student_id, "cancelled", subject_id)
 
 
-async def _delete_if_empty(db: AsyncSession, squad: Squad) -> None:
+async def _delete_if_empty(db: AsyncSession, squad: Squad) -> bool:
     """Delete a squad left with one member, no PENDING invites and unlocked.
 
-    The spec forbids lingering solo squads — this is shared by cancel_invite and
-    decline_invite, the two ways a squad can drop back to one member.
+    The spec forbids lingering solo squads — this is shared by cancel_invite,
+    decline_invite and `_cancel_pending_of` (a squad-mate's invite dying because the
+    invited student joined a different squad first), the ways a squad can drop back
+    to one member. Returns True when the squad was actually deleted.
     """
     still_pending = await db.scalar(
         select(func.count(SquadInvite.id)).where(
@@ -283,6 +333,19 @@ async def _delete_if_empty(db: AsyncSession, squad: Squad) -> None:
     if len(squad.members) <= 1 and not still_pending and squad.locked_at is None:
         await db.delete(squad)
         await db.flush()
+        return True
+    return False
+
+
+async def invite_subject_id(db: AsyncSession, invite_id: int) -> int | None:
+    """The subject a pending invite's squad belongs to — lets a route verify the URL's
+    subject_id actually matches the invite before acting on it."""
+    subject_id: int | None = await db.scalar(
+        select(Squad.subject_id)
+        .join(SquadInvite, SquadInvite.squad_id == Squad.id)
+        .where(SquadInvite.id == invite_id)
+    )
+    return subject_id
 
 
 async def create_with_invites(

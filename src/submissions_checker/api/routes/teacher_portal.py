@@ -375,23 +375,19 @@ async def teacher_subject(
     squad_candidates: list[Student] = []
     if subject.squad_max_size is not None:
         squad_list = await squads.list_squads(db, subject_id)
-        enrolled = (
-            (
-                await db.execute(
-                    select(Student)
-                    .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
-                    .where(
-                        SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL
+        candidate_ids = await squads.eligible_student_ids(db, subject_id)
+        if candidate_ids:
+            squad_candidates = list(
+                (
+                    await db.execute(
+                        select(Student)
+                        .where(Student.id.in_(candidate_ids))
+                        .order_by(Student.full_name)
                     )
-                    .order_by(Student.full_name)
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        )
-        for s in enrolled:
-            if await squads.eligibility(db, subject_id, s.id) is None:
-                squad_candidates.append(s)
     squad_flash = request.query_params.get("squad")
     squad_error = request.query_params.get("squad_error")
 
