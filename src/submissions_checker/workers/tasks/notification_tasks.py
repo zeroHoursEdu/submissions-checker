@@ -290,6 +290,10 @@ async def execute_deadline_reminder_task(db: AsyncSession, payload: dict[str, An
     assignment = student_assignment.subjects_assignment
     subject = assignment.subject
 
+    if not await _is_email_enabled(db, student.id, NotificationCase.DEADLINE_REMINDER):
+        logger.info("deadline_reminder_opted_out", student_id=student.id, sa_id=sa_id)
+        return
+
     portal_url = (
         f"{settings.app_base_url.rstrip('/')}"
         f"/portal/subjects/{subject.id}/assignments/{student_assignment.id}"

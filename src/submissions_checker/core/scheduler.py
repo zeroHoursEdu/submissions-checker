@@ -39,6 +39,7 @@ def init_scheduler() -> AsyncIOScheduler:
 def _register_jobs() -> None:
     """Register all scheduled jobs with the scheduler."""
     from submissions_checker.core.config import get_settings
+    from submissions_checker.workers.scheduled.deadline_reminders import run_deadline_reminders
     from submissions_checker.workers.scheduled.metrics_refresh import refresh_metrics
     from submissions_checker.workers.scheduled.outbox_processor import process_outbox_messages
     from submissions_checker.workers.scheduled.subject_stats_refresh import (
@@ -101,6 +102,21 @@ def _register_jobs() -> None:
     logger.info(
         "Registered subject stats refresh job (interval: %ss)",
         settings.subject_stats_refresh_interval,
+    )
+
+    # Deadline reminders — enqueue DEADLINE_REMINDER emails for unsubmitted work
+    scheduler.add_job(
+        run_deadline_reminders,
+        trigger=IntervalTrigger(seconds=settings.deadline_reminder_interval),
+        id="deadline_reminders",
+        name="Enqueue deadline reminders",
+        replace_existing=True,
+        max_instances=1,
+    )
+
+    logger.info(
+        "Registered deadline reminders job (interval: %ss)",
+        settings.deadline_reminder_interval,
     )
 
 

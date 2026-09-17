@@ -95,6 +95,7 @@ class QuizDisputeStatus(enum.StrEnum):
 class NotificationCase(enum.StrEnum):
     SUBMISSION_CHECKED = "SUBMISSION_CHECKED"
     FEEDBACK_REQUEST = "FEEDBACK_REQUEST"
+    DEADLINE_REMINDER = "DEADLINE_REMINDER"
 
     def __str__(self) -> str:
         return self.value

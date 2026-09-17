@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     # mark, pass %, pending review, cheating %) are recomputed per subject.
     subject_stats_refresh_interval: int = 300
 
+    # Deadline reminders: students with no submission get one email when an
+    # assignment's deadline is within this many days; the job runs on this interval.
+    deadline_reminder_days_before: int = 2
+    deadline_reminder_interval: int = 3600
+
     # Subject plugins directory (gitignored; each subdirectory is a plugin with config.yml)
     plugins_dir: str = "plugins"
 
