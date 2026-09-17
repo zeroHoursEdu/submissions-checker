@@ -1016,6 +1016,42 @@ async def test_feedback_export_csv_contains_responses(
     assert "lectures" in resp.text
 
 
+async def test_feedback_export_csv_neutralises_formula_cells(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """Feedback text is student-written free text; a leading '=' must be escaped."""
+    semester = await _make_active_semester(db)
+    subject = await _make_subject(db, owner_id=teacher.id)
+    student = await make_student(full_name="Grace Hopper", email="grace@example.com")
+    await _enroll(db, subject.id, student.id)
+    fr = FeedbackRequest(
+        subject_id=subject.id, semester_id=semester.id, created_by_teacher_id=teacher.id
+    )
+    db.add(fr)
+    await db.flush()
+    token = FeedbackToken(feedback_request_id=fr.id, student_id=student.id, token="tok-f")
+    db.add(token)
+    await db.flush()
+    db.add(
+        FeedbackResponse(
+            feedback_token_id=token.id,
+            subject_id=subject.id,
+            rating=1,
+            went_well='=HYPERLINK("http://evil")',
+            went_bad="+1",
+            to_change="@x",
+        )
+    )
+    await db.commit()
+
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}/feedback/export.csv")
+    assert resp.status_code == 200
+    assert "'=HYPERLINK" in resp.text
+    assert ",'+1,'@x," in resp.text
+    assert ",=HYPERLINK" not in resp.text
+
+
 async def test_feedback_export_csv_empty_returns_header_only(
     client: AsyncClient, db, teacher
 ) -> None:

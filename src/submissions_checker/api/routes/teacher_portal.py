@@ -65,6 +65,7 @@ from submissions_checker.services.gradebook import (
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
 from submissions_checker.services.storage import StorageService
+from submissions_checker.utils.csv_export import csv_safe
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
 )
@@ -1776,10 +1777,10 @@ async def export_grades_csv(
     for r in rows:
         writer.writerow(
             [
-                r.full_name,
-                r.email,
-                r.group_name,
-                r.assignment_title,
+                csv_safe(r.full_name),
+                csv_safe(r.email),
+                csv_safe(r.group_name),
+                csv_safe(r.assignment_title),
                 r.grade if r.grade is not None else "",
                 r.max_grade,
                 r.submission_status or "",
@@ -2063,14 +2064,15 @@ async def export_feedback_csv(
         ]
     )
     for resp, student in rows:
+        # Free text written by students: a leading '=' would run in the teacher's sheet.
         writer.writerow(
             [
-                student.full_name,
-                student.email,
+                csv_safe(student.full_name),
+                csv_safe(student.email),
                 resp.rating,
-                resp.went_well,
-                resp.went_bad,
-                resp.to_change,
+                csv_safe(resp.went_well),
+                csv_safe(resp.went_bad),
+                csv_safe(resp.to_change),
                 resp.submitted_at.isoformat(),
             ]
         )
