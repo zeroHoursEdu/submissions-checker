@@ -44,27 +44,6 @@ def _ensure_semester_exists() -> int:
         conn.close()
 
 
-def _get_latest_feedback_token(subject_id: int) -> str | None:
-    conn = _db_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT ft.token
-                FROM feedback_tokens ft
-                JOIN feedback_requests fr ON fr.id = ft.feedback_request_id
-                WHERE fr.subject_id = %s
-                ORDER BY ft.id DESC
-                LIMIT 1
-                """,
-                (subject_id,),
-            )
-            row = cur.fetchone()
-            return row[0] if row else None
-    finally:
-        conn.close()
-
-
 def _feedback_request_exists(subject_id: int) -> bool:
     conn = _db_conn()
     today = date.today()

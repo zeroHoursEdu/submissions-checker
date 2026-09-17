@@ -102,12 +102,21 @@ def get_latest_submission_id(student_assignment_id: int) -> int | None:
 
 
 def get_feedback_token_for_subject(subject_id: int) -> str | None:
+    """Return a raw feedback-link token for the subject's latest token row.
+
+    Tokens are stored hashed, so the raw value cannot be read back. Like a teacher
+    re-issuing a link, the test writes a fresh token over the latest row: the hash is
+    replaced and the raw value returned. None when the subject has no token row.
+    """
+    import hashlib
+    import secrets
+
     conn = db_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT ft.token
+                SELECT ft.id
                 FROM feedback_tokens ft
                 JOIN feedback_requests fr ON fr.id = ft.feedback_request_id
                 WHERE fr.subject_id = %s
@@ -117,6 +126,14 @@ def get_feedback_token_for_subject(subject_id: int) -> str | None:
                 (subject_id,),
             )
             row = cur.fetchone()
-            return row[0] if row else None
+            if row is None:
+                return None
+            raw = secrets.token_urlsafe(32)
+            cur.execute(
+                "UPDATE feedback_tokens SET token = NULL, token_hash = %s WHERE id = %s",
+                (hashlib.sha256(raw.encode()).hexdigest(), row[0]),
+            )
+        conn.commit()
+        return raw
     finally:
         conn.close()

@@ -13,6 +13,7 @@ scenarios — see auth_steps.py), so each role probe starts from a clean session
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 from datetime import UTC, datetime
 
@@ -96,8 +97,8 @@ def _mark_token_used(token: str) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE feedback_tokens SET used_at = %s WHERE token = %s",
-                (datetime.now(UTC), token),
+                "UPDATE feedback_tokens SET used_at = %s WHERE token_hash = %s OR token = %s",
+                (datetime.now(UTC), hashlib.sha256(token.encode()).hexdigest(), token),
             )
             conn.commit()
     finally:
