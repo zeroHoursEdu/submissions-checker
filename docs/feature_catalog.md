@@ -52,7 +52,7 @@ detail.
 | Teacher dashboard (your active subjects + enrolled counts) | TEACHER/ADMIN | `GET /teacher` |
 | Create / update a subject from a **config ZIP** (versioned, content-hashed, deduplicated; upsert by `subjectCode`; uploader becomes owner of a new subject) | TEACHER/ADMIN (update requires ownership) | `POST /teacher/subjects/apply-config` |
 | View a subject (students, assignments, test-student + feedback panels) | Owner / ADMIN | `GET /teacher/subjects/{id}` |
-| Soft-delete a subject (marks `DELETED`, data preserved) — **endpoint only, no UI button** | Owner only | `POST /teacher/subjects/{id}/delete` |
+| Soft-delete a subject (marks `DELETED`, data preserved; Операції tab, checkbox-confirmed) | Owner / ADMIN | `POST /teacher/subjects/{id}/delete` |
 | Provision a TEST student for the subject (excluded from analytics) | Owner only | `POST /teacher/subjects/{id}/test-student` |
 | Enter the portal **as** the test student (pilots the student journey) | Owner only | `POST /teacher/subjects/{id}/test-student/enter` |
 
@@ -61,9 +61,8 @@ detail.
 > and quiz/anti-cheat rules all come from the config ZIP — the single source of truth.
 >
 > The teacher UI carries **no affordance that mutates subject or assignment content**: no
-> subject edit, no subject delete, no create/edit assignment, no quiz editor, no grade
-> export button. Those routes still exist and still enforce their
-> own authorization, but the only path a teacher is offered is config re-apply.
+> subject edit, no create/edit assignment, no quiz editor. Subject delete and grade export
+> live on the Операції tab; everything about content goes through config re-apply.
 
 ## 3. Enrollment & students
 
@@ -91,7 +90,7 @@ detail.
 | Assignment review board (per-student latest submission, grade, integrity flags) | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}` |
 | Review one submission (test results, AI verdict when the mode ran one, proctoring evidence, submitted archive) | Owner / ADMIN | `GET /teacher/submissions/{id}/review` |
 | Approve / reject a submission (emails the student) — audited `teacher_approve_submission` / `teacher_reject_submission` | Owner / ADMIN | `POST /teacher/submissions/{id}/review` |
-| Export grades CSV — **endpoint only, no UI button** | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
+| Export grades CSV (Операції tab) | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
 
 ### The submission state machine
 

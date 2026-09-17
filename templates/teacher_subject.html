@@ -332,6 +332,30 @@
       {{ vocab.teacher.view_feedback }}
     </a>
   </div>
+
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+    <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.teacher.data_title }}</h2>
+    <p class="text-sm text-slate-500 mb-4">{{ vocab.teacher.data_hint }}</p>
+    <a href="/teacher/subjects/{{ subject.id }}/export.csv"
+       class="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 bg-slate-50 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors">
+      {{ vocab.teacher.export_grades_csv }}
+    </a>
+  </div>
+
+  <div class="bg-white rounded-xl border border-red-200 shadow-sm p-5">
+    <h2 class="font-semibold text-red-700 mb-1">{{ vocab.teacher.delete_subject_title }}</h2>
+    <p class="text-sm text-slate-500 mb-4">{{ vocab.teacher.delete_subject_hint }}</p>
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/delete" class="flex flex-col sm:flex-row sm:items-center gap-3">
+      <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" required class="rounded border-slate-300">
+        {{ vocab.teacher.delete_subject_confirm }}
+      </label>
+      <button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors">
+        {{ vocab.teacher.delete_subject_button }}
+      </button>
+    </form>
+  </div>
+
 </div>
 
 </div>

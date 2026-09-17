@@ -368,6 +368,13 @@ teacher:
   ai_generated: Ознаки AI-генерації
   ai_comment: Коментар для студента
   proctoring_title: Прокторинг
+  data_title: Дані
+  data_hint: Вивантажити всі оцінки предмета у CSV.
+  export_grades_csv: Експорт оцінок (CSV)
+  delete_subject_title: Видалити предмет
+  delete_subject_hint: Предмет буде приховано для всіх; дані зберігаються і можуть бути відновлені адміністратором через БД.
+  delete_subject_confirm: Я розумію, що предмет зникне з усіх списків
+  delete_subject_button: Видалити
   attempt_label: Спроба
   no_violations: Порушень не зафіксовано
 admin:

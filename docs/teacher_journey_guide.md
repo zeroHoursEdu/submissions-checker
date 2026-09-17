@@ -312,6 +312,8 @@ grade values come from the automated score and config grade range.)
 
 ## 7. Exporting grades
 
+The **Операції** tab has an «Експорт оцінок (CSV)» button, and next to it a checkbox-confirmed
+«Видалити предмет» that soft-deletes the subject (hidden everywhere, data kept).
 `GET /teacher/subjects/{id}/export.csv` downloads a CSV of the subject's grades with
 columns: student, email, group, assignment, grade, max grade, submission status, and
 submission time. One row per student-per-assignment, sorted by group then name. Owner/ADMIN

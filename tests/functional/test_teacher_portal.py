@@ -932,3 +932,12 @@ async def test_assignment_board_shows_ai_flag_badge(
     assert resp.status_code == 200
     assert "data-ai-flag-badge" in resp.text
     assert "boilerplate" in resp.text
+
+
+async def test_operations_tab_offers_export_and_delete(client: AsyncClient, db, teacher) -> None:
+    subject = await _make_subject(db, owner_id=teacher.id)
+    authenticate(client, teacher)
+    resp = await client.get(f"/teacher/subjects/{subject.id}")
+    assert resp.status_code == 200
+    assert f"/teacher/subjects/{subject.id}/export.csv" in resp.text
+    assert f'action="/teacher/subjects/{subject.id}/delete"' in resp.text
