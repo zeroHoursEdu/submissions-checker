@@ -118,11 +118,11 @@ async def execute_feedback_request_task(db: AsyncSession, payload: dict[str, Any
 
     dispatcher = build_dispatcher(settings)
     if not dispatcher._channels:
-        logger.warning("feedback_request_task_no_channel", student_email=student.email)
+        logger.warning("feedback_request_task_no_channel", student_id=student.id)
         return
 
     await dispatcher.notify(student.email, email_subject, body)
-    logger.info("feedback_request_email_sent", token_id=token_id, student_email=student.email)
+    logger.info("feedback_request_email_sent", token_id=token_id, student_id=student.id)
 
 
 async def execute_submission_reviewed_task(db: AsyncSession, payload: dict[str, Any]) -> None:
@@ -193,14 +193,14 @@ async def execute_submission_reviewed_task(db: AsyncSession, payload: dict[str, 
 
     dispatcher = build_dispatcher(settings)
     if not dispatcher._channels:
-        logger.warning("submission_reviewed_task_no_channel", student_email=student.email)
+        logger.warning("submission_reviewed_task_no_channel", student_id=student.id)
         return
 
     await dispatcher.notify(student.email, email_subject, body)
     logger.info(
         "submission_reviewed_email_sent",
         submission_id=submission_id,
-        student_email=student.email,
+        student_id=student.id,
         action=action,
     )
 
@@ -251,7 +251,7 @@ async def execute_quiz_result_task(db: AsyncSession, payload: dict[str, Any]) ->
 
     dispatcher = build_dispatcher(settings)
     if not dispatcher._channels:
-        logger.warning("quiz_result_task_no_channel", student_email=student.email)
+        logger.warning("quiz_result_task_no_channel", student_id=student.id)
         return
 
     await dispatcher.notify(student.email, email_subject, body)
@@ -309,11 +309,11 @@ async def execute_deadline_reminder_task(db: AsyncSession, payload: dict[str, An
 
     dispatcher = build_dispatcher(settings)
     if not dispatcher._channels:
-        logger.warning("deadline_reminder_task_no_channel", student_email=student.email)
+        logger.warning("deadline_reminder_task_no_channel", student_id=student.id)
         return
 
     await dispatcher.notify(student.email, email_subject, body)
-    logger.info("deadline_reminder_sent", student_email=student.email, sa_id=sa_id)
+    logger.info("deadline_reminder_sent", student_id=student.id, sa_id=sa_id)
 
 
 async def _resolve_review_recipients(db: AsyncSession, submission_id: int) -> list[User]:
@@ -485,13 +485,13 @@ async def execute_quiz_dispute_resolved_task(db: AsyncSession, payload: dict[str
 
     dispatcher = build_dispatcher(settings)
     if not dispatcher._channels:
-        logger.warning("quiz_dispute_resolved_no_channel", student_email=student.email)
+        logger.warning("quiz_dispute_resolved_no_channel", student_id=student.id)
         return
 
     await dispatcher.notify(student.email, email_subject, body)
     logger.info(
         "quiz_dispute_resolved_email_sent",
         attempt_id=attempt_id,
-        student_email=student.email,
+        student_id=student.id,
         decision=decision,
     )

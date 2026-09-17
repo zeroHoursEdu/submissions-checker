@@ -38,10 +38,10 @@ async def execute_send_credentials_task(db: AsyncSession, payload: dict[str, Any
     if not dispatcher._channels:
         logger.warning(
             "send_credentials_no_channel_configured",
-            student_email=student_email,
+            username=username,
             message="No email provider configured; credentials not delivered",
         )
         return
 
     await dispatcher.notify(student_email, subject, body)
-    logger.info("send_credentials_sent", student_email=student_email, username=username)
+    logger.info("send_credentials_sent", username=username)
