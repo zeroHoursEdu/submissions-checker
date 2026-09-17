@@ -85,7 +85,10 @@ class Settings(BaseSettings):
     teacher_digest_flush_interval: int = 30  # scheduler poll interval for the flush job
 
     # Outbox
-    outbox_batch_size: int = 1
+    # Messages per poll. The loop is sequential either way, so a bigger batch only
+    # removes the poll interval between messages; at 1, a handful of failing email
+    # retries starved RUN_CHECKS for minutes in the e2e stack.
+    outbox_batch_size: int = 20
     outbox_poll_interval: int = 10
     outbox_max_retries: int = 5
     outbox_retry_backoff_seconds: int = 60

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -19,8 +20,9 @@ class TeacherDashboard:
         """Upload a subject config ZIP via the hidden file input."""
         file_input = self.page.locator('input[name="config_zip"]')
         file_input.set_input_files(str(zip_path))
-        # The form auto-submits via onchange handler
-        self.page.wait_for_url(f"{self.app_url}/teacher**")
+        # The form auto-submits via onchange handler. Wait for the redirect that carries
+        # the outcome; "/teacher**" alone matches the page we are already on.
+        self.page.wait_for_url(re.compile(r"/teacher\?apply_(result|error)="))
 
     def assert_subject_visible(self, subject_name: str) -> None:
         expect(self.page.get_by_text(subject_name).first).to_be_visible()

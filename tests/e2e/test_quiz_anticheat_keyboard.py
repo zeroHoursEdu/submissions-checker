@@ -1,7 +1,7 @@
 """Browser-level test for the passive anti-cheat `keyboard_shortcut` detector.
 
 Exercises the real `keydown` listener extracted verbatim from
-`templates/student_quiz.html` (not a reimplemented copy), so a regression in the
+`templates/_quiz_anticheat.html` (not a reimplemented copy), so a regression in the
 in-template JS predicate fails here instead of only being caught by a person
 manually testing every OS/browser combo. Self-contained: no app server, DB, or
 docker stack required — only a Chromium instance via pytest-playwright.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from playwright.sync_api import Page
 
-TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "templates" / "student_quiz.html"
+TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "templates" / "_quiz_anticheat.html"
 
 
 def _extract_keyboard_shortcut_handler() -> str:

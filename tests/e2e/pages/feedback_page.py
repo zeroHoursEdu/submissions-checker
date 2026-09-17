@@ -16,6 +16,8 @@ class TeacherFeedbackPage:
     def request_feedback_for_subject(self, subject_id: int) -> None:
         """Click the 'Request Feedback' button on the subject page."""
         self.page.goto(f"{self.app_url}/teacher/subjects/{subject_id}")
+        # The request form lives in the Операції tab panel, which is hidden until opened.
+        self.page.locator('button[data-tab-target="operations"]').click()
         self.page.wait_for_load_state("networkidle")
         form = self.page.locator(f'form[action="/teacher/subjects/{subject_id}/feedback/request"]')
         if form.count() > 0:

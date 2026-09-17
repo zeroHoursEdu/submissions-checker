@@ -11,10 +11,10 @@ class NotificationsPage:
         self.app_url = app_url
 
     def navigate(self) -> None:
-        self.page.goto(f"{self.app_url}/portal/notification-preferences")
+        self.page.goto(f"{self.app_url}/portal/settings")
 
     def assert_on_page(self) -> None:
-        expect(self.page).to_have_url(f"{self.app_url}/portal/notification-preferences")
+        expect(self.page).to_have_url(f"{self.app_url}/portal/settings")
 
     def _toggle_channel(self, case: str, method: str) -> None:
         """POST to the toggle endpoint directly."""
@@ -22,7 +22,7 @@ class NotificationsPage:
             f"{self.app_url}/portal/notification-preferences/{case}/{method}/toggle"
         )
         assert response.status in (200, 303), f"Toggle failed: {response.status}"
-        self.page.goto(f"{self.app_url}/portal/notification-preferences")
+        self.page.goto(f"{self.app_url}/portal/settings")
 
     # Case values: SUBMISSION_CHECKED, FEEDBACK_REQUEST
     # Method values: EMAIL

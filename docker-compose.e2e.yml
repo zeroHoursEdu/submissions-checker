@@ -51,9 +51,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=test
       - SCHEDULER_ENABLED=true
       - SECRET_KEY=e2e-test-secret-key-do-not-use-in-production
-      - SMTP_HOST=localhost
-      - SMTP_PORT=1025
-      - SMTP_FROM=noreply@e2e.test
+      # No mail channel: credentials are read from the outbox payload by the tests,
+      # and an unreachable SMTP host only produces retry noise.
+      - OUTBOX_BATCH_SIZE=20
       - PLUGINS_DIR=/home/vampir/petProjects/submissions-checker/plugins
     env_file:
       - .env.e2e
