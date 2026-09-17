@@ -46,6 +46,17 @@ LEGAL = [
     # dispute, the attempt was re-scored and now passes.
     (S.FAILED, "dispute_regrade_passed", S.COMPLETED),
     (S.FAILED, "dispute_regrade_passed_teacher", S.AWAITING_TEACHER_REVIEW),
+    # Teacher unstick controls
+    (S.AI_REVIEW_FAILED, "ai_review_skip_to_teacher", S.AWAITING_TEACHER_REVIEW),
+    (S.VALIDATING, "requeue_checks", S.PENDING),
+    (S.TESTING, "requeue_checks", S.PENDING),
+    (S.AWAITING_AI_REVIEW, "requeue_checks", S.PENDING),
+    (S.AI_REVIEWING, "requeue_checks", S.PENDING),
+    (S.AI_REVIEW_FAILED, "requeue_checks", S.PENDING),
+    (S.VALIDATION_FAILED, "requeue_checks", S.PENDING),
+    (S.TEST_FAILED, "requeue_checks", S.PENDING),
+    (S.FAILED, "requeue_checks", S.PENDING),
+    (S.AWAITING_TEACHER_REVIEW, "requeue_checks", S.PENDING),
 ]
 
 
@@ -125,3 +136,9 @@ def test_start_check_alias_is_gone() -> None:
     sub = _Sub(S.PENDING)
     with pytest.raises(InvalidTransitionError):
         transition(sub, "start_check")
+
+
+def test_completed_cannot_be_requeued() -> None:
+    sub = _Sub(S.COMPLETED)
+    with pytest.raises(InvalidTransitionError):
+        transition(sub, "requeue_checks")

@@ -34,6 +34,8 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     },
     SubmissionStatus.AI_REVIEW_FAILED: {
         "retry_ai_review": SubmissionStatus.AI_REVIEWING,
+        # Teacher gives up on the AI and reviews by hand.
+        "ai_review_skip_to_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
     },
     SubmissionStatus.QUIZ_SENT: {
         "quiz_passed": SubmissionStatus.COMPLETED,
@@ -55,6 +57,23 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
         "dispute_regrade_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
     },
 }
+
+
+# A teacher may send a stuck or failed submission back through the checks. Every
+# state that can be reached by the pipeline (or by a worker dying mid-flight) gets
+# the same exit; terminal COMPLETED is deliberately excluded.
+for _status in (
+    SubmissionStatus.VALIDATING,
+    SubmissionStatus.TESTING,
+    SubmissionStatus.AWAITING_AI_REVIEW,
+    SubmissionStatus.AI_REVIEWING,
+    SubmissionStatus.AI_REVIEW_FAILED,
+    SubmissionStatus.VALIDATION_FAILED,
+    SubmissionStatus.TEST_FAILED,
+    SubmissionStatus.FAILED,
+    SubmissionStatus.AWAITING_TEACHER_REVIEW,
+):
+    _TRANSITIONS.setdefault(_status, {})["requeue_checks"] = SubmissionStatus.PENDING
 
 
 class InvalidTransitionError(Exception):

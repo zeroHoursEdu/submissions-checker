@@ -22,6 +22,7 @@ common:
   status_not_submitted: Не здано
   status_submitted: Здано
   status_checking: Перевіряється…
+  status_ai_review_failed: AI-рецензія не вдалася
   status_check_failed: Помилка перевірки
   status_awaiting_review: Очікує перевірки
   status_quiz_sent: Тест надіслано
@@ -368,6 +369,9 @@ teacher:
   ai_generated: Ознаки AI-генерації
   ai_comment: Коментар для студента
   proctoring_title: Прокторинг
+  rerun_checks: Перезапустити перевірку
+  retry_ai_review: Повторити AI-рецензію
+  send_to_teacher: На ручну перевірку
   data_title: Дані
   data_hint: Вивантажити всі оцінки предмета у CSV.
   export_grades_csv: Експорт оцінок (CSV)

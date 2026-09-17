@@ -29,6 +29,10 @@
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
     <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>{{ vocab.common.status_checking }}
   </span>
+{% elif status == "AI_REVIEW_FAILED" %}
+  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+    <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>{{ vocab.common.status_ai_review_failed }}
+  </span>
 {% elif status in ["VALIDATION_FAILED", "TEST_FAILED"] %}
   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
     <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>{{ vocab.common.status_check_failed }}
@@ -107,6 +111,20 @@
              class="ml-1.5 inline-flex items-center text-xs font-medium text-purple-600 hover:text-purple-800 transition-colors">
             {{ vocab.teacher.review_action }}
           </a>
+          {% endif %}
+          {% set st = row.submission_status %}
+          {% if row.submission_id and (st in ["VALIDATION_FAILED", "TEST_FAILED", "FAILED", "AI_REVIEW_FAILED"] or (stuck_ids is defined and row.submission_id in stuck_ids)) %}
+          <form method="POST" action="/teacher/submissions/{{ row.submission_id }}/rerun-checks" class="inline">
+            <button type="submit" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.rerun_checks }}</button>
+          </form>
+          {% endif %}
+          {% if st == "AI_REVIEW_FAILED" %}
+          <form method="POST" action="/teacher/submissions/{{ row.submission_id }}/retry-ai-review" class="inline">
+            <button type="submit" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.retry_ai_review }}</button>
+          </form>
+          <form method="POST" action="/teacher/submissions/{{ row.submission_id }}/send-to-teacher" class="inline">
+            <button type="submit" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.send_to_teacher }}</button>
+          </form>
           {% endif %}
         </td>
         <td class="px-4 py-3.5">

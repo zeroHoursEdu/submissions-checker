@@ -6,7 +6,7 @@ import csv
 import io
 import secrets
 import urllib.parse
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ from submissions_checker.api.routes.teacher_disputes import count_open_disputes
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.security import COOKIE_NAME, create_access_token
-from submissions_checker.core.state_machine import transition
+from submissions_checker.core.state_machine import InvalidTransitionError, transition
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     EntityType,
@@ -63,6 +63,9 @@ from submissions_checker.services.gradebook import (
 )
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.storage import StorageService
+from submissions_checker.workers.tasks.notification_tasks import (
+    enqueue_teacher_review_notification,
+)
 
 UPLOADS_DIR = Path("uploads")
 
@@ -461,6 +464,18 @@ async def teacher_assignment(
     )
     rows = [row._asdict() for row in rows_result]
 
+    # In-flight submissions older than 30 minutes are assumed stuck (worker died mid-task)
+    # and get the re-run control alongside the failed ones.
+    stale_cutoff = datetime.now(UTC) - timedelta(minutes=30)
+    stuck_ids = {
+        r["submission_id"]
+        for r in rows
+        if r["submission_id"]
+        and r["submission_status"] in _IN_FLIGHT_STATUSES
+        and r["submitted_at"]
+        and r["submitted_at"] < stale_cutoff
+    }
+
     # AI verdicts over the assignment's thresholds get a badge in the Flags column.
     ai_cfg = (assignment.config or {}).get("ai_review") or {}
     ai_flags: dict[int, VerdictSummary] = {}
@@ -526,9 +541,19 @@ async def teacher_assignment(
             "violation_flags": violation_flags,
             "snapshot_flags": snapshot_flags,
             "ai_flags": ai_flags,
+            "stuck_ids": stuck_ids,
         },
     )
 
+
+_IN_FLIGHT_STATUSES = frozenset(
+    {
+        SubmissionStatus.VALIDATING,
+        SubmissionStatus.TESTING,
+        SubmissionStatus.AWAITING_AI_REVIEW,
+        SubmissionStatus.AI_REVIEWING,
+    }
+)
 
 _SNAPSHOT_CONTENT_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
 
@@ -1153,6 +1178,144 @@ async def teacher_review_submission_action(
         url=f"/teacher/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}",
         status_code=303,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Unstick controls: re-run checks, retry / skip a failed AI review
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _load_submission_for_teacher(
+    db: DBSession, submission_id: int, current_user: TeacherUser
+) -> Submission:
+    result = await db.execute(
+        select(Submission)
+        .where(Submission.id == submission_id)
+        .options(
+            selectinload(Submission.students_assignment)
+            .selectinload(StudentAssignment.subjects_assignment)
+            .selectinload(SubjectsAssignment.subject)
+        )
+    )
+    submission = result.scalar_one_or_none()
+    if submission is None:
+        raise HTTPException(status_code=404)
+    subject = submission.students_assignment.subjects_assignment.subject
+    if current_user.role != UserRole.ADMIN and subject.owner_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this subject")
+    return submission
+
+
+def _board_url(submission: Submission) -> str:
+    sa = submission.students_assignment.subjects_assignment
+    return f"/teacher/subjects/{sa.subject_id}/assignments/{sa.id}"
+
+
+def _next_step_for(review_mode: str) -> str:
+    """The RUN_AI_REVIEW payload's next_step, derived from the assignment's review mode."""
+    if review_mode.endswith("then_teacher") or review_mode.endswith("ai_teacher"):
+        return "teacher"
+    if review_mode.endswith("then_quiz"):
+        return "quiz"
+    return "completed"
+
+
+def _requeue_checks(db: DBSession, submission: Submission) -> None:
+    """Send a submission back to PENDING and enqueue RUN_CHECKS.
+
+    The config pin is dropped so a re-run after a config fix picks up the latest
+    version; previous results are cleared so the board does not show stale output.
+    Raises InvalidTransitionError from a status that has no way back (COMPLETED).
+    """
+    transition(submission, "requeue_checks")
+    submission.plugin_config_id = None
+    submission.test_results = None
+    submission.ai_review = None
+    db.add(
+        OutboxMessage(
+            event_type=OutboxEventType.RUN_CHECKS,
+            state=OutboxMessageState.PENDING,
+            payload={"submission_id": submission.id},
+        )
+    )
+
+
+@router.post("/submissions/{submission_id}/rerun-checks")
+async def teacher_rerun_checks(
+    submission_id: int, db: DBSession, current_user: TeacherUser
+) -> RedirectResponse:
+    submission = await _load_submission_for_teacher(db, submission_id, current_user)
+    try:
+        _requeue_checks(db, submission)
+    except InvalidTransitionError as exc:
+        raise HTTPException(
+            status_code=409, detail="Submission is not in a state that allows this action"
+        ) from exc
+    await audit(
+        db,
+        action="rerun_checks",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="submission",
+        target_id=submission_id,
+    )
+    await db.commit()
+    return RedirectResponse(url=_board_url(submission), status_code=303)
+
+
+@router.post("/submissions/{submission_id}/retry-ai-review")
+async def teacher_retry_ai_review(
+    submission_id: int, db: DBSession, current_user: TeacherUser
+) -> RedirectResponse:
+    submission = await _load_submission_for_teacher(db, submission_id, current_user)
+    if submission.status != SubmissionStatus.AI_REVIEW_FAILED:
+        raise HTTPException(
+            status_code=409, detail="Submission is not in a state that allows this action"
+        )
+    sa_cfg = submission.students_assignment.subjects_assignment.config or {}
+    db.add(
+        OutboxMessage(
+            event_type=OutboxEventType.RUN_AI_REVIEW,
+            state=OutboxMessageState.PENDING,
+            payload={
+                "submission_id": submission.id,
+                "next_step": _next_step_for(str(sa_cfg.get("review_mode", "tests_only"))),
+            },
+        )
+    )
+    await audit(
+        db,
+        action="retry_ai_review",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="submission",
+        target_id=submission_id,
+    )
+    await db.commit()
+    return RedirectResponse(url=_board_url(submission), status_code=303)
+
+
+@router.post("/submissions/{submission_id}/send-to-teacher")
+async def teacher_skip_ai_review(
+    submission_id: int, db: DBSession, current_user: TeacherUser
+) -> RedirectResponse:
+    submission = await _load_submission_for_teacher(db, submission_id, current_user)
+    if submission.status != SubmissionStatus.AI_REVIEW_FAILED:
+        raise HTTPException(
+            status_code=409, detail="Submission is not in a state that allows this action"
+        )
+    transition(submission, "ai_review_skip_to_teacher")
+    await enqueue_teacher_review_notification(db, submission.id)
+    await audit(
+        db,
+        action="ai_review_skip_to_teacher",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="submission",
+        target_id=submission_id,
+    )
+    await db.commit()
+    return RedirectResponse(url=_board_url(submission), status_code=303)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
