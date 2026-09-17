@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Cookie, Depends, HTTPException, status
-from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +11,7 @@ from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.core.database import get_db
 from submissions_checker.core.security import (
     COOKIE_NAME,
+    TokenError,
     decode_access_token,
     issued_before_password_change,
 )
@@ -43,7 +43,7 @@ async def _get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         payload = decode_access_token(access_token)
-    except JWTError as exc:
+    except TokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
         ) from exc

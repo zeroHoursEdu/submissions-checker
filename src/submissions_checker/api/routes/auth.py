@@ -8,7 +8,6 @@ from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from jose import JWTError
 from sqlalchemy import or_, select
 
 from submissions_checker.api.dependencies import CurrentUser, DBSession
@@ -24,6 +23,7 @@ from submissions_checker.core.security import (
     COOKIE_NAME,
     JWT_EXPIRY_HOURS,
     MAX_PASSWORD_BYTES,
+    TokenError,
     create_access_token,
     decode_access_token,
     dummy_password_hash,
@@ -78,7 +78,7 @@ async def login_page(request: Request) -> HTMLResponse:
             payload = decode_access_token(token)
             role = UserRole(payload["role"])
             return RedirectResponse(url=_redirect_by_role(role), status_code=302)  # type: ignore[return-value]
-        except (JWTError, KeyError, ValueError):
+        except (TokenError, KeyError, ValueError):
             pass
     return render(request, "login.html", {"current_user": None, "error": None})
 

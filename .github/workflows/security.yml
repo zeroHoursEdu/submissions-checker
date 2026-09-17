@@ -35,7 +35,7 @@ jobs:
         with:
           enable-cache: true
       - name: Export the locked runtime dependencies
-        run: uv export --frozen --no-dev --no-hashes --format requirements-txt -o requirements-audit.txt
+        run: uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements-audit.txt
       - name: pip-audit
         run: uvx pip-audit --strict --desc on -r requirements-audit.txt
 

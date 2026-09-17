@@ -1,16 +1,16 @@
 """Unit tests for core.security — password hashing and JWT round-trips.
 
 No DB, no network. Settings are read from the project .env (which provides a
-valid SECRET_KEY); expired/wrong-secret tokens are crafted with jose directly.
+valid SECRET_KEY); expired/wrong-secret tokens are crafted with PyJWT directly.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
-from jose import jwt
-from jose.exceptions import JWTError
+from jwt import PyJWTError as JWTError
 
 from submissions_checker.core import security
 from submissions_checker.core.config import get_settings

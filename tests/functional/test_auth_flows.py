@@ -566,7 +566,7 @@ async def test_reset_password_rejects_overlong_new_password(
 
 def _token_issued_at(user: User, issued_at: datetime) -> str:
     """A cookie exactly as login would have minted it at *issued_at*."""
-    from jose import jwt
+    import jwt
 
     from submissions_checker.core.config import get_settings
     from submissions_checker.core.security import JWT_ALGORITHM
@@ -602,7 +602,7 @@ async def test_session_without_issue_time_survives_a_password_change(
 ) -> None:
     """Cookies minted before `iat` existed keep working until they expire; the change
     must not log everyone out on deploy."""
-    from jose import jwt
+    import jwt
 
     from submissions_checker.core.config import get_settings
     from submissions_checker.core.security import JWT_ALGORITHM

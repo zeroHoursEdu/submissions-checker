@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
-from jose import jwt
+import jwt
 
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.logging import get_logger
@@ -14,6 +14,8 @@ logger = get_logger(__name__)
 
 COOKIE_NAME = "access_token"
 JWT_ALGORITHM = "HS256"
+# Base class of every PyJWT decode failure (signature, expiry, malformed, wrong alg).
+TokenError = jwt.PyJWTError
 JWT_EXPIRY_HOURS = 8
 
 
@@ -93,8 +95,11 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    """Decode and validate JWT. Raises jose.JWTError on failure."""
-    return jwt.decode(token, get_settings().secret_key, algorithms=[JWT_ALGORITHM])  # type: ignore[no-any-return]
+    """Decode and validate JWT. Raises TokenError on failure."""
+    payload: dict[str, Any] = jwt.decode(
+        token, get_settings().secret_key, algorithms=[JWT_ALGORITHM]
+    )
+    return payload
 
 
 def issued_before_password_change(payload: dict[str, Any], changed_at: datetime | None) -> bool:

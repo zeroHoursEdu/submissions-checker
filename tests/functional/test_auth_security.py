@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from httpx import AsyncClient
-from jose import jwt
 
 from submissions_checker.core.security import COOKIE_NAME, JWT_ALGORITHM
 from submissions_checker.db.models.enums import UserRole

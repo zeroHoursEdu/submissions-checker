@@ -207,8 +207,9 @@ workflows. HIGH/CRITICAL fail the job; `app-image` publishes only when it passes
 - Playwright e2e from a fresh database: 32 passed. The real sandbox ran with
   `--cap-drop=ALL --security-opt=no-new-privileges` against the e2e_test plugin.
 - `zizmor` on the workflows: no findings. `bandit -ll -ii`: no findings with the two
-  documented skips. `pip-audit` on the new lock: one open advisory remains (ecdsa
-  PYSEC-2026-1325, no fixed release; pulled in by python-jose).
+  documented skips. `pip-audit --strict` on the final lock: no known vulnerabilities
+  (python-jose, and with it ecdsa/rsa/pyasn1, was replaced by PyJWT; only HS256 was
+  ever used).
 
 Two things surfaced on the way that were not security findings:
 - FastAPI 0.141 stopped listing included routers' routes flat in `app.routes`; the
