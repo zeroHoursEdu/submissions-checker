@@ -166,6 +166,15 @@ async def finalize_grade(db: AsyncSession, submission: Submission) -> GradeBreak
     passed_attempt = next((a for a in sub.quiz_attempts if a.is_passed), None)
     quiz_pct = _pct(passed_attempt.score, passed_attempt.max_score) if passed_attempt else None
 
+    # Local import: squads imports nothing from grading, but importing it at module
+    # scope would still be fine — kept local to mirror the brief's seam.
+    from submissions_checker.services import squads
+
+    squad = await squads.squad_for_submission(db, sub)
+    squad_members: list[dict[str, Any]] = []
+    if squad is not None:
+        quiz_pct, squad_members = squad_quiz_pct(sub.quiz_attempts)
+
     breakdown = compute_grade(
         grading_cfg,
         subjects_assignment.min_grade,
@@ -173,10 +182,20 @@ async def finalize_grade(db: AsyncSession, submission: Submission) -> GradeBreak
         works_pct=works_pct,
         ai_mark=ai_mark,
         quiz_pct=quiz_pct,
+        round_up=squad is not None,
     )
 
-    sa.grade = breakdown.grade
-    sub.grade_breakdown = breakdown.to_dict()
+    target_sa_ids = [sa.id]
+    if squad is not None:
+        target_sa_ids = await squads.member_sa_ids(db, squad, subjects_assignment.id)
+    for sa_id in target_sa_ids:
+        row = await db.get(StudentAssignment, sa_id)
+        if row is not None:
+            row.grade = breakdown.grade
+    breakdown_dict = breakdown.to_dict()
+    if squad is not None:
+        breakdown_dict["squad"] = {"unified": True, "squad_id": squad.id, "members": squad_members}
+    sub.grade_breakdown = breakdown_dict
     logger.info(
         "finalize_grade",
         submission_id=submission.id,
