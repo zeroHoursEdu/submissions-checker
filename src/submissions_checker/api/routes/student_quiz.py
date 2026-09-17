@@ -248,6 +248,23 @@ def _assert_attempt_owner(
         raise HTTPException(status_code=403)
 
 
+async def _squad_ctx(
+    db: DBSession, attempt: QuizAttempt, submission: Submission, student_id: int
+) -> dict[str, Any] | None:
+    """Context for the "your part" banner on the squad member's quiz/result pages, or
+    None when this attempt isn't part of a squad quiz."""
+    info = attempt.config_snapshot.get("squad")
+    if not info or submission.squad_id is None:
+        return None
+    states = await squads.member_quiz_states(db, submission)
+    return {
+        "my_count": len(attempt.questions_snapshot or []),
+        "total": info.get("total_questions"),
+        "partners": [m.full_name for m in states if m.student_id != student_id],
+        "complete": all(m.passed for m in states),
+    }
+
+
 def _record_timed_out(attempt: QuizAttempt, db: DBSession) -> None:
     """Burn the current question: zero points, flagged as lost to the clock."""
     question = _current_question(attempt)
@@ -881,6 +898,7 @@ async def show_quiz(
                 "anti_cheat_config": anti_cheat_config,
                 "proctoring_config": proctoring_config,
                 "disputed_ids": await _disputed_question_ids(db, attempt.id),
+                "squad_ctx": await _squad_ctx(db, attempt, submission, student_id),
             },
         )
 
@@ -899,6 +917,7 @@ async def show_quiz(
             "anti_cheat_config": anti_cheat_config,
             "proctoring_config": proctoring_config,
             "disputed_ids": await _disputed_question_ids(db, attempt.id),
+            "squad_ctx": await _squad_ctx(db, attempt, submission, student_id),
         },
     )
 
@@ -1649,5 +1668,6 @@ async def quiz_result(
             "subject_id": subject_id,
             "student_assignment_id": my_sa_id or sa.id,
             "disputed_ids": await _disputed_question_ids(db, attempt.id),
+            "squad_ctx": await _squad_ctx(db, attempt, submission, student_id),
         },
     )

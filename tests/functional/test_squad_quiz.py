@@ -182,3 +182,17 @@ async def test_retry_keeps_slice_size_when_required_outnumber_slice(
         for q in second.questions_snapshot:
             if q["is_required"]:
                 assert q["id"] in first_ids
+
+
+async def test_quiz_pages_say_which_part_is_mine(db, make_user, make_student, teacher) -> None:
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    await _lock_pair(db, subject, teacher, (ua, ub))
+    async with _client(ua) as ca:
+        await _upload(ca, subject, sa_a)
+        att = await _start(ca, subject, sa_a)
+        page = await ca.get(f"/portal/quiz/{att}")
+        assert "Ваша частина: 2 з 4 питань" in page.text and "Bohdan B" in page.text
+        await _answer_all(ca, db, att, correct=True)
+        result = await ca.get(f"/portal/quiz/{att}/result")
+        # Jinja autoescapes the apostrophe in the vocab string to &#39; in the raw HTML.
+        assert "Оцінка з" in result.text and "явиться" in result.text

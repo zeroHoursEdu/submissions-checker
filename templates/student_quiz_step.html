@@ -31,6 +31,12 @@
 
 {% block content %}
 
+{% if squad_ctx %}
+<div class="mb-4 px-4 py-2 rounded-lg bg-violet-50 border border-violet-200 text-violet-800 text-sm">
+  👥 {{ vocab.squad.your_part.format(k=squad_ctx.my_count, total=squad_ctx.total) }} · {{ vocab.squad.partners }} {{ squad_ctx.partners | join(", ") }}
+</div>
+{% endif %}
+
 {% if seconds_remaining is not none %}
 <!-- Per-question timer -->
 <div id="timer"

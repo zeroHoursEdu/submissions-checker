@@ -58,6 +58,7 @@
   </div>
   {% set threshold_pct = (attempt.config_snapshot.get('pass_threshold_pct', 0.6) * 100) | round(0) | int %}
   <p class="text-xs text-slate-400">{{ vocab.quiz.pass_threshold }} {{ threshold_pct }}%</p>
+  {% if squad_ctx and attempt.is_passed and not squad_ctx.complete %}<p class="text-xs text-violet-700 mt-2">{{ vocab.squad.grade_pending }}</p>{% endif %}
   {% if timed_out_count %}
   <p class="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
     <span>⏱</span>{{ vocab.quiz.result_timed_out_count }} {{ timed_out_count }}
