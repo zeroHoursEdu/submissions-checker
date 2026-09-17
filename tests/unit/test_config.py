@@ -18,7 +18,8 @@ STRONG_KEY = "f3a1c9e7b5d2486017aa44bc99ee1122aabbccddeeff00112233445566778899"
 def _settings(**overrides):
     base = {"secret_key": STRONG_KEY, "database_url": DB_URL}
     base.update(overrides)
-    return Settings(**base)
+    # Never read the developer's .env: these tests describe explicit inputs only.
+    return Settings(_env_file=None, **base)
 
 
 # ── secret-key validator ──────────────────────────────────────────────────────
@@ -95,3 +96,13 @@ def test_defaults_present() -> None:
     assert s.scheduler_enabled is True
     assert s.s3_bucket_name == "submissions-checker"
     assert s.teacher_digest_enabled is True
+
+
+def test_debug_is_refused_in_production() -> None:
+    """FastAPI debug returns tracebacks to the client; never in production."""
+    with pytest.raises(ValidationError, match="DEBUG"):
+        _settings(environment="production", debug=True)
+
+
+def test_debug_allowed_outside_production() -> None:
+    assert _settings(environment="development", debug=True).debug is True

@@ -140,3 +140,35 @@ def test_root_handler_registered_on_global_app() -> None:
     # The "/" redirect is wired onto the module-level ``app`` instance.
     paths = _registered_paths(main_module.app)
     assert "/" in paths
+
+
+def _settings_stub(**overrides):
+    from types import SimpleNamespace
+
+    base = {
+        "debug": False,
+        "cors_origins": [],
+        "environment": "development",
+        "is_development": True,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_openapi_ui_is_off_in_production(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "get_settings",
+        lambda: _settings_stub(environment="production", is_development=False),
+    )
+    app = main_module.create_app()
+    assert app.docs_url is None
+    assert app.redoc_url is None
+    assert app.openapi_url is None
+
+
+def test_openapi_ui_is_on_in_development(monkeypatch) -> None:
+    monkeypatch.setattr(main_module, "get_settings", lambda: _settings_stub())
+    app = main_module.create_app()
+    assert app.docs_url == "/docs"
+    assert app.openapi_url == "/openapi.json"

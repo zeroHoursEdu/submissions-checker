@@ -32,6 +32,7 @@ from submissions_checker.core.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
+from submissions_checker.core.security_headers import SecurityHeadersMiddleware
 from submissions_checker.workers.scheduled.metrics_refresh import refresh_metrics
 
 # Configure logging before anything else
@@ -97,12 +98,18 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     settings = get_settings()
 
+    # The interactive API docs enumerate every route with its parameters. Useful while
+    # developing, pure reconnaissance material on a public deployment.
+    expose_docs = settings.is_development
     app = FastAPI(
         title="Submissions Checker",
         description="Automated student code submission checker: ZIP upload, sandboxed checks, AI/teacher/quiz review",
         version="0.1.0",
         lifespan=lifespan,
         debug=settings.debug,
+        docs_url="/docs" if expose_docs else None,
+        redoc_url="/redoc" if expose_docs else None,
+        openapi_url="/openapi.json" if expose_docs else None,
     )
 
     # Configure CORS
@@ -115,6 +122,8 @@ def create_app() -> FastAPI:
     )
     # Refuse cross-site POST/PUT/PATCH/DELETE (second CSRF layer after SameSite=Strict).
     app.add_middleware(OriginCheckMiddleware)
+    # Browser hardening headers on every response, including errors and static files.
+    app.add_middleware(SecurityHeadersMiddleware)
     # Outermost of the app middlewares: counts every request by route template.
     app.add_middleware(PrometheusMiddleware)
 
