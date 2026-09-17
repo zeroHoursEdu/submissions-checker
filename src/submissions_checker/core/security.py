@@ -57,13 +57,21 @@ def dummy_password_hash() -> str:
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
 
-def create_access_token(user_id: int, username: str, role: str) -> str:
-    """Create HS256 JWT. Claims: sub (user_id), username, role, exp."""
-    expire = datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS)
+def create_access_token(
+    user_id: int, username: str, role: str, *, issued_at: datetime | None = None
+) -> str:
+    """Create HS256 JWT. Claims: sub (user_id), username, role, iat, exp.
+
+    ``iat`` is compared against ``User.password_changed_at`` on every request, so a
+    password change ends every session that predates it.
+    """
+    now = issued_at or datetime.now(UTC)
+    expire = now + timedelta(hours=JWT_EXPIRY_HOURS)
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "username": username,
         "role": role,
+        "iat": int(now.timestamp()),
         "exp": expire,
     }
     token: str = jwt.encode(payload, get_settings().secret_key, algorithm=JWT_ALGORITHM)
@@ -73,3 +81,15 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
 def decode_access_token(token: str) -> dict[str, Any]:
     """Decode and validate JWT. Raises jose.JWTError on failure."""
     return jwt.decode(token, get_settings().secret_key, algorithms=[JWT_ALGORITHM])  # type: ignore[no-any-return]
+
+
+def issued_before_password_change(payload: dict[str, Any], changed_at: datetime | None) -> bool:
+    """Whether a decoded token predates the user's last password change.
+
+    Tokens without ``iat`` (minted before the claim existed) are never refused on this
+    ground: they age out on their own within JWT_EXPIRY_HOURS.
+    """
+    iat = payload.get("iat")
+    if changed_at is None or not isinstance(iat, int):
+        return False
+    return iat < int(changed_at.timestamp())

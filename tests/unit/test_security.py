@@ -148,3 +148,15 @@ def test_password_too_long_counts_bytes_not_characters() -> None:
     assert password_too_long("a" * 73) is True
     # 3 bytes per character in UTF-8.
     assert password_too_long("я" * 37) is True  # 2 bytes each: 74
+
+
+def test_token_carries_issue_time() -> None:
+    """`iat` is what lets a password change refuse older sessions."""
+    import time
+
+    from submissions_checker.core.security import create_access_token, decode_access_token
+
+    before = int(time.time())
+    payload = decode_access_token(create_access_token(1, "u", "TEACHER"))
+    assert isinstance(payload["iat"], int)
+    assert before <= payload["iat"] <= int(time.time())

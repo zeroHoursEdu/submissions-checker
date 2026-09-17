@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Request, status
@@ -267,6 +268,8 @@ async def reset_password(
         raise HTTPException(status_code=404)
 
     user.password_hash = hash_password(new_password)
+    # A reset is the moment a stolen session must stop working.
+    user.password_changed_at = datetime.now(UTC)
     prt.used = True
     await db.commit()
 
@@ -337,7 +340,11 @@ async def change_password(
             request, current_user, error=error, changed=False, status_code=422
         )
 
+    now = datetime.now(UTC)
     user.password_hash = hash_password(new_password)
+    # Every other session ends here; this one continues on a cookie minted at the
+    # same instant, so the person changing the password is not logged out.
+    user.password_changed_at = now
     await audit(
         db,
         action="change_password",
@@ -345,6 +352,10 @@ async def change_password(
         actor_username=current_user.username,
     )
     await db.commit()
-    return RedirectResponse(
+    response = RedirectResponse(
         url="/auth/change-password?changed=1", status_code=status.HTTP_303_SEE_OTHER
     )
+    _set_auth_cookie(
+        response, create_access_token(user.id, user.username, user.role.value, issued_at=now)
+    )
+    return response

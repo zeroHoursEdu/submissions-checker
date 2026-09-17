@@ -1010,6 +1010,8 @@ async def teacher_resend_credentials(
             continue
         password = _generate_password()
         user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(12)).decode()
+        # The old password is gone; so is any session that was opened with it.
+        user.password_changed_at = datetime.now(UTC)
         db.add(
             OutboxMessage(
                 event_type=OutboxEventType.SEND_CREDENTIALS,

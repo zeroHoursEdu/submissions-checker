@@ -10,6 +10,8 @@ and that the stored password is a bcrypt hash rather than plaintext).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import bcrypt
 import pytest
 from httpx import AsyncClient
@@ -553,3 +555,114 @@ async def test_reset_password_rejects_overlong_new_password(
         data={"token": "tok-long", "new_password": "n" * 73, "confirm_password": "n" * 73},
     )
     assert resp.status_code == 422
+
+
+# ── Sessions end when the password changes ───────────────────────────────────
+
+
+def _token_issued_at(user: User, issued_at: datetime) -> str:
+    """A cookie exactly as login would have minted it at *issued_at*."""
+    from jose import jwt
+
+    from submissions_checker.core.config import get_settings
+    from submissions_checker.core.security import JWT_ALGORITHM
+
+    return jwt.encode(
+        {
+            "sub": str(user.id),
+            "username": user.username,
+            "role": user.role.value,
+            "iat": int(issued_at.timestamp()),
+            "exp": issued_at + timedelta(hours=8),
+        },
+        get_settings().secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+
+
+async def test_session_issued_before_password_change_is_refused(
+    client: AsyncClient, make_user, db
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="kim", password=PASSWORD)
+    old = _token_issued_at(user, datetime.now(UTC) - timedelta(minutes=5))
+    client.cookies.set(COOKIE_NAME, old)
+    assert (await client.get("/teacher")).status_code == 200
+
+    user.password_changed_at = datetime.now(UTC)
+    await db.commit()
+    assert (await client.get("/teacher")).status_code == 401
+
+
+async def test_session_without_issue_time_survives_a_password_change(
+    client: AsyncClient, make_user, db
+) -> None:
+    """Cookies minted before `iat` existed keep working until they expire; the change
+    must not log everyone out on deploy."""
+    from jose import jwt
+
+    from submissions_checker.core.config import get_settings
+    from submissions_checker.core.security import JWT_ALGORITHM
+
+    user = await make_user(role=UserRole.TEACHER, username="lee", password=PASSWORD)
+    user.password_changed_at = datetime.now(UTC)
+    await db.commit()
+    legacy = jwt.encode(
+        {
+            "sub": str(user.id),
+            "username": user.username,
+            "role": user.role.value,
+            "exp": datetime.now(UTC) + timedelta(hours=1),
+        },
+        get_settings().secret_key,
+        algorithm=JWT_ALGORITHM,
+    )
+    client.cookies.set(COOKIE_NAME, legacy)
+    assert (await client.get("/teacher")).status_code == 200
+
+
+async def test_change_password_ends_other_sessions_and_keeps_this_one(
+    client: AsyncClient, make_user
+) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="mia", password=PASSWORD)
+    old = _token_issued_at(user, datetime.now(UTC) - timedelta(minutes=5))
+    client.cookies.set(COOKIE_NAME, old)
+
+    resp = await client.post(
+        "/auth/change-password",
+        data={
+            "current_password": PASSWORD,
+            "new_password": "N3wPassw0rd!",
+            "confirm_password": "N3wPassw0rd!",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    fresh = resp.cookies.get(COOKIE_NAME)
+    assert fresh and fresh != old
+
+    # The response also planted the fresh cookie in the jar; test each cookie alone.
+    client.cookies.clear()
+    client.cookies.set(COOKIE_NAME, old)
+    assert (await client.get("/teacher")).status_code == 401
+    client.cookies.clear()
+    client.cookies.set(COOKIE_NAME, fresh)
+    assert (await client.get("/teacher")).status_code == 200
+
+
+async def test_reset_password_ends_existing_sessions(client: AsyncClient, make_user, db) -> None:
+    user = await make_user(role=UserRole.TEACHER, username="ned", password=PASSWORD)
+    old = _token_issued_at(user, datetime.now(UTC) - timedelta(minutes=5))
+    db.add(PasswordResetToken.create(user_id=user.id, token="tok-ned"))
+    await db.commit()
+
+    resp = await client.post(
+        "/auth/reset-password",
+        data={
+            "token": "tok-ned",
+            "new_password": "N3wPassw0rd!",
+            "confirm_password": "N3wPassw0rd!",
+        },
+    )
+    assert resp.status_code == 200
+    client.cookies.set(COOKIE_NAME, old)
+    assert (await client.get("/teacher")).status_code == 401
