@@ -369,3 +369,38 @@ async def test_passing_the_granted_attempt_completes(
     assert r.status_code == 303
     await db.refresh(sub)
     assert sub.status == SubmissionStatus.COMPLETED
+
+
+# ── Board ────────────────────────────────────────────────────────────────────
+
+
+async def test_board_shows_button_only_for_grantable_rows(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, exhausted, _sa, sub = await _exhausted(db, teacher, make_student)
+    # A second student on the same assignment, failed with 1 of 2 used — not grantable.
+    other = await make_student(full_name="Petro P")
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=other.id))
+    sa2 = StudentAssignment(student_id=other.id, subjects_assignment_id=asg.id)
+    db.add(sa2)
+    await db.commit()
+    await db.refresh(sa2)
+    sub2 = Submission(
+        students_assignment_id=sa2.id,
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+        source_metadata={},
+        status=SubmissionStatus.FAILED,
+        plugin_config_id=sub.plugin_config_id,
+    )
+    db.add(sub2)
+    await db.commit()
+    await db.refresh(sub2)
+    await _attempt(db, sub2, other.id)
+
+    authenticate(client, teacher)
+    page = await client.get(f"/teacher/subjects/{subject.id}/assignments/{asg.id}")
+    assert page.status_code == 200
+    assert "Додаткова спроба тесту" in page.text
+    assert f'action="/teacher/submissions/{sub.id}/grant-quiz-attempt"' in page.text
+    assert f'name="student_id" value="{exhausted.id}"' in page.text
+    assert f'action="/teacher/submissions/{sub2.id}/grant-quiz-attempt"' not in page.text

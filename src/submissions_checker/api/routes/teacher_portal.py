@@ -538,6 +538,26 @@ async def teacher_assignment(
         and r["submitted_at"] < stale_cutoff
     }
 
+    # Students stuck on an exhausted quiz get the "one more attempt" control. Only FAILED /
+    # QUIZ_SENT rows can qualify, and a squad's rows share one submission, so load each
+    # candidate submission once and key the result by (submission, student).
+    candidate_ids = {
+        r["submission_id"]
+        for r in rows
+        if r["submission_id"]
+        and r["submission_status"] in (SubmissionStatus.FAILED, SubmissionStatus.QUIZ_SENT)
+    }
+    grantable: set[tuple[int, int]] = set()
+    if candidate_ids:
+        candidates = (
+            (await db.execute(select(Submission).where(Submission.id.in_(candidate_ids))))
+            .scalars()
+            .all()
+        )
+        for cand in candidates:
+            for sid in await quiz_grants.grantable_students(db, cand):
+                grantable.add((cand.id, sid))
+
     # AI verdicts over the assignment's thresholds get a badge in the Flags column.
     ai_cfg = (assignment.config or {}).get("ai_review") or {}
     ai_flags: dict[int, VerdictSummary] = {}
@@ -614,6 +634,7 @@ async def teacher_assignment(
             "snapshot_flags": snapshot_flags,
             "ai_flags": ai_flags,
             "stuck_ids": stuck_ids,
+            "grantable": grantable,
             "bulk_result": bulk_result,
         },
     )
