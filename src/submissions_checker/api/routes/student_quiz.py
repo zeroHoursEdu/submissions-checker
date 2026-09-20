@@ -53,6 +53,7 @@ from submissions_checker.services.air_raid.geo import resolve_region
 from submissions_checker.services.audit import audit
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
+from submissions_checker.services.quiz_grants import effective_max_attempts
 from submissions_checker.services.quiz_scoring import (
     apply_question_overrides,
     load_question_overrides,
@@ -636,7 +637,9 @@ async def _grade_and_finalize(
             elif submission.squad_id is not None:
                 await _notify_partners_passed(db, submission, attempt.student_id)
         else:
-            max_attempts = attempt.config_snapshot.get("max_quiz_attempts")
+            max_attempts = effective_max_attempts(
+                attempt.config_snapshot.get("max_quiz_attempts"), submission, attempt.student_id
+            )
             if max_attempts is not None:
                 prior = await _count_used_attempts(
                     db, attempt.submission_id, attempt.id, attempt.student_id
@@ -760,10 +763,11 @@ async def start_or_resume_quiz(
     if not quiz_cfg or not quiz_cfg.get("questions"):
         raise HTTPException(status_code=404, detail="No quiz configured for this assignment")
 
-    # Check max attempts
+    # Check max attempts — the config's cap plus anything a teacher granted this student.
     max_attempts = quiz_cfg.get("max_quiz_attempts")
+    allowed = effective_max_attempts(max_attempts, latest_sub, student_id)
     used_count = sum(1 for a in existing if a.status in _TERMINAL_STATUSES)
-    if max_attempts is not None and used_count >= max_attempts:
+    if allowed is not None and used_count >= allowed:
         latest_finished = existing[-1] if existing else None
         if latest_finished:
             return RedirectResponse(

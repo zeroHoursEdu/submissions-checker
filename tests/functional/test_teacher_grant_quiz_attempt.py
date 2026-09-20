@@ -293,3 +293,79 @@ async def test_route_other_teacher_403(
         follow_redirects=False,
     )
     assert r.status_code == 403
+
+
+# ── Student side after a grant ───────────────────────────────────────────────
+
+
+async def _granted(db, client, teacher, make_user, make_student):
+    subject, asg, student, sa, sub = await _exhausted(db, teacher, make_student)
+    user = await make_user(role=UserRole.STUDENT, username="olha", student=student)
+    await quiz_grants.grant_extra_attempt(db, sub, student.id)
+    await db.commit()
+    authenticate(client, user)
+    return subject, asg, student, sa, sub
+
+
+async def test_student_can_start_the_granted_attempt(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _a, _st, sa, _sub = await _granted(db, client, teacher, make_user, make_student)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    new_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    assert r.headers["location"] == f"/portal/quiz/{new_id}"
+    attempt = await db.get(QuizAttempt, new_id)
+    assert attempt.status == QuizAttemptStatus.IN_PROGRESS
+    assert attempt.config_snapshot["max_quiz_attempts"] == 2  # snapshot keeps the base cap
+
+
+async def test_detail_page_offers_the_retry_after_grant(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _a, _st, sa, _sub = await _granted(db, client, teacher, make_user, make_student)
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert page.status_code == 200
+    assert "2/3" in page.text  # used / effective cap
+    assert f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz" in page.text
+
+
+async def test_failing_the_granted_attempt_fails_again_with_none_left(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _a, student, sa, sub = await _granted(db, client, teacher, make_user, make_student)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    new_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    attempt = await db.get(QuizAttempt, new_id)
+    form = {f"answer_{q['id']}": "0" for q in attempt.questions_snapshot}
+    r = await client.post(f"/portal/quiz/{new_id}/submit", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    await db.refresh(attempt)  # the app's session finished it; drop this session's stale copy
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.FAILED
+    # And grantable once more — each click is exactly one attempt.
+    assert await quiz_grants.grantable_students(db, sub) == [student.id]
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 403
+
+
+async def test_passing_the_granted_attempt_completes(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _a, _st, sa, sub = await _granted(db, client, teacher, make_user, make_student)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    new_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    attempt = await db.get(QuizAttempt, new_id)
+    form = {f"answer_{q['id']}": "1" for q in attempt.questions_snapshot}
+    r = await client.post(f"/portal/quiz/{new_id}/submit", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.COMPLETED

@@ -47,6 +47,7 @@ from submissions_checker.db.models.notification_preference import NotificationPr
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.services import squads
 from submissions_checker.services.audit import audit
+from submissions_checker.services.quiz_grants import effective_max_attempts
 from submissions_checker.services.similarity import compare_zip_files
 from submissions_checker.workers.tasks.check_tasks import (
     execute_check_task,
@@ -367,6 +368,9 @@ async def assignment_detail(
                     .get("quiz", {})
                 )
                 quiz_max_attempts = quiz_cfg.get("max_quiz_attempts")
+    if latest_sub is not None:
+        # The config's cap plus any attempts a teacher granted this student on this upload.
+        quiz_max_attempts = effective_max_attempts(quiz_max_attempts, latest_sub, student_id)
 
     check_reason: str | None = None
     if latest_sub and latest_sub.test_results:
