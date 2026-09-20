@@ -41,20 +41,27 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
         "quiz_passed": SubmissionStatus.COMPLETED,
         "quiz_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
         "quiz_failed": SubmissionStatus.FAILED,
+        # Squads only: member A exhausted (→ FAILED), was granted an attempt (→ QUIZ_SENT),
+        # and member B — mid-attempt at the time — has since exhausted too. B's grant
+        # lands while the submission is already QUIZ_SENT; the self-loop keeps one path.
+        "quiz_attempt_granted": SubmissionStatus.QUIZ_SENT,
     },
     SubmissionStatus.AWAITING_TEACHER_REVIEW: {
         "teacher_approve": SubmissionStatus.COMPLETED,
         "teacher_reject": SubmissionStatus.FAILED,
         "teacher_send_quiz": SubmissionStatus.QUIZ_SENT,
     },
-    # FAILED is otherwise terminal. The single exception is a teacher accepting a
-    # broken-question dispute: the attempt is re-scored, now clears the threshold, and the
+    # FAILED is otherwise terminal. The exceptions are a teacher accepting a
+    # broken-question dispute (the attempt is re-scored, now clears the threshold, and the
     # submission has to follow — a student must not stay failed on a question the teacher
-    # has agreed was wrong. Named distinctly from `quiz_passed` on purpose, so that an
-    # ordinary late-finishing attempt can never resurrect a failed submission by accident.
+    # has agreed was wrong; named distinctly from `quiz_passed` on purpose, so that an
+    # ordinary late-finishing attempt can never resurrect a failed submission by accident)
+    # and a teacher granting one more quiz attempt to a student who exhausted
+    # max_quiz_attempts (services.quiz_grants checks that this is why it failed).
     SubmissionStatus.FAILED: {
         "dispute_regrade_passed": SubmissionStatus.COMPLETED,
         "dispute_regrade_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        "quiz_attempt_granted": SubmissionStatus.QUIZ_SENT,
     },
 }
 

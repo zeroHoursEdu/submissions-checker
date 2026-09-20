@@ -46,6 +46,10 @@ LEGAL = [
     # dispute, the attempt was re-scored and now passes.
     (S.FAILED, "dispute_regrade_passed", S.COMPLETED),
     (S.FAILED, "dispute_regrade_passed_teacher", S.AWAITING_TEACHER_REVIEW),
+    # A teacher grants one more quiz attempt to an exhausted student. The self-loop on
+    # QUIZ_SENT is for a squad whose second member exhausted after the first was granted.
+    (S.FAILED, "quiz_attempt_granted", S.QUIZ_SENT),
+    (S.QUIZ_SENT, "quiz_attempt_granted", S.QUIZ_SENT),
     # Teacher unstick controls
     (S.AI_REVIEW_FAILED, "ai_review_skip_to_teacher", S.AWAITING_TEACHER_REVIEW),
     (S.VALIDATING, "requeue_checks", S.PENDING),
@@ -84,6 +88,10 @@ ILLEGAL = [
     (S.COMPLETED, "dispute_regrade_passed"),
     (S.QUIZ_SENT, "dispute_regrade_passed"),
     (S.AWAITING_TEACHER_REVIEW, "dispute_regrade_passed"),
+    # A grant only re-opens a quiz; it never un-completes or skips a teacher review.
+    (S.COMPLETED, "quiz_attempt_granted"),
+    (S.AWAITING_TEACHER_REVIEW, "quiz_attempt_granted"),
+    (S.TEST_FAILED, "quiz_attempt_granted"),
     (S.VALIDATION_FAILED, "validation_passed"),
     (S.TEST_FAILED, "test_passed_ai"),
     (S.AWAITING_TEACHER_REVIEW, "teacher_approve_done"),  # retired legacy event
