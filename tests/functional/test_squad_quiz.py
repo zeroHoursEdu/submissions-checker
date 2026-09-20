@@ -374,3 +374,89 @@ async def test_quiz_pages_say_which_part_is_mine(db, make_user, make_student, te
         result = await ca.get(f"/portal/quiz/{att}/result")
         # Jinja autoescapes the apostrophe in the vocab string to &#39; in the raw HTML.
         assert "Оцінка з" in result.text and "явиться" in result.text
+
+
+async def test_grant_reopens_the_squad_quiz_for_the_exhausted_member_only(
+    db, make_user, make_student, teacher
+) -> None:
+    from submissions_checker.services import quiz_grants
+
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    await _lock_pair(db, subject, teacher, (ua, ub))
+    async with _client(ua) as ca, _client(ub) as cb:
+        await _upload(ca, subject, sa_a)
+        att_a = await _start(ca, subject, sa_a)
+        await _answer_all(ca, db, att_a, correct=True)  # A passes their half
+        for _ in range(2):
+            att = await _start(cb, subject, sa_b)
+            await _answer_all(cb, db, att, correct=False)  # B exhausts
+        sub = (await db.execute(select(Submission))).scalar_one()
+        await db.refresh(sub)
+        assert sub.status == SubmissionStatus.FAILED
+        assert await quiz_grants.grantable_students(db, sub) == [ub.student_id]
+
+        await quiz_grants.grant_extra_attempt(db, sub, ub.student_id)
+        await db.commit()
+        await db.refresh(sub)
+        assert sub.status == SubmissionStatus.QUIZ_SENT
+
+        # A's passed attempt is untouched; A's quiz link still lands on their result.
+        a_row = await db.get(QuizAttempt, att_a)
+        await db.refresh(a_row)
+        assert a_row.is_passed is True
+        r = await ca.get(
+            f"/portal/subjects/{subject.id}/assignments/{sa_a.id}/quiz", follow_redirects=False
+        )
+        assert r.headers["location"].endswith(f"/portal/quiz/{att_a}/result")
+
+        # B gets a fresh attempt of their own slice size and, passing it, completes the squad.
+        att_b3 = await _start(cb, subject, sa_b)
+        b3 = await db.get(QuizAttempt, att_b3)
+        assert b3.status == QuizAttemptStatus.IN_PROGRESS
+        assert len(b3.questions_snapshot) == 2
+        await _answer_all(cb, db, att_b3, correct=True)
+        await db.refresh(sub)
+        assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW  # quiz_then_teacher
+
+
+async def test_second_exhausted_member_is_grantable_while_quiz_sent(
+    db, make_user, make_student, teacher
+) -> None:
+    """A finished exhausting while B was mid-attempt; B then exhausted on a FAILED
+    submission. Granting A moves it to QUIZ_SENT; B must still be grantable there."""
+    from submissions_checker.services import quiz_grants
+
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    await _lock_pair(db, subject, teacher, (ua, ub))
+    async with _client(ua) as ca, _client(ub) as cb:
+        await _upload(ca, subject, sa_a)
+        att_b1 = await _start(cb, subject, sa_b)
+        await _answer_all(cb, db, att_b1, correct=False)
+        att_b2 = await _start(cb, subject, sa_b)  # B mid-attempt
+        att_a1 = await _start(ca, subject, sa_a)
+        await _answer_all(ca, db, att_a1, correct=False)
+        att_a2 = await _start(ca, subject, sa_a)
+        await _answer_all(ca, db, att_a2, correct=False)  # A exhausts → FAILED
+        await _answer_all(cb, db, att_b2, correct=False)  # B's late finish: also exhausted
+        sub = (await db.execute(select(Submission))).scalar_one()
+        await db.refresh(sub)
+        assert sub.status == SubmissionStatus.FAILED
+        assert await quiz_grants.grantable_students(db, sub) == sorted(
+            [ua.student_id, ub.student_id]
+        )
+
+        await quiz_grants.grant_extra_attempt(db, sub, ua.student_id)
+        await db.commit()
+        await db.refresh(sub)
+        assert sub.status == SubmissionStatus.QUIZ_SENT
+        assert await quiz_grants.grantable_students(db, sub) == [ub.student_id]
+
+        await quiz_grants.grant_extra_attempt(db, sub, ub.student_id)  # self-loop edge
+        await db.commit()
+        await db.refresh(sub)
+        assert sub.status == SubmissionStatus.QUIZ_SENT
+        assert sub.source_metadata["quiz_extra_attempts"] == {
+            str(ua.student_id): 1,
+            str(ub.student_id): 1,
+        }
+        assert await quiz_grants.grantable_students(db, sub) == []
