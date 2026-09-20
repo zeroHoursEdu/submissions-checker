@@ -146,6 +146,7 @@ then quiz, then teacher approval), squad of two (A, B):
 | Case | What happens |
 |---|---|
 | A member exhausts quiz attempts without passing | Submission goes `FAILED` (whole squad); members who already passed keep their attempt rows. |
+| Teacher wants to give an exhausted member one more try | The board shows **Додаткова спроба тесту** on that member's row only. Granting it (`POST /teacher/submissions/{id}/grant-quiz-attempt`, `student_id` = the member) records `+1` for that member in `submissions.source_metadata.quiz_extra_attempts` and moves the submission back to `QUIZ_SENT`; partners' passed attempts are untouched and the stored draw is reused. If a second member also exhausted (they were mid-attempt when the first one failed the squad), their button stays available on the now-`QUIZ_SENT` submission. |
 | Teacher rejects the submission | Same as solo: `FAILED`, both members notified. |
 | A dispute (reported-question) regrade flips an attempt to passing | Waits on completeness like any other pass — the submission only advances once `quiz_complete` is true for every enrolled member. |
 | Config's `squads.maxAllowedSize` is lowered, or the `squads:` block is removed | Never touches existing squads or their submissions; only stops new squads from forming (and caps new ones at the new size). Existing locked squads keep working end to end. |
@@ -167,6 +168,7 @@ then quiz, then teacher approval), squad of two (A, B):
 | `POST /portal/subjects/{subject_id}/squad/invites/{invite_id}/decline` | STUDENT, enrolled, invitee | not audited |
 | `POST /portal/subjects/{subject_id}/squad/invites/{invite_id}/cancel` | STUDENT, enrolled, **squad creator only** | not audited |
 | `POST /teacher/subjects/{id}/squads/assign` | Owner / ADMIN | `squad_assign` |
+| `POST /teacher/submissions/{id}/grant-quiz-attempt` | Owner / ADMIN | `grant_quiz_attempt` |
 
 Only the squad's creator sees and can use the Cancel-invite button — a non-creator
 member has no control over invites they didn't send.

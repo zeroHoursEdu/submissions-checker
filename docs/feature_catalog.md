@@ -101,6 +101,7 @@ See [`docs/features/squads.md`](features/squads.md) for the full squad feature.
 | Bulk approve / reject / re-run for selected rows on the board (ineligible rows skipped; audited `bulk_review`) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/bulk` |
 | Re-run checks (any non-terminal or failed status → PENDING, config pin dropped; audited `rerun_checks`) | Owner / ADMIN | `POST /teacher/submissions/{id}/rerun-checks` |
 | Retry a failed AI review / hand it to manual review (from `AI_REVIEW_FAILED`; audited) | Owner / ADMIN | `POST /teacher/submissions/{id}/retry-ai-review`, `POST /teacher/submissions/{id}/send-to-teacher` |
+| Grant one more quiz attempt to a student who exhausted `max_quiz_attempts` (from `FAILED`, or `QUIZ_SENT` for a second squad member; attempt history kept; student notified in-app; audited `grant_quiz_attempt`) | Owner / ADMIN | `POST /teacher/submissions/{id}/grant-quiz-attempt` (form `student_id`) |
 | Similarity report: pairwise token similarity of the latest ZIP per student, threshold `?min=` | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}/similarity` |
 | Export grades CSV (Операції tab) | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
 
@@ -126,6 +127,13 @@ AI_REVIEW_FAILED ──retry_ai_review──▶ AI_REVIEWING
 AWAITING_TEACHER_REVIEW ──teacher_approve──▶ COMPLETED
                         ──teacher_reject──▶ FAILED
                         ──teacher_send_quiz──▶ QUIZ_SENT
+QUIZ_SENT ──quiz_passed──▶ COMPLETED
+          ──quiz_passed_teacher──▶ AWAITING_TEACHER_REVIEW
+          ──quiz_failed──▶ FAILED
+          ──quiz_attempt_granted──▶ QUIZ_SENT   (squad: a second exhausted member)
+FAILED ──quiz_attempt_granted──▶ QUIZ_SENT      (teacher grants one more attempt)
+       ──dispute_regrade_passed──▶ COMPLETED
+       ──dispute_regrade_passed_teacher──▶ AWAITING_TEACHER_REVIEW
 ```
 
 ### Review modes (set per assignment in the config)

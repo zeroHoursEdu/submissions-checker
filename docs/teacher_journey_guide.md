@@ -318,8 +318,13 @@ The assignment board offers, next to the status badge:
   drops the config pin (so a fixed config is picked up) and queues the checks again.
 - **Повторити AI-рецензію** and **На ручну перевірку** on `AI_REVIEW_FAILED`: retry the model
   (the next step is derived from the review mode) or take the submission into your queue.
+- **Додаткова спроба тесту** on a `FAILED` row whose student used every `max_quiz_attempts`
+  without passing: gives that one student one more attempt (click again for another), keeps
+  every previous attempt on record, and sends them an in-app notice. Not offered on
+  submissions you rejected yourself or that already completed.
 
-Every action is audited (`rerun_checks`, `retry_ai_review`, `ai_review_skip_to_teacher`).
+Every action is audited (`rerun_checks`, `retry_ai_review`, `ai_review_skip_to_teacher`,
+`grant_quiz_attempt`).
 
 ### Bulk actions
 
