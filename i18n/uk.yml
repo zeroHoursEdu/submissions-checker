@@ -115,6 +115,8 @@ quiz:
   multiple_choice_hint: Виберіть усі правильні відповіді.
   ordering_hint: Перетягніть елементи у правильному порядку.
   submit_quiz: Надіслати тест
+  notif_extra_attempt_title: Додаткова спроба тесту
+  notif_extra_attempt_body: "Викладач надав вам ще одну спробу тесту з «{title}»."
   pts: бал(ів)
   result_breadcrumb: Результат тесту
   result_passed: Зараховано!
@@ -387,6 +389,7 @@ teacher:
   resend_credentials_hint: Вибраним студентам буде згенеровано новий пароль і надіслано листа.
   resent_result: Надіслано нові доступи
   retry_ai_review: Повторити AI-рецензію
+  grant_quiz_attempt: Додаткова спроба тесту
   send_to_teacher: На ручну перевірку
   data_title: Дані
   data_hint: Вивантажити всі оцінки предмета у CSV.

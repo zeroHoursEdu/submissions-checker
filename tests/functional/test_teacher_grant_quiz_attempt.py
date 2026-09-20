@@ -212,3 +212,84 @@ async def test_second_grant_after_refail_counts_to_two(db, teacher, make_student
     transition(sub, "quiz_failed")
     await db.commit()
     assert await quiz_grants.grant_extra_attempt(db, sub, student.id) == 2
+
+
+# ── Route ────────────────────────────────────────────────────────────────────
+
+
+async def test_route_grants_audits_and_notifies(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, asg, student, sa, sub = await _exhausted(db, teacher, make_student)
+    user = await make_user(role=UserRole.STUDENT, username="olha", student=student)
+    authenticate(client, teacher)
+
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/grant-quiz-attempt",
+        data={"student_id": str(student.id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == f"/teacher/subjects/{subject.id}/assignments/{asg.id}"
+
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.QUIZ_SENT
+    assert sub.source_metadata["quiz_extra_attempts"] == {str(student.id): 1}
+
+    log = (
+        await db.execute(select(AuditLog).where(AuditLog.action == "grant_quiz_attempt"))
+    ).scalar_one()
+    assert log.actor_id == teacher.id
+    assert log.target_type == "submission" and log.target_id == sub.id
+    assert log.detail == {"student_id": student.id, "extra_attempts": 1}
+
+    note = (
+        await db.execute(select(Notification).where(Notification.user_id == user.id))
+    ).scalar_one()
+    assert note.title == "Додаткова спроба тесту"
+    assert "L1" in note.body
+    assert note.link == f"/portal/subjects/{subject.id}/assignments/{sa.id}"
+
+
+async def test_route_defaults_student_to_submission_owner(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    _s, _a, student, _sa, sub = await _exhausted(db, teacher, make_student)
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/grant-quiz-attempt", follow_redirects=False
+    )
+    assert r.status_code == 303
+    await db.refresh(sub)
+    assert sub.source_metadata["quiz_extra_attempts"] == {str(student.id): 1}
+
+
+async def test_route_refuses_when_not_grantable(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    _s, _a, student, _sa, sub = await _arrange(db, teacher, make_student)
+    await _attempt(db, sub, student.id)  # 1 of 2 used — not exhausted
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/grant-quiz-attempt",
+        data={"student_id": str(student.id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 409
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.FAILED
+    assert sub.source_metadata == {}
+
+
+async def test_route_other_teacher_403(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    _s, _a, student, _sa, sub = await _exhausted(db, teacher, make_student)
+    other = await make_user(role=UserRole.TEACHER, username="other-t")
+    authenticate(client, other)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/grant-quiz-attempt",
+        data={"student_id": str(student.id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 403

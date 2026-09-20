@@ -23,6 +23,7 @@ from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import AppSettings, DBSession, TeacherUser
 from submissions_checker.api.routes.teacher_disputes import count_open_disputes
 from submissions_checker.core.config import get_settings
+from submissions_checker.core.i18n import get_vocab
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.sealed import seal
 from submissions_checker.core.security import COOKIE_NAME, create_access_token, hash_token
@@ -56,7 +57,7 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.group import Group
-from submissions_checker.services import squads
+from submissions_checker.services import quiz_grants, squads
 from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
@@ -65,6 +66,7 @@ from submissions_checker.services.gradebook import (
     fetch_grid_rows,
 )
 from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
 from submissions_checker.services.squads import SquadError
 from submissions_checker.services.storage import StorageService
@@ -1647,6 +1649,60 @@ async def teacher_skip_ai_review(
 # ─────────────────────────────────────────────────────────────────────────────
 # Student enrollment management
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/submissions/{submission_id}/grant-quiz-attempt")
+async def teacher_grant_quiz_attempt(
+    submission_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    student_id: int | None = Form(default=None),
+) -> RedirectResponse:
+    """Give one student one more quiz attempt on a submission stuck on an exhausted quiz.
+
+    ``student_id`` picks the squad member; a solo submission defaults to its owner.
+    Attempt history is kept — only the allowance and the status change.
+    """
+    submission = await _load_submission_for_teacher(db, submission_id, current_user)
+    target = student_id if student_id is not None else submission.students_assignment.student_id
+    try:
+        total = await quiz_grants.grant_extra_attempt(db, submission, target)
+    except quiz_grants.GrantError as exc:
+        raise HTTPException(
+            status_code=409, detail="Submission is not in a state that allows this action"
+        ) from exc
+
+    await audit(
+        db,
+        action="grant_quiz_attempt",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="submission",
+        target_id=submission_id,
+        student_id=target,
+        extra_attempts=total,
+    )
+
+    assignment = submission.students_assignment.subjects_assignment
+    user_id = await db.scalar(select(User.id).where(User.student_id == target))
+    if user_id is not None:
+        # A squad member's own students_assignments row, not the uploader's.
+        own_sa_id = await db.scalar(
+            select(StudentAssignment.id).where(
+                StudentAssignment.student_id == target,
+                StudentAssignment.subjects_assignment_id == assignment.id,
+            )
+        )
+        vocab = get_vocab(None).get("quiz", {})
+        await push_notification(
+            db,
+            user_id,
+            str(vocab.get("notif_extra_attempt_title", "")),
+            str(vocab.get("notif_extra_attempt_body", "")).format(title=assignment.title),
+            f"/portal/subjects/{assignment.subject_id}/assignments/{own_sa_id}",
+        )
+    await db.commit()
+    return RedirectResponse(url=_board_url(submission), status_code=303)
 
 
 @router.post("/subjects/{subject_id}/enroll/{student_id_param}")
