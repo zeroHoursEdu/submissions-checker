@@ -30,6 +30,14 @@ The system detects suspicious browser events during a quiz and responds accordin
   shortcut — no DOM event fires for menu-driven browser actions, so there is nothing for
   page JavaScript to detect
 
+**What is deliberately not counted:** leaving the page on purpose. A stepped quiz advances
+by navigating (`POST .../answer` → redirect), and browsers announce that navigation with the
+same events as a tab switch — Firefox fires `visibilitychange` → hidden, Chrome fires `blur`.
+The page sets `window.__acLeaving` on `beforeunload` / `pagehide` / form `submit`, and both
+reporters go quiet once it is set, so answering a question never costs a violation. The
+trade-off: a student who switches tabs *after* pressing "answer", or who closes the quiz tab
+outright, is not recorded — switching to another tab without leaving the page still is.
+
 ---
 
 ## Config Structure

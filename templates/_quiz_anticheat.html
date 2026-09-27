@@ -37,6 +37,24 @@
 {% endif %}
 
 <script>
+// ─── Intentional-navigation guard ─────────────────────────────────
+// A stepped quiz walks from question to question with a full page navigation, and
+// browsers announce that navigation with exactly the events the anti-cheat listens
+// for: Firefox fires `visibilitychange` → hidden, Chrome fires `blur`. Those arrive
+// on the outgoing page and their POST still reaches the server, so an honest student
+// used to accumulate one `tab_switch` (or `window_blur`) per answered question and
+// auto-failed a few questions in. Once this document is committed to leaving, both
+// reporters below go quiet.
+(function() {
+  window.__acLeaving = false;
+  const leave = () => { window.__acLeaving = true; };
+  // `beforeunload` covers every way out, including the per-question timer's
+  // programmatic `form.submit()`, which fires no submit event of its own.
+  window.addEventListener('beforeunload', leave);
+  window.addEventListener('pagehide', leave);
+  document.addEventListener('submit', leave, true);
+})();
+
 {% if anti_cheat_config %}
 // ─── Anti-cheat event tracking ────────────────────────────────────
 (function() {
@@ -83,6 +101,7 @@
   }
 
   async function report(type) {
+    if (window.__acLeaving) return;   // answering a question is not a violation
     try {
       const res = await fetch(`/portal/quiz/${attemptId}/event`, {
         method: 'POST',
@@ -236,6 +255,7 @@ async function captureSnapshot(eventType) {
 
 // Report a camera event through the existing rule engine, then react to the action.
 async function report(type) {
+  if (window.__acLeaving) return;   // see the intentional-navigation guard above
   try {
     const res = await fetch(`/portal/quiz/${attemptId}/event`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},

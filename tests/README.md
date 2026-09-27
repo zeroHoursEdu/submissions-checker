@@ -22,7 +22,13 @@ For the e2e layer also install the `e2e` extra and Playwright browsers:
 ```bash
 uv pip install -e ".[dev,e2e]"
 playwright install chromium
+playwright install firefox   # only for test_quiz_anticheat_navigation.py
 ```
+
+`tests/e2e/test_quiz_anticheat_navigation.py` runs on every installed engine and skips the
+missing ones. Firefox is the one that reproduces the bug it guards (it fires
+`visibilitychange` on navigation, Chromium does not when headless), so without it that test
+still passes but proves nothing.
 
 ## Running
 

@@ -361,3 +361,33 @@ the new bytes hash differently and the apply goes through.
 
 **Fixed (2026-09-17):** dedup compares the latest version only; migration 0028 dropped the
 `(subject_id, content_hash)` uniqueness so a rollback inserts a new version.
+
+---
+
+## 17. ✅ A stepped quiz counted its own page navigations as anti-cheat violations
+
+**Where:** `templates/_quiz_anticheat.html` (the passive-anti-cheat and camera `report()`
+functions) together with `POST /portal/quiz/{attempt}/event`
+(`api/routes/student_quiz.py:report_violation`), which accumulates counts for the whole
+attempt.
+
+**What happens:** a stepped quiz moves to the next question with a full page navigation
+(`POST .../answer` → redirect). Browsers announce that navigation with exactly the events
+the anti-cheat listens for: Firefox fires `visibilitychange` → hidden (reported as
+`tab_switch`), Chrome fires `blur` (reported as `window_blur`). The event fires on the
+outgoing page and its POST still reaches the server, so every answered question added one
+violation. With the `tab_switch` threshold of 3 that `distributedBasics` uses for `fail`, an
+honest Firefox student was auto-failed on the third or fourth question of every attempt —
+and never saw the banner, because the page was already unloading when the `fail` response
+came back.
+
+**Evidence:** reproduced with Playwright against a two-page harness running the template's
+own listeners — Firefox reported `tab_switch` on each of 4 submits; real desktop Chrome
+reported `window_blur` on each. Regression test: `tests/e2e/test_quiz_anticheat_navigation.py`.
+
+**Fixed (2026-09-21):** the template sets `window.__acLeaving` on `beforeunload` / `pagehide`
+/ form `submit`, and both reporters return early once it is set. Events raised while the
+student is actually on the page are unaffected.
+
+**Note for already-affected attempts:** past counts stay in `quiz_attempts.violations`; a
+student failed this way needs an extra attempt granted by their teacher.
