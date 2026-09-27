@@ -8,6 +8,7 @@ transitions and outbox messages.
 
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 import time
@@ -40,7 +41,9 @@ from submissions_checker.services import check_core
 from submissions_checker.services.docker_sandbox import DockerSandbox
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
+from submissions_checker.services.storage import get_storage
 from submissions_checker.services.subject_config import validate_subject_code
+from submissions_checker.services.submission_files import read_submission_zip
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
@@ -123,7 +126,7 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     # Quiz-examined assignments never touch the sandbox — bail out before a check plan is even
     # resolved, since these configs legitimately carry no check_command.
     if review_mode in _QUIZ_FIRST_MODES:
-        _accept_without_checks(submission, review_mode)
+        await _accept_without_checks(submission, review_mode)
         return
 
     # An assignment with no plugin key cannot be matched to anything in config.yml.
@@ -161,16 +164,19 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         return
     plugin_dir = Path(plugins_root) / subject_code
 
-    # Locate and extract the submitted ZIP
+    # Locate and extract the submitted ZIP — object storage first, legacy uploads/ second.
     saved_as = (submission.source_metadata or {}).get("saved_as")
     if not saved_as:
         raise RuntimeError("Submission has no saved_as in source_metadata")
-    zip_path = UPLOADS_DIR / saved_as
+    zip_bytes = await read_submission_zip(get_storage(settings), saved_as, UPLOADS_DIR)
+    if zip_bytes is None:
+        _fail_validation(submission, "Could not open submitted ZIP: file not found in storage")
+        return
 
     with tempfile.TemporaryDirectory(prefix="submission_") as extract_dir:
         extract_path = Path(extract_dir)
         try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
                 safe_extract(zf, extract_path)
         except (zipfile.BadZipFile, OSError) as exc:
             _fail_validation(submission, f"Could not open submitted ZIP: {exc}")
@@ -271,7 +277,7 @@ def _fail_validation(submission: Submission, reason: str) -> None:
     transition(submission, "validation_failed")
 
 
-def _accept_without_checks(submission: Submission, review_mode: str) -> None:
+async def _accept_without_checks(submission: Submission, review_mode: str) -> None:
     """Accept a quiz-examined submission without running any check.
 
     No sandbox, no check plan — but the archive is still opened and safe-extracted to a
@@ -285,9 +291,14 @@ def _accept_without_checks(submission: Submission, review_mode: str) -> None:
     if not saved_as:
         raise RuntimeError("Submission has no saved_as in source_metadata")
 
+    zip_bytes = await read_submission_zip(get_storage(get_settings()), saved_as, UPLOADS_DIR)
+    if zip_bytes is None:
+        _fail_validation(submission, "Could not open submitted ZIP: file not found in storage")
+        return
+
     with tempfile.TemporaryDirectory(prefix="submission_") as extract_dir:
         try:
-            with zipfile.ZipFile(UPLOADS_DIR / saved_as, "r") as zf:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
                 safe_extract(zf, Path(extract_dir))
         except (zipfile.BadZipFile, OSError) as exc:
             _fail_validation(submission, f"Could not open submitted ZIP: {exc}")

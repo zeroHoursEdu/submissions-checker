@@ -926,6 +926,53 @@ async def test_check_validation_failed(
 
 
 @pytest.mark.asyncio
+async def test_check_reads_zip_from_object_storage(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """With an object store configured the worker reads the ZIP from it, not from disk."""
+    from tests.storage_fake import FakeStorage
+
+    zip_path = tmp_path / "src.zip"
+    _write_zip(zip_path)
+    storage = FakeStorage()
+    storage.objects["submissions/s3.zip"] = zip_path.read_bytes()
+    sub = await _seed_check_submission(db_session, "s3", saved_as="s3.zip")
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path / "empty")
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    monkeypatch.setattr(check_tasks, "get_storage", lambda _s: storage)
+    _patch_run_check(monkeypatch, check_core.CheckOutcome("passed", 1, 1, []))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    await _process(db_session, monkeypatch, message)
+
+    await db_session.refresh(sub)
+    assert sub.status != SubmissionStatus.VALIDATION_FAILED
+
+
+@pytest.mark.asyncio
+async def test_check_zip_missing_everywhere_fails_validation(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    sub = await _seed_check_submission(db_session, "gone", saved_as="gone.zip")
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(monkeypatch, check_core.CheckOutcome("passed", 1, 1, []))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.VALIDATION_FAILED
+    assert "Could not open submitted ZIP" in sub.test_results["check_reason"]
+
+
+@pytest.mark.asyncio
 async def test_check_test_failed(
     db_session: AsyncSession, test_settings, monkeypatch, tmp_path
 ) -> None:

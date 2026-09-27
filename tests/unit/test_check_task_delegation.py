@@ -117,6 +117,7 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
             host_plugins_dir=None,
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
 
@@ -179,6 +180,7 @@ async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None
             host_plugins_dir=None,
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
 
@@ -226,6 +228,7 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
             host_plugins_dir=None,
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
 
@@ -289,6 +292,7 @@ async def test_worker_refuses_path_like_subject_code(tmp_path, monkeypatch) -> N
             host_plugins_dir=None,
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
     called: list = []
