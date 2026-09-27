@@ -8,6 +8,7 @@ transitions and outbox messages.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 import tempfile
@@ -21,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.core import metrics
-from submissions_checker.core.config import get_settings
+from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
@@ -41,6 +42,7 @@ from submissions_checker.services import check_core
 from submissions_checker.services.docker_sandbox import DockerSandbox
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
+from submissions_checker.services.plugin_cache import materialize_plugin_tree
 from submissions_checker.services.storage import get_storage
 from submissions_checker.services.subject_config import validate_subject_code
 from submissions_checker.services.submission_files import read_submission_zip
@@ -51,6 +53,8 @@ logger = get_logger(__name__)
 
 UPLOADS_DIR = Path("uploads")
 _SANDBOX = DockerSandbox()
+
+MISSING_ARCHIVE_REASON = "Subject config has no stored archive — re-apply the subject config."
 
 # Review modes that examine the student by quiz instead of by automated tests. Assignments in
 # these modes need no `sandbox`/`check_command` block at all: the upload is accepted after an
@@ -78,6 +82,22 @@ async def is_quiz_first_assignment(
         assignment_code, {}
     )
     return plugin_assignment.get("review_mode", "tests_only") in _QUIZ_FIRST_MODES
+
+
+def _resolve_plugin_dir(
+    settings: Settings, subject_code: str, zip_data: bytes | None
+) -> Path | None:
+    """Host path of the subject tree the sandbox mounts, or None when there is none.
+
+    The stored archive is the source of truth. Configs applied before migration 0018 have
+    no archive; for those the legacy extracted tree under plugins_dir is still honoured
+    (checked via the container path, mounted from the host path).
+    """
+    if zip_data:
+        return materialize_plugin_tree(Path(settings.plugin_cache_dir), subject_code, zip_data)
+    if (Path(settings.plugins_dir) / subject_code).is_dir():
+        return Path(settings.host_plugins_dir or settings.plugins_dir) / subject_code
+    return None
 
 
 async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
@@ -154,7 +174,6 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         _fail_validation(submission, plan.reason)
         return
 
-    plugins_root = settings.host_plugins_dir or settings.plugins_dir
     # The stored code is joined onto the plugins root and bind-mounted into the sandbox;
     # never trust a stored value to still be a plain directory name.
     try:
@@ -162,7 +181,17 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     except ValueError as exc:
         _fail_validation(submission, f"Invalid subjectCode in plugin config: {exc}")
         return
-    plugin_dir = Path(plugins_root) / subject_code
+
+    try:
+        plugin_dir = await asyncio.to_thread(
+            _resolve_plugin_dir, settings, subject_code, getattr(config_record, "zip_data", None)
+        )
+    except (UnsafeArchiveError, zipfile.BadZipFile) as exc:
+        _fail_validation(submission, f"Stored subject archive is unusable: {exc}")
+        return
+    if plugin_dir is None:
+        _fail_validation(submission, MISSING_ARCHIVE_REASON)
+        return
 
     # Locate and extract the submitted ZIP — object storage first, legacy uploads/ second.
     saved_as = (submission.source_metadata or {}).get("saved_as")
