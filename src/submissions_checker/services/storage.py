@@ -5,11 +5,23 @@ from __future__ import annotations
 from pathlib import Path
 
 import aioboto3
+from botocore.exceptions import ClientError
 
 from submissions_checker.core.config import Settings
 from submissions_checker.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_MISSING_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
+
+
+def get_storage(settings: Settings) -> StorageService | None:
+    """The object store, or None when none is configured.
+
+    Unit and functional tests run without an endpoint; every caller must then fall back
+    to its legacy behaviour rather than fail.
+    """
+    return StorageService(settings) if settings.s3_endpoint_url else None
 
 
 class StorageService:
@@ -76,6 +88,26 @@ class StorageService:
         async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:
             await s3.delete_object(Bucket=self._bucket, Key=key)
         logger.info("file_deleted", key=key)
+
+    async def try_download_bytes(self, key: str) -> bytes | None:
+        """Like ``download_bytes`` but None when the object does not exist."""
+        try:
+            return await self.download_bytes(key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in _MISSING_CODES:
+                return None
+            raise
+
+    async def object_exists(self, key: str) -> bool:
+        """Check whether an object exists in S3."""
+        async with self._session.client("s3", endpoint_url=self._endpoint_url) as s3:
+            try:
+                await s3.head_object(Bucket=self._bucket, Key=key)
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") in _MISSING_CODES:
+                    return False
+                raise
+        return True
 
     def _build_url(self, key: str) -> str:
         if self._public_base_url:

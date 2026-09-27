@@ -11,8 +11,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from botocore.exceptions import ClientError
+
 from submissions_checker.core.config import Settings
-from submissions_checker.services.storage import StorageService
+from submissions_checker.services.storage import StorageService, get_storage
 
 
 def _settings(**overrides) -> Settings:
@@ -162,3 +165,38 @@ async def test_download_bytes_reads_the_object_back() -> None:
     s3.get_object.assert_awaited_once_with(
         Bucket="my-bucket", Key="proctoring/attempt-1/1-facelost.jpg"
     )
+
+
+def _client_error(code: str) -> ClientError:
+    return ClientError({"Error": {"Code": code, "Message": code}}, "GetObject")
+
+
+def test_get_storage_none_without_endpoint() -> None:
+    assert get_storage(_settings(s3_endpoint_url=None)) is None
+
+
+def test_get_storage_builds_service_with_endpoint() -> None:
+    with patch("submissions_checker.services.storage.aioboto3.Session"):
+        assert isinstance(
+            get_storage(_settings(s3_endpoint_url="http://minio:9000")), StorageService
+        )
+
+
+async def test_try_download_returns_none_on_missing_key() -> None:
+    svc, s3, _calls, _ = _service_with_mock_client(_settings())
+    s3.get_object.side_effect = _client_error("NoSuchKey")
+    assert await svc.try_download_bytes("submissions/a.zip") is None
+
+
+async def test_try_download_reraises_other_errors() -> None:
+    svc, s3, _calls, _ = _service_with_mock_client(_settings())
+    s3.get_object.side_effect = _client_error("AccessDenied")
+    with pytest.raises(ClientError):
+        await svc.try_download_bytes("k")
+
+
+async def test_object_exists_true_and_false() -> None:
+    svc, s3, _calls, _ = _service_with_mock_client(_settings())
+    assert await svc.object_exists("k") is True
+    s3.head_object.side_effect = _client_error("404")
+    assert await svc.object_exists("k") is False
