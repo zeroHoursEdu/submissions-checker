@@ -6,6 +6,7 @@ the real extraction/tokenization path without external fixtures.
 
 from __future__ import annotations
 
+import io
 import zipfile
 from pathlib import Path
 
@@ -153,3 +154,30 @@ def test_token_set_for_zip_reads_code_files(tmp_path: Path) -> None:
     tokens = token_set_for_zip(p)
     assert {"def", "add", "return"} <= tokens
     assert "ignored" not in tokens
+
+
+# ── bytes support ────────────────────────────────────────────────────────────
+
+
+def _zip_bytes(files: dict[str, str]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, body in files.items():
+            zf.writestr(name, body)
+    return buf.getvalue()
+
+
+def test_bytes_and_path_give_same_score(tmp_path: Path) -> None:
+    from submissions_checker.services.similarity import compare_zip_files, token_set_for_zip
+
+    a = _zip_bytes({"a.py": "def total(x):\n    return x\n"})
+    b = _zip_bytes({"b.py": "def total(y):\n    return y\n"})
+    (tmp_path / "a.zip").write_bytes(a)
+    assert compare_zip_files(a, b) == compare_zip_files(tmp_path / "a.zip", b)
+    assert "total" in token_set_for_zip(a)
+
+
+def test_garbage_bytes_are_empty_not_error() -> None:
+    from submissions_checker.services.similarity import token_set_for_zip
+
+    assert token_set_for_zip(b"not a zip") == frozenset()

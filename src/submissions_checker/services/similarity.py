@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import re
 import zipfile
 from pathlib import Path
+
+ZipSource = Path | bytes
 
 _CODE_EXTENSIONS = {".py", ".java", ".c", ".cpp", ".h", ".js", ".ts", ".cs", ".go", ".rs"}
 _IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
@@ -24,16 +27,17 @@ def _normalize(source: str) -> list[str]:
     return [t.lower() for t in _IDENTIFIER.findall(source)]
 
 
-def _extract_tokens(zip_path: Path) -> list[str]:
-    """Extract and tokenize all code files from a ZIP archive."""
+def _extract_tokens(src: ZipSource) -> list[str]:
+    """Extract and tokenize all code files from a ZIP archive (path or bytes)."""
     tokens: list[str] = []
     try:
-        with zipfile.ZipFile(zip_path) as zf:
+        zf_src = io.BytesIO(src) if isinstance(src, bytes) else src
+        with zipfile.ZipFile(zf_src) as zf:
             for name in zf.namelist():
                 if Path(name).suffix.lower() in _CODE_EXTENSIONS:
                     try:
-                        src = zf.read(name).decode("utf-8", errors="ignore")
-                        tokens.extend(_normalize(src))
+                        file_src = zf.read(name).decode("utf-8", errors="ignore")
+                        tokens.extend(_normalize(file_src))
                     except Exception:
                         continue
     except Exception:
@@ -51,16 +55,16 @@ def jaccard_similarity(a: list[str], b: list[str]) -> float:
     return intersection / union if union else 0.0
 
 
-def compare_zip_files(path_a: Path, path_b: Path) -> float:
-    """Return similarity score [0, 1] between two ZIP submission archives."""
+def compare_zip_files(path_a: ZipSource, path_b: ZipSource) -> float:
+    """Return similarity score [0, 1] between two ZIP submission archives (paths or bytes)."""
     tokens_a = _extract_tokens(path_a)
     tokens_b = _extract_tokens(path_b)
     return jaccard_similarity(tokens_a, tokens_b)
 
 
-def token_set_for_zip(zip_path: Path) -> frozenset[str]:
-    """The distinct identifier tokens of every code file in a ZIP archive."""
-    return frozenset(_extract_tokens(zip_path))
+def token_set_for_zip(zip_src: ZipSource) -> frozenset[str]:
+    """The distinct identifier tokens of every code file in a ZIP archive (path or bytes)."""
+    return frozenset(_extract_tokens(zip_src))
 
 
 def pairwise_similarity(items: dict[int, frozenset[str]]) -> list[tuple[int, int, float]]:
