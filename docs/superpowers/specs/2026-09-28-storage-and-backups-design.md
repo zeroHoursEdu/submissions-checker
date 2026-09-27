@@ -57,11 +57,15 @@ is live in production, so every step must be non-breaking for an existing deploy
 ## 3. Subject trees are materialized from Postgres
 
 - New `services/plugin_cache.py`:
-  `materialize_plugin_tree(root: Path, subject_code: str, content_hash: str, zip_bytes: bytes) -> Path`
-  - target `root/<subject_code>-<content_hash[:16]>/`; if it exists, return it.
+  `materialize_plugin_tree(root: Path, subject_code: str, zip_bytes: bytes) -> Path`
+  - target `root/<subject_code>-<sha256(zip_bytes)[:16]>/`; if it exists, reuse it.
   - else `safe_extract` into `root/.tmp-<uuid>`, chmod dirs 0755 / files 0644 (sandbox
     images run as non-root), `os.replace` to target (a concurrent loser discards its temp).
-  - remove other `root/<subject_code>-*` directories (best effort).
+  - touch the target's mtime on every use; remove other `root/<subject_code>-<hash>`
+    directories (and stale `.tmp-*`) only when **idle for more than a day**. Deleting them
+    eagerly would race: two replicas share `/tmp`, and a submission pinned to an older
+    config version may be mid-check on the other replica.
+  - the hash is the sha256 of `zip_data` itself, so it does not depend on `content_hash`.
 - Root: new setting `plugin_cache_dir = "/tmp/subchk-plugins"`. `/tmp` is already
   bind-mounted same-path in prod compose, so the host daemon resolves the sandbox mount.
 - `check_tasks`: if `config_record.zip_data` is present → materialize and use it.
