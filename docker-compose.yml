@@ -117,12 +117,23 @@ services:
     ports:
       - "9090:9090"
 
+  loki:
+    image: grafana/loki:3.5.0
+    container_name: submissions-checker-loki
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./observability/local/loki.yml:/etc/loki/loki.yml:ro
+    ports:
+      - "3100:3100"
+
   grafana:
     image: grafana/grafana:11.5.1
     container_name: submissions-checker-grafana
     profiles: ["observability"]
     depends_on:
       - prometheus
+      - loki
     environment:
       # A local throwaway with nothing worth protecting; a login screen only slows a check down.
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -143,6 +154,7 @@ services:
     profiles: ["observability"]
     depends_on:
       - prometheus
+      - loki
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -150,13 +162,18 @@ services:
       - /etc/alloy/config.alloy
     volumes:
       - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       # Prometheus' remote-write receiver ignores basic auth; non-empty dummies keep the
       # config path identical to the Grafana Cloud one.
       GRAFANA_CLOUD_PROM_URL: http://prometheus:9090/api/v1/write
       GRAFANA_CLOUD_PROM_USER: local
       GRAFANA_CLOUD_PROM_TOKEN: local
+      GRAFANA_CLOUD_LOKI_URL: http://loki:3100/loki/api/v1/push
+      GRAFANA_CLOUD_LOKI_USER: local
+      GRAFANA_CLOUD_LOKI_TOKEN: local
       SUBCHK_ENV: local
+      SUBCHK_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-submissions-checker}
       APP_METRICS_HOST: app
     ports:
       - "12345:12345"

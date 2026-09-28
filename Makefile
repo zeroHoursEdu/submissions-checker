@@ -110,11 +110,11 @@ e2e-logs: ## Follow e2e app log
 	docker compose -f docker-compose.e2e.yml logs -f app-e2e
 
 ##@ Observability (docs/observability.md)
-observability-up: ## Local Prometheus+Grafana+Alloy; Grafana at :3000
-	docker compose --profile observability up -d prometheus grafana alloy
+observability-up: ## Local Prometheus+Loki+Grafana+Alloy; Grafana at :3000
+	docker compose --profile observability up -d prometheus loki grafana alloy
 
 observability-down: ## Stop the local observability harness
-	docker compose --profile observability rm -sf prometheus grafana alloy
+	docker compose --profile observability rm -sf prometheus loki grafana alloy
 
 alloy-logs: ## Follow Alloy (rejected pushes show here)
 	docker compose --profile observability logs -f alloy
