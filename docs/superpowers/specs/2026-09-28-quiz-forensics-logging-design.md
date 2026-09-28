@@ -57,13 +57,14 @@ impossible to tell whether a fail was deserved or a false positive:
 | `user_agent` | VARCHAR(256) NULL | truncated |
 | `created_at` / `updated_at` | `TimestampMixin` | |
 
-`outcome` and `action` are stored as strings validated by StrEnums in `db/models/enums.py`
-(`QuizEventOutcome`, reuse action names), UPPERCASE values per project convention.
+`outcome` is a native PG enum `quiz_event_outcome` backed by `QuizEventOutcome` in
+`db/models/enums.py` (UPPERCASE values, per convention). `action` stays a plain string: its
+values (`none`, `warn`, …) are the config vocabulary teachers write in `config.yml`.
 
 Row cap: at most 500 rows per attempt. Beyond it events still update counters as today but are
-not stored; `quiz_anticheat_event` logs still record them. The cap is checked with a count
-query only when the attempt's stored event count could exceed it (keep a running count in
-`violations["_events_stored"]` to avoid a COUNT per request).
+not stored; `quiz_anticheat_event` logs still record them. The cap is checked with an indexed
+`COUNT(*)` on `attempt_id` per event (at most 500 rows; events arrive a few per minute), so
+`violations` gains no bookkeeping key.
 
 Write semantics: the row is added in the same transaction as the `attempt.violations` update.
 For early-return paths (not in progress, paused, type cap) a row is still written with the
@@ -73,8 +74,8 @@ matching `ignored_*` outcome, then the existing response is returned unchanged.
 
 `tab_return` and `focus_return` are reserved types. They carry `away_ms`, are stored with
 `outcome=INFORMATIONAL`, never increment `violations`, never count toward
-`_MAX_DISTINCT_EVENT_TYPES`, and never match a rule even if a config names them (config apply
-rejects rules naming reserved types — validation added in `ConfigApplyService`).
+`_MAX_DISTINCT_EVENT_TYPES`, and never match a rule even if a config names them (the handler returns before the rule loop;
+config apply has no anti-cheat validation today and none is added).
 
 ### Client context (`_quiz_anticheat.html`)
 
@@ -84,24 +85,31 @@ rejects rules naming reserved types — validation added in `ConfigApplyService`
   `ms_since_load` (int)
 - `resize`: `from_w`, `from_h`, `to_w`, `to_h`
 - `tab_return` / `focus_return`: `away_ms`
-- `camera_*`: `faces` (int), `score` (float 0..1), `held_ms` (int)
-- `keyboard_shortcut`: `combo` (e.g. `ctrl+c`; modifier + single key only, never text)
+- `camera_*`: `faces` (int), `yaw`, `pitch` (degrees, -180..180, `camera_looking_away` only),
+  `held_ms` (the gate's sustain window)
+- `keyboard_shortcut`: `combo` (e.g. `ctrl+c`, `f12`; modifiers + the one key, never text)
 
 `_read_event_type` becomes `_read_event(request) -> tuple[str, dict]`. Sanitizer
 (`services/quiz_events.py::sanitize_ctx`): keeps only whitelisted keys, ints clamped to
-`[0, 10**9]`, floats to `[0, 1]`, bools, `visibility` from its enum, `combo` matching
-`^(ctrl|alt|meta|shift)(\+(ctrl|alt|meta|shift))*\+[a-z0-9]{1,12}$`. Invalid or oversized
+`[0, 10**9]`, `yaw`/`pitch` to `[-180, 180]`, bools, `visibility` from its enum, `combo`
+matching `^((ctrl|alt|meta|shift)\+){0,4}[a-z0-9]{1,12}$`. Invalid or oversized
 (`> 1 KB` serialized) ctx is dropped to `{}` — never a 400; the event must be recorded. The
 existing 413/400 rules for the body and `type` are unchanged.
 
 ### Teacher UI
 
-In the proctoring block of `teacher_submission_review.html`, under the counter chips, a
-collapsible `<details>` "Хронологія подій" table per attempt: offset from attempt start
+The existing review page (`/teacher/submissions/{id}/review`) only opens for
+`AWAITING_TEACHER_REVIEW` submissions, so an auto-failed quiz never reaches it. The timeline
+therefore gets its own page, `GET /teacher/quiz-attempts/{attempt_id}/events`
+(`teacher_quiz_attempt_events.html`), linked from: the violation / auto-failed badge in the
+assignment table (`teacher_assignment.html`), and each attempt in the review page's proctoring
+block. The page shows the attempt header (student, status, score, started/submitted) and a
+table: offset from attempt start
 (`+04:12`), event, count, action (`fail` in red), human-readable context (`не було 42 с`,
 `1920×1080 → 1920×640`, `облич: 0`), and a grey "ігноровано (пауза)" marker for ignored rows.
-Strings in `i18n/uk.yml`. Access is the page's existing `require_subject_access`; events are
-loaded in the same query path that loads `proctoring` (one `selectinload`).
+Strings in `i18n/uk.yml`. Access: subject owner or ADMIN via `require_subject_access`
+(attempt → submission → student_assignment → subjects_assignment → subject); unknown attempt
+404, another teacher's attempt 403.
 
 ## 2. Application logging
 
@@ -132,7 +140,8 @@ Pure ASGI middleware, added directly inside `PrometheusMiddleware`:
 
 - `outbox_processor`: per message bind `outbox_id`, `event_type`, `attempt_no`, and
   `submission_id` / `attempt_id` when present in the payload. Events: `outbox_dispatched`,
-  `outbox_failed` (`retry_in_s`, exception), `outbox_dead`.
+  `outbox_failed` (with traceback; there is no backoff — the message is re-picked on the next
+  10 s tick), `outbox_dead` (retries exhausted). Idle ticks log at debug.
 - `check_tasks`: `check_started`, `check_finished` (`status`, `score`, `duration_ms`).
 - `review_tasks`: `ai_review_finished` (`code_mark`, `provider`, `duration_ms`),
   `ai_review_failed`.
@@ -144,14 +153,12 @@ Pure ASGI middleware, added directly inside `PrometheusMiddleware`:
 |---|---|---|
 | `quiz_attempt_started` / `quiz_attempt_resumed` | info | `attempt_id`, `student_id`, `assignment_id`, `squad_id`, `question_count` |
 | `quiz_answer_saved` | info | `attempt_id`, `question_id` |
-| `quiz_question_expired` | info | `attempt_id`, `question_id` |
+| `quiz_questions_expired` | info | `attempt_id`, `burned` |
 | `quiz_anticheat_event` | info (warning when action ≠ none) | `attempt_id`, `event_type`, `count_after`, `action`, `outcome`, `rule_threshold`, `away_ms` |
 | `quiz_attempt_force_failed` | warning | `attempt_id`, `student_id`, `event_type`, `count_after`, `rule_threshold`, `violations` |
-| `quiz_attempt_timed_out` | info | `attempt_id` |
-| `quiz_attempt_submitted` | info | `attempt_id`, `score`, `passed`, `force_fail`, `duration_s` |
+| `quiz_attempt_finished` | info (warning for `VIOLATION_FAIL`) | `attempt_id`, `student_id`, `status` (`COMPLETED`/`TIMED_OUT`/`VIOLATION_FAIL`), `score`, `max_score`, `passed`, `duration_s` |
 | `quiz_snapshot_saved` / `quiz_snapshot_failed` | info / error | `attempt_id`, `event_type` |
 | `quiz_dispute_created` / `quiz_dispute_resolved` | info | `dispute_id`, `question_id`, `accepted` |
-| `quiz_regrade_applied` | info | `question_id`, `attempts_rescored` |
 
 ### `except` audit
 
@@ -167,10 +174,10 @@ The implementation plan lists each location.
   `com.docker.compose.project` = `SUBCHK_COMPOSE_PROJECT` env
 - `discovery.relabel` → labels `app="subchk"`, `service` (compose service), `env`
 - `loki.source.docker` → `loki.process`:
-  - `stage.match {service="app"}`: `stage.json` extracting `level`, `event`, `request_id`,
-    `user_id`, `attempt_id`, `submission_id`; `stage.labels` for `level` only;
-    `stage.structured_metadata` for the ids
-  - drop stage for `event="http_request"` on `/health` routes (defence in depth)
+  - `stage.json` extracting `level` (app and caddy both log JSON; non-JSON lines such as
+    postgres pass through unlabelled); `stage.labels` for `level` only. Ids stay in the JSON body and are read with `| json` at query time — no
+    structured metadata, which would collide with the `| json` names (`attempt_id_extracted`)
+    and buys nothing at this volume
 - `loki.write` → `GRAFANA_CLOUD_LOKI_URL` with basic auth `GRAFANA_CLOUD_LOKI_USER` /
   `GRAFANA_CLOUD_LOKI_TOKEN`
 
@@ -241,8 +248,7 @@ must match the builder output (existing drift check covers new files).
 ## 5. Testing
 
 - unit: `sanitize_ctx` (whitelist, clamps, combo regex, oversize → `{}`); middleware level
-  selection and request-id validation; `LOG_FORMAT` switching; reserved types rejected by
-  config apply
+  selection and request-id validation; `LOG_FORMAT` switching
 - integration: `/event` writes a timeline row with correct `action`/`outcome` for each rule
   action, for paused, not-in-progress, type-cap, 500-row cap and informational events;
   counters and responses are unchanged versus current behaviour (regression)
