@@ -87,3 +87,53 @@ def test_unsafe_archive_leaves_nothing(tmp_path) -> None:
     with pytest.raises(UnsafeArchiveError):
         materialize_plugin_tree(tmp_path, "demo", _zip({"../evil": "x"}))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_incomplete_tree_is_restored(tmp_path) -> None:
+    """A host /tmp cleaner (e.g. systemd-tmpfiles) can remove individual unread files
+    from an otherwise-fresh tree without touching its mtime. Reuse must notice and
+    re-extract rather than handing the sandbox a tree that is missing files."""
+    z = _zip({"a.txt": "1", "b/c.txt": "2"})
+    out = materialize_plugin_tree(tmp_path, "demo", z)
+    (out / "b/c.txt").unlink()
+    restored = materialize_plugin_tree(tmp_path, "demo", z)
+    assert restored == out
+    assert (restored / "a.txt").read_text() == "1"
+    assert (restored / "b/c.txt").read_text() == "2"
+
+
+def test_target_pruned_between_check_and_utime_triggers_reextract(tmp_path, monkeypatch) -> None:
+    """Another replica's idle sweep can remove the whole target dir in the gap between
+    this call's completeness check and its os.utime() touch. That must be handled like
+    any other missing/incomplete tree, not raise FileNotFoundError out of this call."""
+    import shutil
+
+    z = _zip({"a.txt": "1"})
+    out = materialize_plugin_tree(tmp_path, "demo", z)
+
+    real_utime = os.utime
+    calls = {"n": 0}
+
+    def flaky_utime(path, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            shutil.rmtree(path, ignore_errors=True)
+            raise FileNotFoundError(path)
+        return real_utime(path, *args, **kwargs)
+
+    monkeypatch.setattr(plugin_cache.os, "utime", flaky_utime)
+    restored = materialize_plugin_tree(tmp_path, "demo", z)
+    assert restored == out
+    assert (restored / "a.txt").read_text() == "1"
+    assert calls["n"] >= 2
+
+
+def test_old_dir_pruned_like_tmp(tmp_path) -> None:
+    """.old-* leftovers from a re-extraction race follow the same idle-prune rule as
+    .tmp-* leftovers."""
+    stale_old = tmp_path / ".old-deadbeef"
+    stale_old.mkdir()
+    past = time.time() - 2 * 86400
+    os.utime(stale_old, (past, past))
+    materialize_plugin_tree(tmp_path, "demo", _zip({"v": "1"}))
+    assert not stale_old.exists()
