@@ -16,6 +16,8 @@ from ``api/routes/teacher_portal.py``, ``api/authz.py`` and the state machine.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
@@ -1280,3 +1282,130 @@ async def test_similarity_report_requires_subject_access(
     authenticate(client, other)
     r = await client.get(f"/teacher/subjects/{subject.id}/assignments/{sa.id}/similarity")
     assert r.status_code == 403
+
+
+# ── Download / similarity read through the object-storage seam ──────────────
+
+
+async def test_download_served_from_object_storage(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """No local copy at all — the ZIP lives only in MinIO."""
+    from submissions_checker.api.routes import teacher_portal as teacher_portal_module
+    from tests.storage_fake import FakeStorage
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    submission = await _make_submission(
+        db, sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    submission.source_metadata = {"saved_as": "obj-only.zip", "original_filename": "lab1.zip"}
+    await db.commit()
+
+    storage = FakeStorage()
+    storage.objects["submissions/obj-only.zip"] = b"PK\x03\x04 stored only in minio"
+
+    authenticate(client, teacher)
+    with patch.object(teacher_portal_module, "get_storage", return_value=storage):
+        resp = await client.get(f"/teacher/submissions/{submission.id}/download")
+    assert resp.status_code == 200
+    assert resp.content == b"PK\x03\x04 stored only in minio"
+    assert "lab1.zip" in resp.headers["content-disposition"]
+
+
+async def test_download_404_when_object_missing_everywhere(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    from submissions_checker.api.routes import teacher_portal as teacher_portal_module
+    from tests.storage_fake import FakeStorage
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    submission = await _make_submission(
+        db, sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    submission.source_metadata = {"saved_as": "vanished.zip"}
+    await db.commit()
+
+    authenticate(client, teacher)
+    with patch.object(teacher_portal_module, "get_storage", return_value=FakeStorage()):
+        resp = await client.get(f"/teacher/submissions/{submission.id}/download")
+    assert resp.status_code == 404
+
+
+async def test_download_content_disposition_encodes_cyrillic_filename(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """RFC 5987 filename* — Ukrainian original filenames are common here."""
+    from urllib.parse import quote
+
+    from submissions_checker.api.routes import teacher_portal as teacher_portal_module
+    from tests.storage_fake import FakeStorage
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    submission = await _make_submission(
+        db, sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    submission.source_metadata = {
+        "saved_as": "cyr.zip",
+        "original_filename": "лабораторна.zip",
+    }
+    await db.commit()
+
+    storage = FakeStorage()
+    storage.objects["submissions/cyr.zip"] = b"PK\x03\x04 cyrillic name"
+
+    authenticate(client, teacher)
+    with patch.object(teacher_portal_module, "get_storage", return_value=storage):
+        resp = await client.get(f"/teacher/submissions/{submission.id}/download")
+    assert resp.status_code == 200
+    cd = resp.headers["content-disposition"]
+    assert "filename*=utf-8''" in cd
+    assert quote("лабораторна.zip") in cd
+
+
+async def test_similarity_report_reads_object_storage(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """Both ZIPs live only in MinIO, not on any local disk."""
+    import io
+    import zipfile
+
+    from submissions_checker.api.routes import teacher_portal as teacher_portal_module
+    from tests.storage_fake import FakeStorage
+
+    def _zip_bytes(source: str) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("main.py", source)
+        return buf.getvalue()
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    storage = FakeStorage()
+    src = "def solve(x):\n    return x * 2\n"
+    for i, name in enumerate(["Alice Cloud", "Bob Cloud"]):
+        student = await make_student(full_name=name, email=f"cloud{i}@example.com")
+        await _enroll(db, subject.id, student.id)
+        sub = await _make_submission(db, sa.id, student.id, status=SubmissionStatus.COMPLETED)
+        saved_as = f"cloud-{i}.zip"
+        sub.source_metadata = {"saved_as": saved_as}
+        storage.objects[f"submissions/{saved_as}"] = _zip_bytes(src)
+    await db.commit()
+
+    authenticate(client, teacher)
+    with patch.object(teacher_portal_module, "get_storage", return_value=storage):
+        resp = await client.get(
+            f"/teacher/subjects/{subject.id}/assignments/{sa.id}/similarity?min=0.1"
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Alice Cloud" in body and "Bob Cloud" in body
+    assert "100%" in body
