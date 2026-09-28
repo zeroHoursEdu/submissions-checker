@@ -1313,14 +1313,18 @@ async def teacher_review_submission(
 def _attachment_header(name: str) -> str:
     """A Content-Disposition value for *name*, exactly as Starlette's FileResponse builds one.
 
-    Non-ASCII names (Ukrainian originals are common here) need the RFC 5987
-    ``filename*=utf-8''…`` form — a plain ``filename="…"`` cannot carry them.
+    ``original_filename`` is student-controlled, so this cannot just ASCII-check and then
+    interpolate raw: an ASCII name containing ``"``, ``;`` or a backslash could inject a second
+    ``filename`` parameter into the header. Starlette's own rule is what actually closes that —
+    quote the name, and fall back to the RFC 5987 ``filename*=utf-8''…`` form whenever quoting
+    changed anything (which covers non-ASCII originals — Ukrainian is common here — and any
+    character quoting escapes), using the plain ``filename="…"`` form only when the name needed
+    no escaping at all.
     """
-    try:
-        name.encode("ascii")
-        return f'attachment; filename="{name}"'
-    except UnicodeEncodeError:
-        return f"attachment; filename*=utf-8''{urllib.parse.quote(name)}"
+    quoted = urllib.parse.quote(name)
+    if quoted != name:
+        return f"attachment; filename*=utf-8''{quoted}"
+    return f'attachment; filename="{name}"'
 
 
 @router.get("/submissions/{submission_id}/download")

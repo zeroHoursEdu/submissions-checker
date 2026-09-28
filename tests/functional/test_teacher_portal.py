@@ -1371,6 +1371,43 @@ async def test_download_content_disposition_encodes_cyrillic_filename(
     assert quote("лабораторна.zip") in cd
 
 
+async def test_download_content_disposition_escapes_header_injection_attempt(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """original_filename is student-controlled: an ASCII name carrying '"', ';' or '\\'
+    must not let it inject a second filename parameter into the header — it has to fall
+    back to the RFC 5987 filename* form, exactly as Starlette's own FileResponse does."""
+    from urllib.parse import quote
+
+    from submissions_checker.api.routes import teacher_portal as teacher_portal_module
+    from tests.storage_fake import FakeStorage
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    student = await make_student()
+    await _enroll(db, subject.id, student.id)
+    submission = await _make_submission(
+        db, sa.id, student.id, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    malicious = 'evil"; filename="pwned.exe.zip'
+    submission.source_metadata = {"saved_as": "inj.zip", "original_filename": malicious}
+    await db.commit()
+
+    storage = FakeStorage()
+    storage.objects["submissions/inj.zip"] = b"PK\x03\x04 injected name attempt"
+
+    authenticate(client, teacher)
+    with patch.object(teacher_portal_module, "get_storage", return_value=storage):
+        resp = await client.get(f"/teacher/submissions/{submission.id}/download")
+    assert resp.status_code == 200
+    cd = resp.headers["content-disposition"]
+    # The whole malicious value must land inside the single RFC 5987 filename* parameter,
+    # quoted as one opaque token — not break out into a second `filename=` parameter via a
+    # raw '"' or ';'.
+    assert cd == f"attachment; filename*=utf-8''{quote(malicious)}"
+    assert '"' not in cd
+
+
 async def test_similarity_report_reads_object_storage(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
