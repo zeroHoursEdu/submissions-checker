@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.core.database import get_db
+from submissions_checker.core.request_logging import bind_user
 from submissions_checker.core.security import (
     COOKIE_NAME,
     TokenError,
@@ -62,6 +63,7 @@ async def _get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Session ended by password change"
         )
 
+    bind_user(user.id, user.role.value)
     return CurrentUserData(
         user_id=user.id,
         username=user.username,
