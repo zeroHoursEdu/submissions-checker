@@ -326,6 +326,8 @@ def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
             seconds=limit
         )
         burned += 1
+    if burned:
+        logger.info("quiz_questions_expired", attempt_id=attempt.id, burned=burned)
     return burned
 
 
@@ -607,6 +609,17 @@ async def _grade_and_finalize(
     attempt.is_passed = is_passed
     attempt.submitted_at = _utcnow()
     attempt.status = status
+    started = attempt.started_at.replace(tzinfo=UTC)
+    (logger.warning if status == QuizAttemptStatus.VIOLATION_FAIL else logger.info)(
+        "quiz_attempt_finished",
+        attempt_id=attempt.id,
+        student_id=attempt.student_id,
+        status=status.value,
+        score=score,
+        max_score=max_score,
+        passed=is_passed,
+        duration_s=int((attempt.submitted_at - started).total_seconds()),
+    )
     metrics.quiz_attempts_finished_total.labels(status=status.value).inc()
     if is_passed:
         metrics.quiz_attempts_passed_total.inc()
@@ -747,6 +760,7 @@ async def start_or_resume_quiz(
 
     in_progress = next((a for a in existing if a.status == QuizAttemptStatus.IN_PROGRESS), None)
     if in_progress:
+        logger.info("quiz_attempt_resumed", attempt_id=in_progress.id, student_id=student_id)
         return RedirectResponse(url=f"/portal/quiz/{in_progress.id}", status_code=303)
 
     passed = next((a for a in existing if a.is_passed), None)
@@ -827,6 +841,14 @@ async def start_or_resume_quiz(
     await db.commit()
     metrics.quiz_attempts_started_total.inc()
     await db.refresh(attempt)
+    logger.info(
+        "quiz_attempt_started",
+        attempt_id=attempt.id,
+        student_id=student_id,
+        assignment_id=sa.subjects_assignment_id,
+        squad_id=latest_sub.squad_id,
+        question_count=len(questions_snapshot),
+    )
 
     return RedirectResponse(url=f"/portal/quiz/{attempt.id}", status_code=303)
 
@@ -1292,6 +1314,12 @@ async def report_question(
     )
     await db.commit()
     metrics.disputes_opened_total.inc()
+    logger.info(
+        "quiz_dispute_created",
+        dispute_id=dispute.id,
+        attempt_id=attempt.id,
+        question_id=question_id,
+    )
 
     return JSONResponse({"ok": True, "dispute_id": dispute.id})
 
@@ -1526,7 +1554,11 @@ async def upload_snapshot(
         return JSONResponse({"stored": False, "reason": "limit"})
     safe_event = "".join(c for c in event_type if c.isalnum() or c in "_-")[:48] or "event"
     key = f"proctoring/attempt-{attempt_id}/{(seq or 0) + 1}-{safe_event}.{ext}"
-    url = await storage.upload_bytes(data, key, frame.content_type)
+    try:
+        url = await storage.upload_bytes(data, key, frame.content_type)
+    except Exception:
+        logger.exception("quiz_snapshot_failed", attempt_id=attempt_id, event_type=safe_event)
+        raise
 
     snapshot = QuizAttemptSnapshot(
         attempt_id=attempt_id,
@@ -1537,6 +1569,7 @@ async def upload_snapshot(
     )
     db.add(snapshot)
     await db.commit()
+    logger.info("quiz_snapshot_saved", attempt_id=attempt_id, event_type=safe_event)
 
     # No URL in the response: evidence is private and is read back only through the
     # authenticated teacher endpoint. Handing the client an object-storage URL would
@@ -1623,6 +1656,7 @@ async def answer_question(
             db.add(answer)
             metrics.quiz_answers_total.inc()
             attempt.answers.append(answer)
+            logger.info("quiz_answer_saved", attempt_id=attempt_id, question_id=q_id)
             attempt.current_index += 1
             attempt.question_started_at = _utcnow()
 
