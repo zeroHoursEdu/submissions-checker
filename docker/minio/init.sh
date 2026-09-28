@@ -6,7 +6,9 @@
 # webcam frames on the internet for anyone holding the object key.
 set -eu
 
-until mc alias set local "http://minio:9000" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>/dev/null; do
+MINIO_HOST="${MINIO_HOST:-minio}"
+
+until mc alias set local "http://${MINIO_HOST}:9000" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>/dev/null; do
 	echo "waiting for minio..."
 	sleep 2
 done

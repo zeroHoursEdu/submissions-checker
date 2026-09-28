@@ -87,7 +87,14 @@ services:
       SANDBOX_MAX_MEMORY: ${SANDBOX_MAX_MEMORY:-384m}
       SANDBOX_MAX_CPUS: ${SANDBOX_MAX_CPUS:-1.0}
       # Host-absolute: the daemon resolves sandbox bind mounts on the host, not here.
-      HOST_PLUGINS_DIR: "${HOST_PLUGINS_DIR:?absolute host path to the plugins directory}"
+      # Optional now that config trees live in Postgres and are unpacked on demand into
+      # PLUGIN_CACHE_DIR — set it only to keep reading configs applied before 0018.
+      HOST_PLUGINS_DIR: "${HOST_PLUGINS_DIR:-}"
+      # Where check workers unpack a subject's stored config archive for the sandbox.
+      # Must be the same path inside the app container and on the host, since the
+      # daemon resolves the sandbox's bind mount on the host — hence the /tmp:/tmp
+      # mount below rather than a container-local directory.
+      PLUGIN_CACHE_DIR: /tmp/subchk-plugins
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
@@ -115,14 +122,16 @@ services:
       # Same path inside and out: the daemon resolves the sandbox's /output bind mount
       # on the host, so a container-only path would not exist from its point of view.
       - /tmp:/tmp
-      # Writable: the app OWNS this tree. Applying a subject config extracts the
-      # uploaded ZIP to plugins/<subjectCode>/, so a read-only mount fails the apply
-      # after the database has already committed — the subject appears, its files do
-      # not. Read-only belongs one level down, where untrusted checker code actually
-      # runs: docker_sandbox mounts the subject's directory into the sandbox as :ro.
-      - ${HOST_PLUGINS_DIR}:/app/plugins
-      # Shared across replicas: a ZIP received by one replica is read later by whichever
-      # replica drains the outbox. A per-container directory would lose it.
+      # Legacy read-only-in-practice fallback: the app no longer writes here — applying
+      # a subject config stores the ZIP in Postgres and workers unpack it into
+      # PLUGIN_CACHE_DIR instead (see docker_sandbox / plugin_cache). This mount only
+      # keeps serving configs applied before migration 0018 that still expect a plugins/
+      # tree on disk. Defaults to ./plugins so the service starts with no host path
+      # configured at all; phase 2 removes this mount entirely.
+      - ${HOST_PLUGINS_DIR:-./plugins}:/app/plugins
+      # Legacy read-only fallback for submission ZIPs uploaded before object storage:
+      # kept until `migrate_uploads` reports 0 missing across every replica; phase 2
+      # removes it.
       - uploads:/app/uploads
     group_add:
       # Host docker group id — grants socket access without running the app as root.

@@ -133,7 +133,7 @@ class Settings(BaseSettings):
 
     # S3-compatible object storage (images and assignment content files)
     s3_bucket_name: str = "submissions-checker"
-    s3_endpoint_url: str | None = None  # set to http://localstack:4566 in dev
+    s3_endpoint_url: str | None = None  # set to http://minio:9000 in dev
     s3_public_base_url: str | None = None  # base URL for constructing public file URLs
     aws_access_key_id: str = "test"
     aws_secret_access_key: str = "test"
