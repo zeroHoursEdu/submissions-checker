@@ -42,7 +42,13 @@ opts="-c default_transaction_read_only=on"
 # shellcheck disable=SC2016
 inner='psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 if [[ -n "$sql" ]]; then
-  prod_compose exec -T -e "PGOPTIONS=${opts}" postgres sh -c "${inner} -v ON_ERROR_STOP=1 -c $(printf %q "$sql")"
+  # SQL travels on stdin, never as an argument: a double `printf %q` (once for the SQL,
+  # once for the whole argument list crossing the ssh hop) is not portable across the
+  # two remote shell layers — bash's %q emits $'...' for control characters (e.g. a
+  # newline inside a multi-line statement), which the container's POSIX sh cannot
+  # parse, silently word-splitting it into something else. Piping keeps the remote
+  # command line entirely static (no user data in it at all).
+  printf '%s\n' "$sql" | prod_compose exec -T -e "PGOPTIONS=${opts}" postgres sh -c "${inner} -v ON_ERROR_STOP=1 -X -q"
 else
   SSH_TTY_FLAG=(-t)
   prod_compose exec -e "PGOPTIONS=${opts}" postgres sh -c "${inner}"

@@ -7,6 +7,19 @@ mkdir "$tmp/bin"
 cat > "$tmp/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SSH_LOG"
+# FAKE_SSH_FAIL_ON lets a test simulate a remote command failing (e.g. `stop app`),
+# to check what runs after it. Stdin is always drained so a caller piping data (SQL on
+# stdin, or a closed stdin) never blocks or gets SIGPIPE, and captured to $SSH_STDIN
+# when a test wants to inspect exactly what would have reached the remote command.
+if [[ -n "${FAKE_SSH_FAIL_ON:-}" && "$*" == *"${FAKE_SSH_FAIL_ON}"* ]]; then
+  cat >/dev/null
+  exit 1
+fi
+if [[ -n "${SSH_STDIN:-}" ]]; then
+  cat > "$SSH_STDIN"
+else
+  cat >/dev/null
+fi
 EOF
 chmod +x "$tmp/bin/ssh"
 export PATH="$tmp/bin:$PATH" SSH_LOG="$tmp/ssh.log" PROD_ENV_FILE="$tmp/none"
@@ -33,33 +46,45 @@ grep -q "exec -T backup backup.sh status" "$SSH_LOG"
 scripts/ops/connect-to-prod-db.sh -c "select 1"
 grep -q "default_transaction_read_only=on" "$SSH_LOG"
 
-# A SQL string with quotes, spaces and a `$` must reach the remote intact. _prod.sh
-# quotes with `printf %q` twice over (once for the SQL, once for the whole argument
-# list crossing the ssh boundary), so decode both layers the same way a real remote
-# shell would (word-split + quote-removal via `eval "set -- ..."`) and compare.
-decode_qwords() {
-  # The inner script references $POSTGRES_USER/$POSTGRES_DB the way the real remote
-  # shell would expand them; this test only cares about the trailing SQL token, so
-  # tolerate them being unset instead of tripping our own `set -u`.
-  set +u
-  eval "set -- $1"
-  set -u
-  printf '%s' "${!#}"
-}
-
+# A multi-line SQL string with quotes, a `$`, a tab and a newline must reach psql
+# byte-identical, and none of it may appear on the remote command line: a `printf %q`
+# of it (needed twice over, once for the SQL and once for the whole argument list
+# crossing the ssh boundary) is not portable across the two remote shell layers — for
+# control characters bash's %q emits `$'...'`, which the container's POSIX sh cannot
+# parse, so a multi-line statement would get word-split into something else entirely.
+# SQL travels on stdin instead; the command line stays fully static.
 : > "$SSH_LOG"
-tricky_sql="select 'a b' as \"x\", '\$1'"
-scripts/ops/connect-to-prod-db.sh -c "$tricky_sql"
-logged="$(cat "$SSH_LOG")"
-outer_tokens="${logged#*--env-file .env }"
-inner_script="$(decode_qwords "$outer_tokens")"
-decoded_sql="$(decode_qwords "$inner_script")"
-[[ "$decoded_sql" == "$tricky_sql" ]] || { echo "connect-to-prod-db: SQL was not safely quoted (got: $decoded_sql)"; exit 1; }
+stdin_capture="$tmp/stdin.log"
+tricky_sql=$'select \'a\tb\' as "x", \'$1\' -- comment\nline2 with a\ttab'
+SSH_STDIN="$stdin_capture" scripts/ops/connect-to-prod-db.sh -c "$tricky_sql"
+diff <(printf '%s\n' "$tricky_sql") "$stdin_capture" >/dev/null \
+  || { echo "connect-to-prod-db: SQL did not arrive on stdin byte-identical"; exit 1; }
+grep -qF "line2 with a" "$SSH_LOG" && { echo "connect-to-prod-db: SQL text leaked into the remote command line"; exit 1; }
+grep -q "postgres sh -c" "$SSH_LOG" || { echo "connect-to-prod-db: psql was not invoked"; exit 1; }
 
 : > "$SSH_LOG"
 if echo "no" | scripts/ops/restore-prod-from-backup.sh latest; then echo "restore ran without confirmation"; exit 1; fi
 test ! -s "$SSH_LOG" || { echo "restore touched the host without confirmation"; exit 1; }
 
+# A closed stdin makes `read` itself fail (no line to read); the script must say so
+# distinctly instead of exiting silently via `set -e`, and still must not touch the host.
+: > "$SSH_LOG"
+if scripts/ops/restore-prod-from-backup.sh latest < /dev/null 2>"$tmp/err"; then
+  echo "restore ran despite closed stdin"; exit 1
+fi
+grep -q "aborted (no confirmation)" "$tmp/err" || { echo "restore: missing no-confirmation message"; exit 1; }
+test ! -s "$SSH_LOG" || { echo "restore touched the host despite closed stdin"; exit 1; }
+
+# The EXIT trap that restarts `app` must be armed before `stop app` runs, not after —
+# otherwise a `stop app` that itself fails under `set -e` leaves the app down for good.
+: > "$SSH_LOG"
+if FAKE_SSH_FAIL_ON='stop app' scripts/ops/restore-prod-from-backup.sh latest --yes; then
+  echo "restore did not propagate the stop-app failure"; exit 1
+fi
+grep -q "up -d app" "$SSH_LOG" || { echo "restore-prod-from-backup: app was not restarted after stop failed"; exit 1; }
+grep -q "RESTORE_CONFIRM=yes backup restore latest" "$SSH_LOG" && { echo "restore proceeded despite stop app failing"; exit 1; }
+
+: > "$SSH_LOG"
 scripts/ops/restore-prod-from-backup.sh latest --yes
 grep -q "stop app" "$SSH_LOG"
 grep -q "RESTORE_CONFIRM=yes backup restore latest" "$SSH_LOG"

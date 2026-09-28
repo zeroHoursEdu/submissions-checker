@@ -32,11 +32,18 @@ require_prod
 
 if [[ $yes -ne 1 ]]; then
   echo "This REPLACES the database and bucket on ${PROD_SSH} with backup '${stamp}'."
-  read -r -p "Type 'restore' to continue: " answer
+  # A closed/exhausted stdin makes `read` fail (no line to read); without this check
+  # `set -e` would exit right here, before the "aborted" message below ever runs.
+  if ! read -r -p "Type 'restore' to continue: " answer; then
+    echo "aborted (no confirmation)" >&2
+    exit 1
+  fi
   [[ "$answer" == "restore" ]] || { echo "aborted"; exit 1; }
 fi
 
-prod_compose stop app
+# Registered before `stop app`: if stop itself fails under `set -e`, the trap must
+# already be in place so the app still comes back up.
 trap 'prod_compose up -d app' EXIT
+prod_compose stop app
 prod_compose --profile backup run --rm -e RESTORE_CONFIRM=yes backup restore "$stamp"
 echo "Restore of ${stamp} finished; starting app."

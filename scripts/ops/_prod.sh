@@ -18,7 +18,10 @@ SSH_TTY_FLAG=()
 prod_compose() {
   # SC2029: the client-side expansion of $PROD_DIR and "$@" is the point — printf %q
   # quotes them so the remote shell reconstructs the exact same argument list.
+  # ${SSH_TTY_FLAG[@]+"${SSH_TTY_FLAG[@]}"}, not "${SSH_TTY_FLAG[@]}": under `set -u`,
+  # expanding an empty array with the plain form is an error on bash < 4.4 (e.g. the
+  # /bin/bash 3.2 that ships with macOS).
   # shellcheck disable=SC2029
-  ssh "${SSH_TTY_FLAG[@]}" "$PROD_SSH" \
+  ssh ${SSH_TTY_FLAG[@]+"${SSH_TTY_FLAG[@]}"} "$PROD_SSH" \
     "cd $(printf %q "$PROD_DIR") && docker compose -f docker-compose.prod.yml --env-file .env $(printf '%q ' "$@")"
 }
