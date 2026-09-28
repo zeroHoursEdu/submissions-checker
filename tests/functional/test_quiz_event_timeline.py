@@ -169,6 +169,32 @@ async def test_rows_stop_at_the_cap_but_counting_goes_on(
     assert len(await _events(db, attempt.id)) == 500
 
 
+async def test_the_row_explaining_an_auto_fail_is_stored_past_the_cap(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    # The client controls how many informational/ignored rows exist; it must not be able
+    # to crowd out the one row a teacher needs to understand a force-fail.
+    attempt = await _attempt(
+        db, student_user, [_rule("paste", 1, {"type": "fail", "message": "x"})]
+    )
+    db.add_all(
+        QuizAttemptEvent(
+            attempt_id=attempt.id,
+            event_type="tab_return",
+            action="none",
+            outcome=QuizEventOutcome.INFORMATIONAL,
+        )
+        for _ in range(500)
+    )
+    await db.commit()
+
+    r = await student_client.post(f"/portal/quiz/{attempt.id}/event", json={"type": "paste"})
+    assert r.json()["action"] == "fail"
+    rows = await _events(db, attempt.id)
+    assert len(rows) == 501
+    assert (rows[-1].event_type, rows[-1].action) == ("paste", "fail")
+
+
 @pytest.mark.parametrize("ctx", ["junk", 7, [1], {"vw": "abc"}, {"nested": {"a": 1}}])
 async def test_malformed_context_never_blocks_the_event(
     student_client: AsyncClient, db, student_user, ctx: object

@@ -1024,7 +1024,11 @@ async def _record_event(
     count_after: int | None = None,
     rule_threshold: int | None = None,
 ) -> None:
-    """Log the event and, below the per-attempt cap, add its timeline row (caller commits)."""
+    """Log the event and, below the per-attempt cap, add its timeline row (caller commits).
+
+    A ``fail`` row is stored even past the cap: the rows before it are client-controlled,
+    and they must never crowd out the one row that explains an auto-fail.
+    """
     log = logger.warning if action != "none" else logger.info
     log(
         "quiz_anticheat_event",
@@ -1037,13 +1041,14 @@ async def _record_event(
         rule_threshold=rule_threshold,
         ctx=ctx,
     )
-    stored = await db.scalar(
-        select(func.count())
-        .select_from(QuizAttemptEvent)
-        .where(QuizAttemptEvent.attempt_id == attempt.id)
-    )
-    if (stored or 0) >= MAX_EVENTS_STORED_PER_ATTEMPT:
-        return
+    if action != "fail":
+        stored = await db.scalar(
+            select(func.count())
+            .select_from(QuizAttemptEvent)
+            .where(QuizAttemptEvent.attempt_id == attempt.id)
+        )
+        if (stored or 0) >= MAX_EVENTS_STORED_PER_ATTEMPT:
+            return
     db.add(
         QuizAttemptEvent(
             attempt_id=attempt.id,
