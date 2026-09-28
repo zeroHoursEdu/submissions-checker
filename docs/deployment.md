@@ -124,6 +124,17 @@ echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swap.conf
 sudo sysctl --system
 ```
 
+RHEL-family hosts (Oracle Linux and similar) run `systemd-tmpfiles` against `/tmp` on a
+timer, aging out files it considers unused — including files this app is actively using
+under `PLUGIN_CACHE_DIR` (`/tmp/subchk-plugins`), which has its own idle-pruning logic in
+`plugin_cache.py` and does not need systemd's help. Exclude that one path (a no-op, and
+harmless, on Ubuntu/Debian hosts, which do not run `systemd-tmpfiles` against `/tmp` by
+default):
+
+```bash
+echo 'x /tmp/subchk-plugins' | sudo tee /etc/tmpfiles.d/subchk-plugins.conf
+```
+
 Open only 80, 443 and SSH. On Oracle Cloud this means **both** the VCN security list and
 the instance firewall — Oracle images ship with iptables rules that silently drop
 traffic the security list allows:
@@ -424,6 +435,31 @@ the migration rule above: the previous release is schema-compatible with the mig
 database by construction. If you ever break that rule, rollback stops being safe, which
 is the real reason the rule exists.
 
+**Rolling back past the storage-migration release strands anything that release alone
+knows how to read.** The previous image never reads MinIO and never reads a stored
+config archive — it only understands the local `uploads` volume and a `plugins/` tree on
+disk. If the rollback happens after this release has already taken traffic:
+
+- **Submissions uploaded since the deploy exist only in MinIO** (`submissions/<saved_as>`
+  in the bucket) — the old code cannot see them. Copy them into the `uploads` volume
+  before (or immediately after) rolling back:
+
+  ```bash
+  docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+    -v uploads:/uploads --entrypoint sh backup -c \
+    'rclone copy --transfers 2 --checkers 4 --buffer-size 8M \
+      minio:"$S3_BUCKET_NAME"/submissions /uploads'
+  ```
+
+  (`backup` already carries `RCLONE_CONFIG`/`RCLONE_CONFIG_MINIO_*` and `S3_BUCKET_NAME`
+  in its own environment; `-v uploads:/uploads` attaches the app's `uploads` volume to it
+  for this one run only — the service does not mount it normally.)
+
+- **Configs applied since the deploy exist only as `subject_plugin_configs.zip_data`** —
+  the old code only reads a `plugins/` tree on disk. Once the old image is back up,
+  re-apply each affected subject's config ZIP through the teacher portal; the old code
+  writes it to `plugins/` on apply, same as it always did before this release.
+
 ---
 
 ## Backups and restore
@@ -565,10 +601,14 @@ database first instead of restoring into it. **Stop the app replicas first** —
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env stop app
+# Single-quoted: $POSTGRES_USER/$POSTGRES_DB must expand INSIDE the postgres container
+# (where they are set, from its own `environment:`), not on the host shell, which has
+# no such variables exported — that would silently run `psql -U "" -d postgres -c
+# "DROP DATABASE \"\";"` instead.
 docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
-  psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE \"$POSTGRES_DB\";"
+  sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE \"$POSTGRES_DB\";"'
 docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
-  psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\";"
+  sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\";"'
 ```
 
 Then run the restore script against the now-empty database as usual — it starts the
@@ -581,6 +621,49 @@ this.
 
 Verify a restore against a scratch database at least once. A backup that has never
 been restored is a backup you do not know you have.
+
+### Undoing a restore
+
+Every restore snapshots what it is about to overwrite to `pre-restore/<stamp>.dump` and
+`pre-restore/<stamp>/` before touching anything (the `restore` output prints that stamp:
+"current database saved to pre-restore/`<stamp>`.dump"). Restoring the wrong stamp, or
+into the wrong environment, is itself undone by putting that snapshot back — as long as
+`BACKUP_RETENTION_DAYS` has not since pruned it.
+
+There is no single `restore` command for this (it restores from `postgres/<stamp>.dump` +
+`minio/current`, not from `pre-restore/`); do it by hand, stopped/started around it same
+as any restore, with everything run against the `backup` container so rclone and the
+Postgres credentials are already configured there — quote each script in single quotes so
+`$RCLONE_REMOTE`/`$POSTGRES_USER`/etc. expand **inside** the container, not on the host:
+
+```bash
+STAMP=20260928T030158Z   # from the restore's own log line, or:
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+  --entrypoint sh backup -c 'rclone lsf "$RCLONE_REMOTE/pre-restore" | sort'
+
+docker compose -f docker-compose.prod.yml --env-file .env stop app
+
+# Database (--transfers/--checkers/--buffer-size match backup.sh's own $RCLONE_FLAGS —
+# this container's memory limit is 128m)
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+  -e STAMP="${STAMP}" --entrypoint sh backup -c '
+    set -eu
+    rclone copyto --transfers 2 --checkers 4 --buffer-size 8M \
+      "$RCLONE_REMOTE/pre-restore/$STAMP.dump" "/tmp/$STAMP.dump"
+    PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner \
+      --single-transaction --host=postgres --username="$POSTGRES_USER" \
+      --dbname="$POSTGRES_DB" "/tmp/$STAMP.dump"
+    rm -f "/tmp/$STAMP.dump"
+  '
+
+# Bucket
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+  -e STAMP="${STAMP}" --entrypoint sh backup -c \
+  'rclone sync --transfers 2 --checkers 4 --buffer-size 8M \
+    "$RCLONE_REMOTE/pre-restore/$STAMP" minio:"$S3_BUCKET_NAME"'
+
+docker compose -f docker-compose.prod.yml --env-file .env up -d app
+```
 
 ### Privacy
 
@@ -614,7 +697,11 @@ host, but need a manual step to finish:
    through the teacher portal) so its check scripts come from Postgres too, not a
    plugins/ tree on disk.
 
-2. **Rollout order on the existing host**, so nothing is unavailable mid-migration:
+2. **Rollout order on the existing host**, so nothing is unavailable mid-migration.
+   Deploy at a quiet time — no deadline due and no quiz running — and do not apply any
+   subject config while the rollout is in progress: a submission or a check that starts
+   on the old replica and is served its response by a new one (or vice versa, during the
+   one-at-a-time Watchtower swap) is the scenario the next step detects and fixes up.
 
    1. Let Watchtower roll out the new app image (or force it — see
       [Operations](#operations)).
@@ -626,6 +713,21 @@ host, but need a manual step to finish:
    5. Only once all of the above is confirmed, delete the **old** `BACKUP_DIR`
       contents by hand (the previous backup container, if you had one, keeps running
       harmlessly until you recreate it — nothing forces you to do this on a schedule).
+   6. Check for submissions that hit the mixed-replica window: a validation started on
+      an old replica (still writing to local `uploads/`) can be picked up for checking
+      by a new replica that only knows to read the ZIP from MinIO, and fails validation
+      with a "could not open the ZIP" reason. Find them with
+      `scripts/ops/connect-to-prod-db.sh`:
+
+      ```bash
+      scripts/ops/connect-to-prod-db.sh -c "SELECT id, created_at FROM submissions
+        WHERE status = 'VALIDATION_FAILED' AND created_at > '<deploy time>'
+        AND test_results->>'check_reason' LIKE 'Could not open submitted ZIP%';"
+      ```
+
+      For every id it lists, use the "Перезапустити перевірку" (rerun checks) action on
+      that submission's review page in the teacher UI — the ZIP is already durably
+      stored, so a re-run finds it wherever it actually lives.
 
 3. **Phase 2 (a later release, not this one):** once `migrate_uploads` reports zero
    missing submissions and zero subjects without a stored archive, the `uploads`

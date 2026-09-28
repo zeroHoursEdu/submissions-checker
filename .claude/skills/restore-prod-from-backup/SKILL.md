@@ -19,3 +19,7 @@ If the chosen stamp predates a migration that has since run, `pg_restore --clean
 leave newer tables behind and the app's startup migration will then fail — see
 `docs/deployment.md#backups-and-restore` ("Restoring across a migration boundary") for
 the drop/recreate steps to run first in that case.
+
+Restored the wrong stamp? Every restore snapshots what it overwrote to `pre-restore/`
+first — see `docs/deployment.md#undoing-a-restore` for the manual steps to put it back,
+as long as retention has not pruned it since.
