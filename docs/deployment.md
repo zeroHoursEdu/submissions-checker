@@ -472,17 +472,28 @@ The service is **opt-in**: nothing runs, and nothing is written anywhere, unless
    # n) New remote, name it "gdrive", type "drive", scope "drive.file", auto config: yes
    ```
 
-2. Copy the resulting config to the host, into the directory the compose file mounts
-   (`RCLONE_CONFIG_DIR`, default `./docker/backup/rclone`; gitignored):
+   Confirm where that just wrote the config — do not assume the default path, it
+   varies by OS and by whether you already have an `rclone.conf`:
 
    ```bash
-   scp ~/.config/rclone/rclone.conf "$PROD_SSH:$PROD_DIR/docker/backup/rclone/rclone.conf"
+   rclone config file
+   ```
+
+2. Create the directory on the host (it is gitignored, so it will not already exist
+   from a fresh clone) and copy the config into it — the directory the compose file
+   mounts is `RCLONE_CONFIG_DIR`, default `./docker/backup/rclone`:
+
+   ```bash
+   ssh "$PROD_SSH" "mkdir -p '$PROD_DIR/docker/backup/rclone'"
+   scp "$(rclone config file | tail -1)" "$PROD_SSH:$PROD_DIR/docker/backup/rclone/rclone.conf"
    ```
 
    That directory is mounted **read-write**: rclone rewrites the Drive token into
    `rclone.conf` whenever it refreshes, so the file cannot be read-only.
 
-3. In the host's `.env`:
+3. In the host's `.env`, set `COMPOSE_PROFILES` in exactly the one place
+   `.env.prod.example` has it (a second `COMPOSE_PROFILES=` line further down would
+   silently override this one — plain `.env` files are read top-to-bottom):
 
    ```bash
    COMPOSE_PROFILES=backup            # or: observability,backup
@@ -524,17 +535,17 @@ scripts/ops/restore-prod-from-backup.sh <STAMP|latest> [--yes]
 simply the newest dump on the remote (a dump can exist for a run that then failed at
 the bucket sync; restoring that would be a mistake `latest` is designed to avoid).
 
-Before touching anything, the script/`backup.sh restore`:
+Each store is snapshotted immediately before it is overwritten, not both up front:
 
-1. Saves the **current** database to `pre-restore/<now>.dump` and the **current**
-   bucket to `pre-restore/<now>/` on the remote.
-2. Restores the database with `pg_restore --clean --if-exists --no-owner
-   --single-transaction` — a failure here rolls back and leaves the database exactly
-   as it was; nothing downstream runs.
-3. Syncs the bucket from `minio/current` (objects are not point-in-time; anything
-   uploaded after the chosen backup and not yet re-synced is simply overwritten back
-   to the older state — recoverable from `minio/deleted/<stamp>/` if it was ever
-   captured by a run).
+1. Saves the **current** database to `pre-restore/<now>.dump` on the remote, then
+   restores it with `pg_restore --clean --if-exists --no-owner --single-transaction`
+   — a failure here rolls back and leaves the database exactly as it was; nothing
+   downstream (including the bucket) is touched.
+2. Only once the database restore has succeeded: saves the **current** bucket to
+   `pre-restore/<now>/` on the remote, then syncs it from `minio/current` (objects are
+   not point-in-time; anything uploaded after the chosen backup and not yet re-synced
+   is simply overwritten back to the older state — recoverable from
+   `minio/deleted/<stamp>/` if it was ever captured by a run).
 
 The host script also stops the app before any of this and **restarts it even if the
 restore failed**, so a bad restore does not also leave the site down.
@@ -549,17 +560,24 @@ exist *in the dump* — if you restore a dump taken **before** a migration that 
 run, tables/columns the newer schema added are left behind, and the app's own
 startup migration then fails trying to re-apply what it thinks is missing. If the
 chosen stamp predates a migration you know has run since, drop and recreate the
-database first instead of restoring into it:
+database first instead of restoring into it. **Stop the app replicas first** —
+`DROP DATABASE` fails while anything is still connected to it:
 
 ```bash
+docker compose -f docker-compose.prod.yml --env-file .env stop app
 docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
   psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE \"$POSTGRES_DB\";"
 docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
   psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\";"
 ```
 
-Then run the restore against the now-empty database. Ordinary same-schema restores
-(the common case) need none of this.
+Then run the restore script against the now-empty database as usual — it starts the
+app again itself (even if the restore then fails), so you do not need to bring it back
+up by hand. The only case where you do is if you abort here, after dropping the
+database but before running the restore: `docker compose -f docker-compose.prod.yml
+--env-file .env up -d app` (the app will fail to boot until a restore actually
+populates the database). Ordinary same-schema restores (the common case) need none of
+this.
 
 Verify a restore against a scratch database at least once. A backup that has never
 been restored is a backup you do not know you have.
