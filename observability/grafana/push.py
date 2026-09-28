@@ -25,7 +25,7 @@ from typing import Any
 HERE = Path(__file__).parent
 FOLDER_UID, FOLDER_TITLE = "subchk", "Submissions Checker"
 CONTACT_POINT = "subchk-telegram"
-DASHBOARDS = ("subchk-technical", "subchk-goals")
+DASHBOARDS = ("subchk-technical", "subchk-goals", "subchk-quiz-investigation", "subchk-logs")
 
 
 def _env(name: str) -> str:

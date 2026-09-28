@@ -48,10 +48,25 @@ _PROMQL_WORDS = {
 
 def iter_panels(dashboard: dict[str, Any]) -> Iterator[dict[str, Any]]:
     for panel in dashboard["panels"]:
-        if panel["type"] == "row":
+        if panel.get("type") == "row":
             yield from panel.get("panels", [])
         else:
             yield panel
+
+
+DS_LOGS = {"type": "loki", "uid": "grafanacloud-logs"}
+_APP = '{app="subchk", env="$env", service="app"}'
+_EVENT_RE = re.compile(r'event=~?"([^"]+)"')
+
+
+def logql_event_names(dashboard: dict[str, Any]) -> set[str]:
+    """Every `event="x"` / `event=~"a|b"` a LogQL query filters on."""
+    names: set[str] = set()
+    for panel in iter_panels(dashboard):
+        for target in panel.get("targets", []):
+            for match in _EVENT_RE.findall(target["expr"]):
+                names.update(match.split("|"))
+    return names
 
 
 def metric_names_in(dashboard: dict[str, Any]) -> set[str]:
@@ -811,8 +826,218 @@ def goals() -> dict[str, Any]:
     )
 
 
+# ── Log dashboards ───────────────────────────────────────────────────────────
+#
+# Private (not pushed to Grafana Cloud, never public): template variables are fine here,
+# unlike the Prometheus dashboards above which must stay self-contained.
+
+
+def _logs_target(expr: str, *, instant: bool = False) -> dict[str, Any]:
+    t: dict[str, Any] = {"datasource": DS_LOGS, "expr": expr, "refId": "A"}
+    if instant:
+        t["queryType"] = "instant"
+    return t
+
+
+def _logs(
+    grid: _Grid, title: str, description: str, expr: str, *, w: int = 24, h: int = 10
+) -> dict[str, Any]:
+    return {
+        "type": "logs",
+        "title": title,
+        "description": description,
+        "datasource": DS_LOGS,
+        "gridPos": grid.place(w, h),
+        "options": {
+            "showTime": True,
+            "wrapLogMessage": True,
+            "sortOrder": "Ascending",
+            "enableLogDetails": True,
+            "prettifyLogMessage": False,
+        },
+        "targets": [_logs_target(expr)],
+    }
+
+
+def _logs_timeseries(
+    grid: _Grid, title: str, description: str, expr: str, legend: str, *, w: int = 12, h: int = 8
+) -> dict[str, Any]:
+    return {
+        "type": "timeseries",
+        "title": title,
+        "description": description,
+        "datasource": DS_LOGS,
+        "gridPos": grid.place(w, h),
+        "fieldConfig": {
+            "defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 60}},
+            "overrides": [],
+        },
+        "targets": [{**_logs_target(expr), "legendFormat": legend}],
+    }
+
+
+def _textbox(name: str, label: str) -> dict[str, Any]:
+    return {
+        "type": "textbox",
+        "name": name,
+        "label": label,
+        "query": "",
+        "current": {"text": "", "value": ""},
+    }
+
+
+def _env_var() -> dict[str, Any]:
+    return {
+        "type": "custom",
+        "name": "env",
+        "label": "env",
+        "query": "prod,local",
+        "current": {"text": "prod", "value": "prod"},
+        "options": [{"text": v, "value": v, "selected": v == "prod"} for v in ("prod", "local")],
+    }
+
+
+def _logs_dashboard(
+    uid: str, title: str, panels: list[dict[str, Any]], variables: list[dict[str, Any]]
+) -> dict[str, Any]:
+    for i, panel in enumerate(panels, start=1):
+        panel["id"] = i
+    return {
+        "uid": uid,
+        "title": title,
+        "tags": TAGS,
+        "timezone": "browser",
+        "editable": True,
+        "graphTooltip": 1,
+        "refresh": "",
+        "schemaVersion": 39,
+        "version": 1,
+        "time": {"from": "now-24h", "to": "now"},
+        "templating": {"list": variables},
+        "annotations": {"list": []},
+        "panels": panels,
+    }
+
+
+def quiz_investigation() -> dict[str, Any]:
+    g = _Grid()
+    attempt = f'{_APP} | json | attempt_id="$attempt_id"'
+    panels = [
+        _logs(
+            g,
+            "Auto-fails in range",
+            "Which attempts did anti-cheat fail, on which event and rule? Copy attempt_id / user_id into the boxes above.",
+            f'{_APP} | json | event="quiz_attempt_force_failed" '
+            '| line_format "attempt={{.attempt_id}} user={{.user_id}} student={{.student_id}} '
+            '{{.event_type}} x{{.count_after}} (threshold {{.rule_threshold}})"',
+            h=8,
+        ),
+        _logs(
+            g,
+            "Anti-cheat timeline of the attempt",
+            "Every event the browser sent for $attempt_id, what the server decided, and the context (away_ms, viewport, focus).",
+            f'{attempt} | event="quiz_anticheat_event" '
+            '| line_format "{{.event_type}} -> {{.action}} [{{.outcome}}] count={{.count_after}} '
+            'away={{.ctx_away_ms}}ms focus={{.ctx_has_focus}} {{.ctx_vw}}x{{.ctx_vh}}"',
+            h=12,
+        ),
+        _logs_timeseries(
+            g,
+            "Events by type",
+            "Bursts of one event type point at a detector misfiring, not a student.",
+            f'sum by (event_type) (count_over_time({attempt} | event="quiz_anticheat_event" [$__auto]))',
+            "{{event_type}}",
+        ),
+        _logs(
+            g,
+            "Attempt lifecycle",
+            "Start, answers, expiry, finish, snapshots for $attempt_id.",
+            f'{attempt} | event=~"quiz_attempt_started|quiz_attempt_resumed|quiz_answer_saved|'
+            'quiz_questions_expired|quiz_attempt_finished|quiz_snapshot_saved|quiz_snapshot_failed|quiz_dispute_created"',
+            w=12,
+            h=8,
+        ),
+        _logs(
+            g,
+            "Everything the user did",
+            "All HTTP requests by $user_id in order: reloads, failed saves, 4xx/5xx around the fail.",
+            f'{_APP} | json | event="http_request" | user_id="$user_id" '
+            '| line_format "{{.status}} {{.method}} {{.route}} {{.duration_ms}}ms req={{.request_id}}"',
+        ),
+        _logs(
+            g,
+            "Warnings and errors around the attempt",
+            "Anything at warning or above that carries $attempt_id.",
+            '{app="subchk", env="$env", service="app", level=~"warning|error"} | json | attempt_id="$attempt_id"',
+            h=8,
+        ),
+    ]
+    return _logs_dashboard(
+        "subchk-quiz-investigation",
+        "Submissions Checker — Quiz investigation",
+        panels,
+        [_env_var(), _textbox("attempt_id", "attempt_id"), _textbox("user_id", "user_id")],
+    )
+
+
+def logs_overview() -> dict[str, Any]:
+    g = _Grid()
+    problems = '{app="subchk", env="$env", service="app", level=~"error|warning"}'
+    panels = [
+        _logs_timeseries(
+            g,
+            "Errors and warnings by logger",
+            "Which module is complaining, and since when?",
+            f"sum by (logger, level) (count_over_time({problems} | json [$__auto]))",
+            "{{level}} {{logger}}",
+        ),
+        _logs_timeseries(
+            g,
+            "5xx by route",
+            "Which page is failing for users?",
+            f'sum by (route) (count_over_time({_APP} | json | event="http_request" | status >= 500 [$__auto]))',
+            "{{route}}",
+        ),
+        _logs(
+            g,
+            "Slow requests (> 2 s)",
+            "Requests a student waited on; req id links to all its lines.",
+            f'{_APP} | json | event="http_request" | duration_ms > 2000 '
+            '| line_format "{{.duration_ms}}ms {{.method}} {{.route}} user={{.user_id}} req={{.request_id}}"',
+            w=12,
+            h=8,
+        ),
+        _logs(
+            g,
+            "Background job failures",
+            "Outbox messages that failed or gave up, and failed AI reviews.",
+            f'{_APP} | json | event=~"outbox_failed|outbox_dead|ai_review_failed"',
+            w=12,
+            h=8,
+        ),
+        _logs(
+            g,
+            "Checks that did not pass",
+            "Finished checks with passed=false, by submission.",
+            f'{_APP} | json | event="check_finished" | passed="false" '
+            '| line_format "submission={{.submission_id}} {{.status}} {{.score}}/{{.max_score}}"',
+            w=12,
+            h=8,
+        ),
+        _logs(
+            g,
+            "All errors",
+            "Every error line with its traceback.",
+            '{app="subchk", env="$env", level="error"}',
+            w=12,
+            h=8,
+        ),
+    ]
+    return _logs_dashboard("subchk-logs", "Submissions Checker — Logs", panels, [_env_var()])
+
+
 def main() -> None:
-    for build in (technical, goals):
+    for build in (technical, goals, quiz_investigation, logs_overview):
         dash = build()
         path = HERE / f"{dash['uid']}.json"
         path.write_text(json.dumps(dash, indent=2, ensure_ascii=False) + "\n")

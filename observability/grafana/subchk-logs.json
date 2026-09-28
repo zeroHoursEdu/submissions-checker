@@ -1,0 +1,252 @@
+{
+  "uid": "subchk-logs",
+  "title": "Submissions Checker — Logs",
+  "tags": [
+    "subchk"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "type": "custom",
+        "name": "env",
+        "label": "env",
+        "query": "prod,local",
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        },
+        "options": [
+          {
+            "text": "prod",
+            "value": "prod",
+            "selected": true
+          },
+          {
+            "text": "local",
+            "value": "local",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Errors and warnings by logger",
+      "description": "Which module is complaining, and since when?",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "sum by (logger, level) (count_over_time({app=\"subchk\", env=\"$env\", service=\"app\", level=~\"error|warning\"} | json [$__auto]))",
+          "refId": "A",
+          "legendFormat": "{{level}} {{logger}}"
+        }
+      ],
+      "id": 1
+    },
+    {
+      "type": "timeseries",
+      "title": "5xx by route",
+      "description": "Which page is failing for users?",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "sum by (route) (count_over_time({app=\"subchk\", env=\"$env\", service=\"app\"} | json | event=\"http_request\" | status >= 500 [$__auto]))",
+          "refId": "A",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "id": 2
+    },
+    {
+      "type": "logs",
+      "title": "Slow requests (> 2 s)",
+      "description": "Requests a student waited on; req id links to all its lines.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\"} | json | event=\"http_request\" | duration_ms > 2000 | line_format \"{{.duration_ms}}ms {{.method}} {{.route}} user={{.user_id}} req={{.request_id}}\"",
+          "refId": "A"
+        }
+      ],
+      "id": 3
+    },
+    {
+      "type": "logs",
+      "title": "Background job failures",
+      "description": "Outbox messages that failed or gave up, and failed AI reviews.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\"} | json | event=~\"outbox_failed|outbox_dead|ai_review_failed\"",
+          "refId": "A"
+        }
+      ],
+      "id": 4
+    },
+    {
+      "type": "logs",
+      "title": "Checks that did not pass",
+      "description": "Finished checks with passed=false, by submission.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\"} | json | event=\"check_finished\" | passed=\"false\" | line_format \"submission={{.submission_id}} {{.status}} {{.score}}/{{.max_score}}\"",
+          "refId": "A"
+        }
+      ],
+      "id": 5
+    },
+    {
+      "type": "logs",
+      "title": "All errors",
+      "description": "Every error line with its traceback.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", level=\"error\"}",
+          "refId": "A"
+        }
+      ],
+      "id": 6
+    }
+  ]
+}

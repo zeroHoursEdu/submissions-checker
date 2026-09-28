@@ -1,0 +1,269 @@
+{
+  "uid": "subchk-quiz-investigation",
+  "title": "Submissions Checker — Quiz investigation",
+  "tags": [
+    "subchk"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "type": "custom",
+        "name": "env",
+        "label": "env",
+        "query": "prod,local",
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        },
+        "options": [
+          {
+            "text": "prod",
+            "value": "prod",
+            "selected": true
+          },
+          {
+            "text": "local",
+            "value": "local",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "type": "textbox",
+        "name": "attempt_id",
+        "label": "attempt_id",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      },
+      {
+        "type": "textbox",
+        "name": "user_id",
+        "label": "user_id",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "logs",
+      "title": "Auto-fails in range",
+      "description": "Which attempts did anti-cheat fail, on which event and rule? Copy attempt_id / user_id into the boxes above.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\"} | json | event=\"quiz_attempt_force_failed\" | line_format \"attempt={{.attempt_id}} user={{.user_id}} student={{.student_id}} {{.event_type}} x{{.count_after}} (threshold {{.rule_threshold}})\"",
+          "refId": "A"
+        }
+      ],
+      "id": 1
+    },
+    {
+      "type": "logs",
+      "title": "Anti-cheat timeline of the attempt",
+      "description": "Every event the browser sent for $attempt_id, what the server decided, and the context (away_ms, viewport, focus).",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 12
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\"} | json | attempt_id=\"$attempt_id\" | event=\"quiz_anticheat_event\" | line_format \"{{.event_type}} -> {{.action}} [{{.outcome}}] count={{.count_after}} away={{.ctx_away_ms}}ms focus={{.ctx_has_focus}} {{.ctx_vw}}x{{.ctx_vh}}\"",
+          "refId": "A"
+        }
+      ],
+      "id": 2
+    },
+    {
+      "type": "timeseries",
+      "title": "Events by type",
+      "description": "Bursts of one event type point at a detector misfiring, not a student.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "sum by (event_type) (count_over_time({app=\"subchk\", env=\"$env\", service=\"app\"} | json | attempt_id=\"$attempt_id\" | event=\"quiz_anticheat_event\" [$__auto]))",
+          "refId": "A",
+          "legendFormat": "{{event_type}}"
+        }
+      ],
+      "id": 3
+    },
+    {
+      "type": "logs",
+      "title": "Attempt lifecycle",
+      "description": "Start, answers, expiry, finish, snapshots for $attempt_id.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\"} | json | attempt_id=\"$attempt_id\" | event=~\"quiz_attempt_started|quiz_attempt_resumed|quiz_answer_saved|quiz_questions_expired|quiz_attempt_finished|quiz_snapshot_saved|quiz_snapshot_failed|quiz_dispute_created\"",
+          "refId": "A"
+        }
+      ],
+      "id": 4
+    },
+    {
+      "type": "logs",
+      "title": "Everything the user did",
+      "description": "All HTTP requests by $user_id in order: reloads, failed saves, 4xx/5xx around the fail.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 10
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\"} | json | event=\"http_request\" | user_id=\"$user_id\" | line_format \"{{.status}} {{.method}} {{.route}} {{.duration_ms}}ms req={{.request_id}}\"",
+          "refId": "A"
+        }
+      ],
+      "id": 5
+    },
+    {
+      "type": "logs",
+      "title": "Warnings and errors around the attempt",
+      "description": "Anything at warning or above that carries $attempt_id.",
+      "datasource": {
+        "type": "loki",
+        "uid": "grafanacloud-logs"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 38,
+        "w": 24,
+        "h": 8
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "grafanacloud-logs"
+          },
+          "expr": "{app=\"subchk\", env=\"$env\", service=\"app\", level=~\"warning|error\"} | json | attempt_id=\"$attempt_id\"",
+          "refId": "A"
+        }
+      ],
+      "id": 6
+    }
+  ]
+}

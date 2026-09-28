@@ -144,3 +144,73 @@ groups:
     annotations:
       summary: A background job has waited more than 15 minutes; checks and emails
         are not going out.
+  - uid: subchk-quiz-force-fail-spike
+    title: QuizForceFailSpike
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: grafanacloud-logs
+      model:
+        refId: A
+        expr: sum(count_over_time({app="subchk", env="prod", service="app"} | json
+          | event="quiz_attempt_force_failed" [10m])) > 5
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    for: 0m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      app: submissions-checker
+    annotations:
+      summary: 'More than 5 quiz attempts auto-failed in 10 minutes: a rule or a browser
+        change is likely misfiring. Open the Quiz investigation dashboard.'
+  - uid: subchk-outbox-dead
+    title: OutboxDead
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 900
+        to: 0
+      datasourceUid: grafanacloud-logs
+      model:
+        refId: A
+        expr: sum(count_over_time({app="subchk", env="prod", service="app"} | json
+          | event="outbox_dead" [15m])) > 0
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    for: 0m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      app: submissions-checker
+    annotations:
+      summary: A background job exhausted its retries (check, AI review or email lost).
+        See the Logs dashboard.

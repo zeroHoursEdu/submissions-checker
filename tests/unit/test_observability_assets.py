@@ -14,6 +14,16 @@ from submissions_checker.core import metrics
 
 GRAFANA = Path(__file__).resolve().parents[2] / "observability" / "grafana"
 DS = {"type": "prometheus", "uid": "grafanacloud-prom"}
+SRC = Path(__file__).resolve().parents[2] / "src"
+DS_LOGS = {"type": "loki", "uid": "grafanacloud-logs"}
+_LOG_DASHBOARDS = [
+    ("quiz_investigation", "subchk-quiz-investigation"),
+    ("logs_overview", "subchk-logs"),
+]
+
+
+def _source_text() -> str:
+    return "\n".join(p.read_text() for p in SRC.rglob("*.py"))
 
 
 def _load(name: str) -> ModuleType:
@@ -81,6 +91,53 @@ def test_series_budget_estimate_is_under_500(build: ModuleType) -> None:
     assert build.estimate_series(replicas=2, route_templates=75) < 500
 
 
+# ── Log dashboards ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("fn", "uid"), _LOG_DASHBOARDS)
+def test_committed_log_dashboards_match_generator(build: ModuleType, fn: str, uid: str) -> None:
+    committed = json.loads((GRAFANA / f"{uid}.json").read_text())
+    assert committed == getattr(build, fn)(), (
+        "run: python3 observability/grafana/build_dashboards.py"
+    )
+
+
+@pytest.mark.parametrize(("fn", "uid"), _LOG_DASHBOARDS)
+def test_log_dashboards_query_only_this_app(build: ModuleType, fn: str, uid: str) -> None:
+    dash = getattr(build, fn)()
+    assert dash["uid"] == uid and "subchk" in dash["tags"]
+    for panel in build.iter_panels(dash):
+        assert panel["datasource"] == DS_LOGS, panel["title"]
+        assert panel.get("description"), panel["title"]
+        for target in panel.get("targets", []):
+            assert 'app="subchk"' in target["expr"], target["expr"]
+
+
+@pytest.mark.parametrize(("fn", "uid"), _LOG_DASHBOARDS)
+def test_log_dashboards_name_only_events_the_code_emits(
+    build: ModuleType, fn: str, uid: str
+) -> None:
+    names = build.logql_event_names(getattr(build, fn)())
+    assert names
+    source = _source_text()
+    missing = {n for n in names if f'"{n}"' not in source}
+    assert not missing, f"events queried but never logged: {missing}"
+
+
+def test_log_alerts_name_only_events_the_code_emits(
+    alerting: ModuleType, build: ModuleType
+) -> None:
+    source = _source_text()
+    exprs = [
+        d["model"]["expr"] for r in alerting.rules() for d in r["data"] if "expr" in d["model"]
+    ]
+    names = {
+        n for e in exprs for n in build.logql_event_names({"panels": [{"targets": [{"expr": e}]}]})
+    }
+    assert names == {"quiz_attempt_force_failed", "outbox_dead"}
+    assert all(f'"{n}"' in source for n in names)
+
+
 # ── Alerting ─────────────────────────────────────────────────────────────────
 
 
@@ -98,22 +155,32 @@ def test_committed_alert_rules_match_generator(alerting: ModuleType) -> None:
     )
 
 
-def test_alert_rules_are_the_four_from_the_spec(alerting: ModuleType, build: ModuleType) -> None:
+def test_alert_rules_are_the_ones_from_the_specs(alerting: ModuleType, build: ModuleType) -> None:
     rules = alerting.rules()
     assert [r["title"] for r in rules] == [
         "ServiceDown",
         "HighErrorRate",
         "DbUnhealthy",
         "OutboxStuck",
+        "QuizForceFailSpike",
+        "OutboxDead",
     ]
     for rule in rules:
         assert rule["folderUID"] == "subchk" and rule["ruleGroup"] == "subchk"
         assert rule["labels"] == {"app": "submissions-checker"}
+    for rule in rules[:4]:
         exprs = [d["model"]["expr"] for d in rule["data"] if "expr" in d["model"]]
         assert exprs and all('job="submissions-checker"' in e for e in exprs)
         fake_dash = {"panels": [{"type": "x", "targets": [{"expr": e}]} for e in exprs]}
         referenced = build.metric_names_in(fake_dash)
         assert referenced <= metrics.registered_sample_names() | {"up"}, referenced
+    for rule in rules[4:]:
+        exprs = [d["model"]["expr"] for d in rule["data"] if "expr" in d["model"]]
+        assert exprs and all('app="subchk"' in e and 'env="prod"' in e for e in exprs)
+        assert all(
+            d["datasourceUid"] == "grafanacloud-logs" for d in rule["data"] if "expr" in d["model"]
+        )
+        assert rule["noDataState"] == "OK"
     assert rules[0]["noDataState"] == "Alerting"  # no scrape at all IS the outage
     assert all(r["noDataState"] == "OK" for r in rules[1:])
 
