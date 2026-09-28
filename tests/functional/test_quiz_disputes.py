@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from structlog.testing import capture_logs
 
 from submissions_checker.db.models import (
     Notification,
@@ -571,12 +572,18 @@ async def test_reject_records_the_note_and_changes_no_score(
     dispute = await _file_dispute(db, attempt, student_user.student_id, 1)
 
     login(client, owner)
-    resp = await client.post(
-        f"/teacher/disputes/{dispute.id}/resolve",
-        data={"action": "reject", "note": "the key is right, 'blue' is the answer"},
-        follow_redirects=False,
-    )
+    with capture_logs() as logs:
+        resp = await client.post(
+            f"/teacher/disputes/{dispute.id}/resolve",
+            data={"action": "reject", "note": "the key is right, 'blue' is the answer"},
+            follow_redirects=False,
+        )
     assert resp.status_code == 303
+    resolved = [e for e in logs if e["event"] == "quiz_dispute_resolved"]
+    assert len(resolved) == 1
+    assert resolved[0]["dispute_id"] == dispute.id
+    assert resolved[0]["question_id"] == 1
+    assert resolved[0]["accepted"] is False
 
     await db.refresh(dispute)
     await db.refresh(attempt)
@@ -627,12 +634,20 @@ async def test_accept_credits_the_question_and_records_an_override(
     dispute = await _file_dispute(db, attempt, student_user.student_id, 1)
 
     login(client, owner)
-    resp = await client.post(
-        f"/teacher/disputes/{dispute.id}/resolve",
-        data={"action": "accept", "note": "both 'blue' and 'green' are defensible"},
-        follow_redirects=False,
-    )
+    with capture_logs() as logs:
+        resp = await client.post(
+            f"/teacher/disputes/{dispute.id}/resolve",
+            data={"action": "accept", "note": "both 'blue' and 'green' are defensible"},
+            follow_redirects=False,
+        )
     assert resp.status_code == 303
+    resolved = [e for e in logs if e["event"] == "quiz_dispute_resolved"]
+    assert len(resolved) == 1
+    assert resolved[0]["dispute_id"] == dispute.id
+    assert resolved[0]["question_id"] == 1
+    assert resolved[0]["accepted"] is True
+    # The note is free text a student will read; it stays out of the logs.
+    assert "defensible" not in repr(resolved)
 
     await db.refresh(dispute)
     assert dispute.status == QuizDisputeStatus.ACCEPTED
