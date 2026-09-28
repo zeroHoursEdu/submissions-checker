@@ -248,8 +248,9 @@ and that *Replicas up* on the Technical dashboard reads 2 (see `docs/observabili
 
 Same Alloy, same `observability` profile, no extra service: it now also tails every
 container's stdout over the read-only Docker socket and pushes to Grafana Cloud Loki.
-Three more vars alongside the `GRAFANA_CLOUD_PROM_*` ones in `.env`
-(`docs/observability.md#logs` has the full pipeline and query examples):
+Three more vars, already templated in `.env.prod.example` right after the
+`GRAFANA_CLOUD_PROM_*` block — fill them in there (or in the host's `.env`, copied
+from it) (`docs/observability.md#logs` has the full pipeline and query examples):
 
 ```dotenv
 GRAFANA_CLOUD_LOKI_URL=      # …/loki/api/v1/push

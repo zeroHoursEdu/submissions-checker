@@ -149,11 +149,11 @@ the socket is already held by the app and Watchtower, and Alloy publishes no por
 this adds one pinned-version, non-exposed container to that trust boundary rather than
 a new one.
 
-In production this pushes to Grafana Cloud Loki (`GRAFANA_CLOUD_LOKI_URL/USER/TOKEN`
-in the host `.env`, same access-policy pattern as the Prometheus vars above, scope
-`logs:write`). Locally it pushes to a throwaway `loki` container in the `observability`
-profile (`make observability-up`, which resolves and passes the real compose project
-name so this works from a worktree too).
+In production this pushes to Grafana Cloud Loki (`GRAFANA_CLOUD_LOKI_URL/USER/TOKEN`,
+templated in `.env.prod.example` right after the `GRAFANA_CLOUD_PROM_*` block, same
+access-policy pattern, scope `logs:write`). Locally it pushes to a throwaway `loki`
+container in the `observability` profile (`make observability-up`, which resolves and
+passes the real compose project name so this works from a worktree too).
 
 Only `level` is pulled out of the JSON body into a Loki label (via `stage.json` +
 `stage.labels`); everything else — `request_id`, `user_id`, `attempt_id`,
