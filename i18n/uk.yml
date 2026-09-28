@@ -400,6 +400,23 @@ teacher:
   delete_subject_button: Видалити
   attempt_label: Спроба
   no_violations: Порушень не зафіксовано
+  timeline_title: "Хронологія подій"
+  timeline_link: "Хронологія подій"
+  timeline_empty: "Жодних подій не зафіксовано (або спроба старіша за цю функцію)."
+  timeline_capped: "Показано перші 500 подій; решта врахована в лічильниках, але не збережена."
+  timeline_col_time: "Час"
+  timeline_col_event: "Подія"
+  timeline_col_count: "Лічильник"
+  timeline_col_action: "Дія"
+  timeline_col_context: "Контекст"
+  timeline_outcome_informational: "довідково"
+  timeline_outcome_ignored_paused: "ігноровано (пауза)"
+  timeline_outcome_ignored_not_in_progress: "ігноровано (спроба завершена)"
+  timeline_outcome_ignored_type_cap: "ігноровано (ліміт типів)"
+  timeline_away: "не було"
+  timeline_hidden: "вкладка прихована"
+  timeline_no_focus: "без фокусу"
+  timeline_faces: "облич"
 admin:
   semesters_title: Семестри
   semesters_hint: Опитування про курс прив'язане до поточного семестру. Періоди не можуть перетинатися.

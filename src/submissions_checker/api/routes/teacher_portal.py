@@ -36,6 +36,7 @@ from submissions_checker.db.models import (
     FeedbackToken,
     OutboxMessage,
     QuizAttempt,
+    QuizAttemptEvent,
     QuizAttemptSnapshot,
     Semester,
     Student,
@@ -67,6 +68,7 @@ from submissions_checker.services.gradebook import (
 )
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
+from submissions_checker.services.quiz_events import MAX_EVENTS_STORED_PER_ATTEMPT, offset_label
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
 from submissions_checker.services.squads import SquadError
 from submissions_checker.services.storage import StorageService, get_storage
@@ -575,12 +577,14 @@ async def teacher_assignment(
         r["student_id"]: r["student_assignment_id"] for r in rows if r["student_assignment_id"]
     }
     violation_flags: dict[int, dict[str, Any]] = {}
+    violation_attempts: dict[int, int] = {}
     if sa_id_list:
         viol_result = await db.execute(
             select(
                 Submission.students_assignment_id,
                 QuizAttempt.student_id,
                 QuizAttempt.violations,
+                QuizAttempt.id,
             )
             .join(Submission, Submission.id == QuizAttempt.submission_id)
             .where(
@@ -596,6 +600,7 @@ async def teacher_assignment(
             sa_id_val = sa_by_student.get(vr.student_id, vr.students_assignment_id)
             if sa_id_val not in violation_flags:
                 violation_flags[sa_id_val] = vr.violations or {}
+                violation_attempts[sa_id_val] = vr.id
 
     # Load proctoring snapshot thumbnails grouped by student_assignment (same squad-mate
     # keying as violation_flags above).
@@ -631,6 +636,7 @@ async def teacher_assignment(
             "subject_id": subject_id,
             "rows": rows,
             "violation_flags": violation_flags,
+            "violation_attempts": violation_attempts,
             "snapshot_flags": snapshot_flags,
             "ai_flags": ai_flags,
             "stuck_ids": stuck_ids,
@@ -758,6 +764,68 @@ _IN_FLIGHT_STATUSES = frozenset(
 )
 
 _SNAPSHOT_CONTENT_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+
+@router.get("/quiz-attempts/{attempt_id}/events", response_class=HTMLResponse)
+async def quiz_attempt_events(
+    request: Request,
+    attempt_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> HTMLResponse:
+    """The attempt's anti-cheat timeline: what the browser reported and what the server did."""
+    attempt = (
+        await db.execute(
+            select(QuizAttempt)
+            .where(QuizAttempt.id == attempt_id)
+            .options(
+                selectinload(QuizAttempt.submission)
+                .selectinload(Submission.students_assignment)
+                .selectinload(StudentAssignment.subjects_assignment),
+                selectinload(QuizAttempt.submission)
+                .selectinload(Submission.students_assignment)
+                .selectinload(StudentAssignment.student),
+            )
+        )
+    ).scalar_one_or_none()
+    if attempt is None:
+        raise HTTPException(status_code=404)
+    sa = attempt.submission.students_assignment
+    subject = await require_subject_access(db, sa.subjects_assignment.subject_id, current_user)
+    # A squad-mate's attempt hangs off the uploader's submission; name the one who sat it.
+    student = await db.get(Student, attempt.student_id) if attempt.student_id else sa.student
+
+    events = (
+        await db.execute(
+            select(QuizAttemptEvent)
+            .where(QuizAttemptEvent.attempt_id == attempt.id)
+            .order_by(QuizAttemptEvent.created_at, QuizAttemptEvent.id)
+        )
+    ).scalars()
+    rows = [
+        {
+            "offset": offset_label(e.created_at, attempt.started_at),
+            "event_type": e.event_type,
+            "count_after": e.count_after,
+            "action": e.action,
+            "outcome": e.outcome.value,
+            "ctx": e.client_ctx or {},
+        }
+        for e in events
+    ]
+    return render(
+        request,
+        "teacher_quiz_attempt_events.html",
+        {
+            "current_user": current_user,
+            "attempt": attempt,
+            "student": student,
+            "subject": subject,
+            "assignment": sa.subjects_assignment,
+            "rows": rows,
+            "row_cap": MAX_EVENTS_STORED_PER_ATTEMPT,
+        },
+    )
 
 
 @router.get("/proctoring/snapshots/{snapshot_id}")
