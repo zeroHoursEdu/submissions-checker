@@ -15,10 +15,10 @@
 #   minio           192M
 #   app           2x320M = 640M
 #   watchtower       48M
-#   backup           48M   (pg_dump streams to disk; it is a client, not a server)
+#   backup          128M   (rclone; only when the backup profile is on)
 #   alloy            96M   (profile `observability`; nothing when the profile is off)
 #   ------------------------
-#   committed     ~1636M, leaving ~400M for a transient check sandbox
+#   committed     ~1716M, leaving ~320M for a transient check sandbox
 #
 # SANDBOX_MAX_MEMORY (default 384m) is what a check may take out of that headroom.
 # Re-do this arithmetic whenever a service is added or a limit is raised.
@@ -294,6 +294,10 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
+  # Opt-in: COMPOSE_PROFILES=backup in .env (comma-join with observability). Backups go
+  # only to $RCLONE_REMOTE (Google Drive) — a copy on this disk would die with it. Env uses
+  # `:-` not `:?`: compose interpolates profiled services even when they are off.
+  # Runbook: docs/deployment.md#backups-and-restore; scripts/ops/*-prod-*.sh wrap it.
   backup:
     build:
       context: .
@@ -305,27 +309,34 @@ services:
     # there should not be: the image is two packages on top of alpine and is not
     # worth a registry round trip.
     pull_policy: build
+    profiles: ["backup"]
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${BACKUP_TZ:-Europe/Kyiv}
+      BACKUP_CRON: ${BACKUP_CRON:-0 */6 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+      POSTGRES_USER: ${POSTGRES_USER:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-submissions_checker}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-submissions-checker}
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      RCLONE_CONFIG_MINIO_TYPE: s3
+      RCLONE_CONFIG_MINIO_PROVIDER: Minio
+      RCLONE_CONFIG_MINIO_ENDPOINT: http://minio:9000
+      RCLONE_CONFIG_MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-}
+      RCLONE_CONFIG_MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-}
     volumes:
-      # Point BACKUP_DIR at a second block volume: a backup on the same disk as the
-      # data protects against corruption, not against losing the disk.
-      - ${BACKUP_DIR:-./backups}:/backups
+      # A directory, not the file, and writable: rclone rewrites rclone.conf (atomically,
+      # via a temp file) whenever it refreshes the Drive token.
+      - ${RCLONE_CONFIG_DIR:-./docker/backup/rclone}:/config/rclone
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
     networks: [data]
-    mem_limit: 48m
+    mem_limit: 128m
     logging: *default-logging
     labels:
       com.centurylinklabs.watchtower.enable: "false"

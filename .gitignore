@@ -222,3 +222,6 @@ ssh/
 
 # Self-hosted browser models for quiz proctoring (fetched by scripts/fetch_vendor_assets.py)
 static/vendor/
+
+# rclone's config directory for the prod backup sidecar — holds the Google Drive token
+docker/backup/rclone/
