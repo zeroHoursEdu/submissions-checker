@@ -134,12 +134,23 @@ status() {
 	[ "${age_h}" -le "${MAX_AGE_HOURS}" ] || { echo "OLDER THAN ${MAX_AGE_HOURS}h"; exit 1; }
 }
 
-# Only names shaped like a backup stamp — a stray file dropped in postgres/ (or a dump
-# from a run that failed later, e.g. at the bucket sync) should not show up as a choice.
+# Only names shaped like a backup stamp — a stray file dropped in postgres/ is skipped.
+# A dump from a run that failed later (e.g. at the bucket sync) DOES show up — it is a
+# real file in postgres/ — but is marked so it isn't mistaken for a full backup: `restore
+# latest` never picks it (that resolves via last-success), but a stamp passed explicitly
+# would restore the database alone with no matching object state.
 list() {
+	last="$(rclone cat "${REMOTE}/last-success" 2>/dev/null)" || last=""
+	last_epoch=""
+	[ -n "${last}" ] && last_epoch="$(stamp_epoch "${last}")"
 	rclone lsf "${REMOTE}/postgres" 2>/dev/null | while IFS= read -r entry; do
 		s="${entry%.dump}"
-		case "$s" in [0-9]*T*Z) echo "$s" ;; esac
+		case "$s" in [0-9]*T*Z) ;; *) continue ;; esac
+		if [ -n "${last_epoch}" ] && [ "$(stamp_epoch "$s")" -gt "${last_epoch}" ]; then
+			echo "$s  (after last successful backup — objects may be incomplete)"
+		else
+			echo "$s"
+		fi
 	done | sort
 }
 

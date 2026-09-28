@@ -65,6 +65,15 @@ wait "${lock_holder_pid}" 2>/dev/null || true
 # dump can exist for a run that later failed (here, one that was never a real dump at
 # all). If `restore latest` picked this by name, pg_restore would fail on garbage bytes.
 dc run --rm --entrypoint sh backup -c 'echo not-a-real-dump | rclone rcat "$RCLONE_REMOTE/postgres/29990101T000000Z.dump"'
+
+# F8: `list` must flag that same dump as newer than last-success — it exists only because
+# a run got as far as uploading a dump and never became a real backup — rather than
+# presenting it as an ordinary restore point indistinguishable from a good one.
+list_out="$(dc run --rm backup list)"
+echo "${list_out}"
+echo "${list_out}" | grep -q "^29990101T000000Z  (after last successful backup — objects may be incomplete)$" \
+	|| { echo "list did not flag a dump newer than last-success"; exit 1; }
+
 dc run --rm -e RESTORE_CONFIRM=yes backup restore latest
 test "$(psql_ 'SELECT v FROM marker;')" = "before"
 dc run --rm --entrypoint sh backup -c 'rclone deletefile "$RCLONE_REMOTE/postgres/29990101T000000Z.dump"'
