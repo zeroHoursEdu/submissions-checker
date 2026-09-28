@@ -205,3 +205,61 @@ async def test_idle_outbox_tick_logs_nothing_at_info(db_session: AsyncSession, m
     with capture_logs() as logs:
         await outbox_processor.process_outbox_messages()
     assert [e for e in logs if e["log_level"] != "debug"] == []
+
+
+@pytest.mark.asyncio
+async def test_outbox_failure_from_check_task_keeps_submission_id(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """Regression: bind/unbind inside execute_check_task must not blow away the
+    submission_id the outbox loop's own bound_contextvars put in place — the
+    unbind used to leave the outbox's own outbox_failed line with no submission_id."""
+    import structlog
+    from structlog.testing import capture_logs
+
+    from submissions_checker.workers.tasks import check_tasks
+
+    async def failing_execute_check(db, submission_id):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(check_tasks, "_execute_check", failing_execute_check)
+
+    message = OutboxMessage(event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": 77})
+    db_session.add(message)
+    await db_session.commit()
+    await db_session.refresh(message)
+
+    _patch_processor_session(monkeypatch, db_session)
+    with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as logs:
+        await outbox_processor.process_outbox_messages()
+
+    failed = next(e for e in logs if e["event"] == "outbox_failed")
+    assert failed["submission_id"] == 77
+
+
+@pytest.mark.asyncio
+async def test_outbox_failure_from_ai_review_task_keeps_submission_id(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """Same regression as above, for the RUN_AI_REVIEW path."""
+    import structlog
+    from structlog.testing import capture_logs
+
+    from submissions_checker.workers.tasks import review_tasks
+
+    async def failing_execute_ai_review(db, payload, submission_id):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(review_tasks, "_execute_ai_review", failing_execute_ai_review)
+
+    message = OutboxMessage(event_type=OutboxEventType.RUN_AI_REVIEW, payload={"submission_id": 78})
+    db_session.add(message)
+    await db_session.commit()
+    await db_session.refresh(message)
+
+    _patch_processor_session(monkeypatch, db_session)
+    with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as logs:
+        await outbox_processor.process_outbox_messages()
+
+    failed = next(e for e in logs if e["event"] == "outbox_failed")
+    assert failed["submission_id"] == 78

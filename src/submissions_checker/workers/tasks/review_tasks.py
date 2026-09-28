@@ -243,11 +243,11 @@ def _validate_verdict(parsed: dict[str, Any]) -> None:
 
 async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     submission_id = payload.get("submission_id")
-    structlog.contextvars.bind_contextvars(submission_id=submission_id)
-    try:
+    if submission_id is None:
         await _execute_ai_review(db, payload, submission_id)
-    finally:
-        structlog.contextvars.unbind_contextvars("submission_id")
+        return
+    with structlog.contextvars.bound_contextvars(submission_id=submission_id):
+        await _execute_ai_review(db, payload, submission_id)
 
 
 async def _execute_ai_review(

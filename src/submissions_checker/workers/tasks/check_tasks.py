@@ -109,11 +109,8 @@ def _resolve_plugin_dir(
 
 async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     submission_id: int = payload["submission_id"]
-    structlog.contextvars.bind_contextvars(submission_id=submission_id)
-    try:
+    with structlog.contextvars.bound_contextvars(submission_id=submission_id):
         await _execute_check(db, submission_id)
-    finally:
-        structlog.contextvars.unbind_contextvars("submission_id")
 
 
 async def _execute_check(db: AsyncSession, submission_id: int) -> None:
