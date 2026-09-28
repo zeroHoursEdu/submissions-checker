@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import posixpath
 import shutil
 import time
 import uuid
@@ -54,13 +55,34 @@ def materialize_plugin_tree(
     return target
 
 
+def _extracted_relpath(filename: str) -> str | None:
+    """Where `safe_extract`'s underlying `zipfile.extractall` actually writes this
+    entry, relative to the tree root — or None when nothing is written for it.
+
+    This mirrors `zipfile.ZipFile._extract_member`'s own sanitisation (split on '/',
+    drop empty/'.'/'..' components, rejoin) rather than `posixpath.normpath`: for an
+    entry like "a/../b.txt", normpath mathematically resolves it down to "b.txt", but
+    the stdlib's own extraction merely drops the ".." *token* and keeps "a", writing to
+    "a/b.txt" instead (confirmed against the stdlib — safe_extract's own traversal
+    check happens to accept this entry, since `(dest / "a/../b.txt").resolve()` also
+    lands inside dest, just not at the same place extractall actually writes it). A
+    completeness check has to agree with reality, not with a plausible-looking but
+    different normalisation, or it will consider the tree eternally incomplete.
+    """
+    parts = [p for p in filename.split("/") if p not in ("", posixpath.curdir, posixpath.pardir)]
+    return "/".join(parts) if parts else None
+
+
 def _is_complete(target: Path, zip_bytes: bytes) -> bool:
     """True when every file entry of the archive still exists under target."""
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
-            if not (target / info.filename).is_file():
+            relpath = _extracted_relpath(info.filename)
+            if relpath is None:
+                continue
+            if not (target / relpath).is_file():
                 return False
     return True
 
@@ -68,10 +90,14 @@ def _is_complete(target: Path, zip_bytes: bytes) -> bool:
 def _reextract(root: Path, target: Path, zip_bytes: bytes) -> None:
     """Extract into a fresh temp dir and swap it in for target.
 
-    Any existing target is moved aside to `.old-<uuid>` first so the swap is atomic and
-    a concurrent reader of the old tree is unaffected, then removed. Races with another
-    replica doing the same thing are tolerated: whichever tree ends up at `target` is
-    equally correct, so a losing os.replace just keeps theirs instead of erroring.
+    Re-checks completeness immediately before touching `target`: another replica may
+    have already re-extracted a complete tree into it while we were preparing ours, in
+    which case we keep theirs and discard our tmp rather than clobbering it. Any
+    existing target that IS moved aside lands at `.old-<uuid>` and is left there for the
+    idle prune, not removed here — a sandbox on another replica may still be reading it
+    through its own bind mount of the old path. Races with another replica doing this
+    same dance are tolerated: whichever tree ends up at `target` is equally correct, so
+    a losing os.replace just keeps theirs instead of erroring.
     """
     tmp = root / f"{_TMP_PREFIX}{uuid.uuid4().hex}"
     try:
@@ -79,13 +105,12 @@ def _reextract(root: Path, target: Path, zip_bytes: bytes) -> None:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             safe_extract(zf, tmp)
         _widen_permissions(tmp)
-        old_candidate = root / f"{_OLD_PREFIX}{uuid.uuid4().hex}"
-        old: Path | None
+        if target.is_dir() and _is_complete(target, zip_bytes):
+            return  # another replica already fixed it; theirs is as good as ours
         try:
-            target.rename(old_candidate)
-            old = old_candidate
+            target.rename(root / f"{_OLD_PREFIX}{uuid.uuid4().hex}")
         except FileNotFoundError:
-            old = None  # nothing to move aside — already gone (raced or never existed)
+            pass  # nothing to move aside — already gone (raced or never existed)
         try:
             os.replace(tmp, target)
         except OSError:
@@ -93,8 +118,6 @@ def _reextract(root: Path, target: Path, zip_bytes: bytes) -> None:
             # is as good as ours.
             if not target.is_dir():
                 raise
-        if old is not None:
-            shutil.rmtree(old, ignore_errors=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

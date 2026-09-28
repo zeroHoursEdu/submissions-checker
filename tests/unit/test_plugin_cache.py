@@ -137,3 +137,60 @@ def test_old_dir_pruned_like_tmp(tmp_path) -> None:
     os.utime(stale_old, (past, past))
     materialize_plugin_tree(tmp_path, "demo", _zip({"v": "1"}))
     assert not stale_old.exists()
+
+
+def test_reextraction_does_not_delete_old_dir_immediately(tmp_path) -> None:
+    """R2: a sandbox on another replica may still be reading the pre-re-extraction tree
+    through its own bind mount of the old path. Re-extraction must move it aside to
+    `.old-<uuid>` and leave it there for the idle prune, not remove it on the spot."""
+    z = _zip({"a.txt": "1", "b.txt": "2"})
+    out = materialize_plugin_tree(tmp_path, "demo", z)
+    (out / "b.txt").unlink()  # force incompleteness -> re-extraction on the next call
+
+    restored = materialize_plugin_tree(tmp_path, "demo", z)
+    assert restored == out
+
+    old_dirs = [p for p in tmp_path.iterdir() if p.name.startswith(".old-")]
+    assert len(old_dirs) == 1
+    assert old_dirs[0].is_dir()
+
+
+def test_concurrently_completed_target_is_kept(tmp_path, monkeypatch) -> None:
+    """R2: re-check completeness immediately before renaming target aside. If another
+    replica already fixed it in the gap between our first check and now, keep theirs
+    instead of clobbering it with our own (redundant) extraction."""
+    z = _zip({"a.txt": "1", "b.txt": "2"})
+    out = materialize_plugin_tree(tmp_path, "demo", z)
+    (out / "b.txt").unlink()  # force incompleteness -> re-extraction attempt
+
+    real_widen = plugin_cache._widen_permissions
+
+    def sneaky_widen(tree: object) -> None:
+        # Our tmp extraction is ready; simulate another replica finishing its own
+        # re-extraction of `target` right before we re-check and swap ours in.
+        (out / "b.txt").write_text("fixed-by-other-replica")
+        real_widen(tree)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(plugin_cache, "_widen_permissions", sneaky_widen)
+    result = materialize_plugin_tree(tmp_path, "demo", z)
+
+    assert result == out
+    assert (out / "b.txt").read_text() == "fixed-by-other-replica"
+
+
+def test_dotdot_entry_completeness_matches_real_extraction(tmp_path) -> None:
+    """R3: `a/../b.txt` passes safe_extract's own traversal check (it resolves inside
+    the tree) but the stdlib's own extractall writes it to `a/b.txt`, not `b.txt` (it
+    drops the ".." token instead of resolving it against "a" — verified against the
+    stdlib, this is NOT what posixpath.normpath computes). A completeness check that
+    disagrees with where the file actually landed would consider the tree eternally
+    incomplete and re-extract (destroying anything else placed in it) on every call."""
+    z = _zip({"a/../b.txt": "x"})
+    out = materialize_plugin_tree(tmp_path, "demo", z)
+    assert (out / "a" / "b.txt").read_text() == "x"
+
+    marker = out / "marker.txt"
+    marker.write_text("kept")
+    restored = materialize_plugin_tree(tmp_path, "demo", z)
+    assert restored == out
+    assert marker.exists()
