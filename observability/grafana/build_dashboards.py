@@ -828,8 +828,11 @@ def goals() -> dict[str, Any]:
 
 # ── Log dashboards ───────────────────────────────────────────────────────────
 #
-# Private (not pushed to Grafana Cloud, never public): template variables are fine here,
-# unlike the Prometheus dashboards above which must stay self-contained.
+# These ARE pushed to Grafana Cloud, same as the Prometheus dashboards above, but they
+# are never made public/anonymous (they show user/attempt ids, so they must stay behind
+# login) — unlike a public dashboard, a template variable is fine here. That is also why
+# the "self-contained, no template variables" test below applies only to the Prometheus
+# dashboards, not these.
 
 
 def _logs_target(expr: str, *, instant: bool = False) -> dict[str, Any]:
