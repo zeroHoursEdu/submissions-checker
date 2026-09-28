@@ -1,22 +1,35 @@
 services:
-  localstack:
-    image: localstack/localstack:3
-    container_name: submissions-checker-localstack
-    ports:
-      - "4566:4566"
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: submissions-checker-minio
+    command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      - SERVICES=s3
-      - DEFAULT_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"   # console: http://localhost:9001 (minioadmin / minioadmin)
     volumes:
-      - ./docker/localstack/init:/etc/localstack/init/ready.d
+      - minio_data:/data
     healthcheck:
-      test: ["CMD", "awslocal", "s3", "ls"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 20s
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      S3_BUCKET_NAME: submissions-checker
+    entrypoint: ["/bin/sh", "/init.sh"]
+    volumes:
+      - ./docker/minio/init.sh:/init.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
@@ -32,6 +45,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   app:
     build:
@@ -45,10 +60,9 @@ services:
       - LOG_LEVEL=INFO
       - DEBUG=true
       - WATCHFILES_FORCE_POLLING=true
-      - S3_ENDPOINT_URL=http://localstack:4566
-      - S3_PUBLIC_BASE_URL=http://localhost:4566/submissions-checker
-      - AWS_ACCESS_KEY_ID=test
-      - AWS_SECRET_ACCESS_KEY=test
+      - S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
       - HOST_PLUGINS_DIR=${PWD}/plugins
     env_file:
       - .env
@@ -63,14 +77,17 @@ services:
       - ./templates:/app/templates
       - ./static:/app/static
       - ./i18n:/app/i18n
+      # legacy: only for configs applied before migration 0018; remove with the uploads fallback
       - ./plugins:/app/plugins
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp:/tmp
     depends_on:
       postgres:
         condition: service_healthy
-      localstack:
+      minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     command: uvicorn submissions_checker.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src
     dns:
       - 8.8.8.8
@@ -145,3 +162,4 @@ services:
 
 volumes:
   postgres_data:
+  minio_data:

@@ -28,7 +28,7 @@ Full route-by-route catalogue: `docs/feature_catalog.md`.
 ## Stack
 
 FastAPI · SQLAlchemy 2 (async, asyncpg) · PostgreSQL 16 · Alembic · APScheduler ·
-Jinja2 + Tailwind · S3-compatible storage (MinIO / LocalStack) · OpenAI or Anthropic
+Jinja2 + Tailwind · S3-compatible storage (MinIO) · OpenAI or Anthropic
 for AI review · Resend / Brevo / SMTP for email · structlog · Prometheus · uv · ruff · mypy.
 
 ## Run locally
@@ -37,7 +37,7 @@ Requires Docker and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 cp .env.example .env            # set SECRET_KEY (openssl rand -hex 32)
-make up                         # postgres + app + localstack + prometheus + grafana + alloy
+make up                         # postgres + minio + app; observability is `make observability-up`
 make logs-app
 ```
 
@@ -58,7 +58,8 @@ uv run --frozen mypy src/
 ```
 
 Always pass `--frozen`; a bare `uv run` rewrites `uv.lock`. Layers and fixtures are
-described in `tests/README.md`.
+described in `tests/README.md`. Every `make` target and ops script is explained in
+`docs/commands.md`.
 
 ## Layout
 
@@ -78,6 +79,7 @@ templates/  i18n/uk.yml  alembic/  docker/  observability/  tests/  docs/
 
 | Doc | For |
 |---|---|
+| `docs/commands.md` | every `make` target and ops script: what, when, prerequisites, destructive? |
 | `docs/feature_catalog.md` | every feature, who can use it, routes, state machine |
 | `docs/PLUGIN_AUTHORING.md` | writing a subject: config.yml, check/validate scripts, quiz block |
 | `docs/anti-cheat.md` | quiz proctoring rules and presets |

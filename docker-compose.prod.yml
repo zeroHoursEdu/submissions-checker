@@ -15,10 +15,10 @@
 #   minio           192M
 #   app           2x320M = 640M
 #   watchtower       48M
-#   backup           48M   (pg_dump streams to disk; it is a client, not a server)
+#   backup          128M   (rclone; only when the backup profile is on)
 #   alloy            96M   (profile `observability`; nothing when the profile is off)
 #   ------------------------
-#   committed     ~1636M, leaving ~400M for a transient check sandbox
+#   committed     ~1716M, leaving ~320M for a transient check sandbox
 #
 # SANDBOX_MAX_MEMORY (default 384m) is what a check may take out of that headroom.
 # Re-do this arithmetic whenever a service is added or a limit is raised.
@@ -87,7 +87,14 @@ services:
       SANDBOX_MAX_MEMORY: ${SANDBOX_MAX_MEMORY:-384m}
       SANDBOX_MAX_CPUS: ${SANDBOX_MAX_CPUS:-1.0}
       # Host-absolute: the daemon resolves sandbox bind mounts on the host, not here.
-      HOST_PLUGINS_DIR: "${HOST_PLUGINS_DIR:?absolute host path to the plugins directory}"
+      # Optional now that config trees live in Postgres and are unpacked on demand into
+      # PLUGIN_CACHE_DIR — set it only to keep reading configs applied before 0018.
+      HOST_PLUGINS_DIR: "${HOST_PLUGINS_DIR:-}"
+      # Where check workers unpack a subject's stored config archive for the sandbox.
+      # Must be the same path inside the app container and on the host, since the
+      # daemon resolves the sandbox's bind mount on the host — hence the /tmp:/tmp
+      # mount below rather than a container-local directory.
+      PLUGIN_CACHE_DIR: /tmp/subchk-plugins
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
@@ -115,14 +122,16 @@ services:
       # Same path inside and out: the daemon resolves the sandbox's /output bind mount
       # on the host, so a container-only path would not exist from its point of view.
       - /tmp:/tmp
-      # Writable: the app OWNS this tree. Applying a subject config extracts the
-      # uploaded ZIP to plugins/<subjectCode>/, so a read-only mount fails the apply
-      # after the database has already committed — the subject appears, its files do
-      # not. Read-only belongs one level down, where untrusted checker code actually
-      # runs: docker_sandbox mounts the subject's directory into the sandbox as :ro.
-      - ${HOST_PLUGINS_DIR}:/app/plugins
-      # Shared across replicas: a ZIP received by one replica is read later by whichever
-      # replica drains the outbox. A per-container directory would lose it.
+      # Legacy read-only-in-practice fallback: the app no longer writes here — applying
+      # a subject config stores the ZIP in Postgres and workers unpack it into
+      # PLUGIN_CACHE_DIR instead (see docker_sandbox / plugin_cache). This mount only
+      # keeps serving configs applied before migration 0018 that still expect a plugins/
+      # tree on disk. Defaults to ./plugins so the service starts with no host path
+      # configured at all; phase 2 removes this mount entirely.
+      - ${HOST_PLUGINS_DIR:-./plugins}:/app/plugins
+      # Legacy read-only fallback for submission ZIPs uploaded before object storage:
+      # kept until `migrate_uploads` reports 0 missing across every replica; phase 2
+      # removes it.
       - uploads:/app/uploads
     group_add:
       # Host docker group id — grants socket access without running the app as root.
@@ -285,6 +294,10 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
+  # Opt-in: COMPOSE_PROFILES=backup in .env (comma-join with observability). Backups go
+  # only to $RCLONE_REMOTE (Google Drive) — a copy on this disk would die with it. Env uses
+  # `:-` not `:?`: compose interpolates profiled services even when they are off.
+  # Runbook: docs/deployment.md#backups-and-restore; scripts/ops/*-prod-*.sh wrap it.
   backup:
     build:
       context: .
@@ -296,27 +309,38 @@ services:
     # there should not be: the image is two packages on top of alpine and is not
     # worth a registry round trip.
     pull_policy: build
+    profiles: ["backup"]
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${BACKUP_TZ:-Europe/Kyiv}
+      BACKUP_CRON: ${BACKUP_CRON:-0 */6 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      RCLONE_CONFIG: /config/rclone/rclone.conf
+      POSTGRES_USER: ${POSTGRES_USER:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-submissions_checker}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-submissions-checker}
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      RCLONE_CONFIG_MINIO_TYPE: s3
+      RCLONE_CONFIG_MINIO_PROVIDER: Minio
+      RCLONE_CONFIG_MINIO_ENDPOINT: http://minio:9000
+      RCLONE_CONFIG_MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-}
+      RCLONE_CONFIG_MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-}
     volumes:
-      # Point BACKUP_DIR at a second block volume: a backup on the same disk as the
-      # data protects against corruption, not against losing the disk.
-      - ${BACKUP_DIR:-./backups}:/backups
+      # A directory, not the file, and writable: rclone rewrites rclone.conf (atomically,
+      # via a temp file) whenever it refreshes the Drive token.
+      - ${RCLONE_CONFIG_DIR:-./docker/backup/rclone}:/config/rclone
+      # Shared across every container of this service — the long-lived scheduler and any
+      # ad hoc `compose run backup once|restore` — so its flock actually serializes them.
+      # A container-local /tmp lock only serializes a `run` against itself.
+      - backup_lock:/var/lock/backup
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
     networks: [data]
-    mem_limit: 48m
+    mem_limit: 128m
     logging: *default-logging
     labels:
       com.centurylinklabs.watchtower.enable: "false"
@@ -373,3 +397,4 @@ volumes:
   caddy_config:
   uploads:
   alloy_data:
+  backup_lock:

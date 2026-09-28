@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import zipfile
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -303,6 +304,82 @@ async def test_submit_creates_pending_submission_and_outbox(
         .all()
     )
     assert len(outbox) == 1
+
+
+async def test_submit_stores_zip_in_object_storage(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    """The ZIP goes to the object store, not the legacy uploads/ directory, when one
+    is configured — the uploads volume was the one store no backup covered."""
+    from submissions_checker.api.routes import student_portal as student_portal_module
+    from tests.storage_fake import FakeStorage
+
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
+
+    storage = FakeStorage()
+    with patch.object(student_portal_module, "get_storage", return_value=storage):
+        resp = await student_client.post(
+            f"/portal/subjects/{subject.id}/assignments/{sa.id}/submit",
+            files={"file": ("solution.zip", _zip_bytes(), "application/zip")},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303
+
+    sub = (
+        await db.execute(select(Submission).where(Submission.students_assignment_id == sa.id))
+    ).scalar_one()
+    key = f"submissions/{sub.source_metadata['saved_as']}"
+    assert key in storage.objects
+    assert not (student_portal_module.UPLOADS_DIR / sub.source_metadata["saved_as"]).exists()
+
+
+async def test_submit_similarity_reads_classmate_zip_from_object_storage(
+    student_client: AsyncClient, db, student_user, make_student
+) -> None:
+    """Upload-time similarity must compare against a classmate ZIP that lives only in
+    the object store — there is no local copy of it to fall back to."""
+    from submissions_checker.api.routes import student_portal as student_portal_module
+    from tests.storage_fake import FakeStorage
+
+    await _consent(db, student_user.student_id)
+    subject = await _make_subject(db)
+    await _enroll(db, student_user.student_id, subject.id)
+    sub_a = await _make_assignment(db, subject.id)
+    sa = await _make_student_assignment(db, student_user.student_id, sub_a.id)
+
+    classmate = await make_student()
+    await _enroll(db, classmate.id, subject.id)
+    classmate_sa = await _make_student_assignment(db, classmate.id, sub_a.id)
+
+    zip_bytes = _zip_bytes()
+    storage = FakeStorage()
+    storage.objects["submissions/classmate.zip"] = zip_bytes
+    db.add(
+        Submission(
+            students_assignment_id=classmate_sa.id,
+            source_type=SubmissionSourceType.ZIP_UPLOAD,
+            source_metadata={"saved_as": "classmate.zip", "original_filename": "x.zip"},
+            status=SubmissionStatus.COMPLETED,
+        )
+    )
+    await db.commit()
+
+    with patch.object(student_portal_module, "get_storage", return_value=storage):
+        resp = await student_client.post(
+            f"/portal/subjects/{subject.id}/assignments/{sa.id}/submit",
+            files={"file": ("solution.zip", zip_bytes, "application/zip")},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303
+
+    sub = (
+        await db.execute(select(Submission).where(Submission.students_assignment_id == sa.id))
+    ).scalar_one()
+    assert sub.source_metadata["similarity_score"] == 1.0
 
 
 async def test_submit_non_zip_rejected_400(student_client: AsyncClient, db, student_user) -> None:

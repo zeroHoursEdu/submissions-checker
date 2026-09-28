@@ -8,6 +8,7 @@ the core's outcome is what lands in submission.test_results.
 
 from __future__ import annotations
 
+import io
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,16 @@ from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.services import check_core
 from submissions_checker.workers.tasks import check_tasks
+
+
+def _plugin_zip() -> bytes:
+    """A minimal archive materialize_plugin_tree can extract for the config's subjectCode."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("config.yml", "subjectCode: demo\n")
+        zf.writestr("assignments/lab1/check_common.py", "print('ok')\n")
+    return buf.getvalue()
+
 
 _CONFIG = {
     "subjectCode": "demo",
@@ -105,7 +116,7 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         students_assignment=student_assignment,
         squad_id=None,
     )
-    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
+    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG, zip_data=_plugin_zip())
     db = _FakeDB(submission, config_record)
 
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
@@ -115,8 +126,10 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         lambda: SimpleNamespace(
             plugins_dir=str(tmp_path),
             host_plugins_dir=None,
+            plugin_cache_dir=str(tmp_path / "cache"),
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
 
@@ -141,7 +154,7 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
     # Core received the resolved plan (variant check_command from variant 3).
     assert isinstance(recorded["plan"], check_core.CheckPlan)
     assert recorded["plan"].variant_check == "assignments/lab1/check.py"
-    assert recorded["plugin_dir"] == Path(str(tmp_path)) / "demo"
+    assert recorded["plugin_dir"].parent == Path(str(tmp_path)) / "cache"
 
     # Worker persisted exactly the core's outcome, plus the pinned config version.
     assert submission.test_results == {
@@ -169,7 +182,7 @@ async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None
         test_results=None,
         students_assignment=student_assignment,
     )
-    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
+    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG, zip_data=_plugin_zip())
     db = _FakeDB(submission, config_record)
     monkeypatch.setattr(
         check_tasks,
@@ -177,8 +190,10 @@ async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None
         lambda: SimpleNamespace(
             plugins_dir=str(tmp_path),
             host_plugins_dir=None,
+            plugin_cache_dir=str(tmp_path / "cache"),
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
 
@@ -214,7 +229,7 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
         test_results=None,
         students_assignment=student_assignment,
     )
-    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG)
+    config_record = SimpleNamespace(id=99, version=2, config=_CONFIG, zip_data=_plugin_zip())
     db = _FakeDB(submission, config_record)
 
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
@@ -224,8 +239,10 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
         lambda: SimpleNamespace(
             plugins_dir=str(tmp_path),
             host_plugins_dir=None,
+            plugin_cache_dir=str(tmp_path / "cache"),
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
 
@@ -278,7 +295,7 @@ async def test_worker_refuses_path_like_subject_code(tmp_path, monkeypatch) -> N
         students_assignment=student_assignment,
     )
     evil = {**_CONFIG, "subjectCode": "../templates"}
-    db = _FakeDB(submission, SimpleNamespace(id=99, version=2, config=evil))
+    db = _FakeDB(submission, SimpleNamespace(id=99, version=2, config=evil, zip_data=_plugin_zip()))
 
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(
@@ -287,8 +304,10 @@ async def test_worker_refuses_path_like_subject_code(tmp_path, monkeypatch) -> N
         lambda: SimpleNamespace(
             plugins_dir=str(tmp_path),
             host_plugins_dir=None,
+            plugin_cache_dir=str(tmp_path / "cache"),
             sandbox_max_memory="512m",
             sandbox_max_cpus=1.0,
+            s3_endpoint_url=None,
         ),
     )
     called: list = []

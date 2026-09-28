@@ -13,7 +13,7 @@ from typing import Any
 
 import bcrypt
 from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import Select, and_, cast, false, func, nullsfirst, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
@@ -69,7 +69,8 @@ from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
 from submissions_checker.services.squads import SquadError
-from submissions_checker.services.storage import StorageService
+from submissions_checker.services.storage import StorageService, get_storage
+from submissions_checker.services.submission_files import read_submission_zip
 from submissions_checker.utils.csv_export import csv_safe
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
@@ -154,8 +155,7 @@ async def apply_subject_config(
     settings: AppSettings,
     config_zip: UploadFile,
 ) -> RedirectResponse:
-    storage = StorageService(settings) if settings.s3_endpoint_url else None
-    service = ConfigApplyService(storage, plugins_dir=Path(settings.plugins_dir))
+    service = ConfigApplyService(get_storage(settings))
     try:
         zip_bytes = await config_zip.read()
         result = await service.apply(zip_bytes, owner_id=current_user.user_id, db=db)
@@ -651,6 +651,7 @@ async def teacher_similarity_report(
     sa_id: int,
     db: DBSession,
     current_user: TeacherUser,
+    settings: AppSettings,
     min_score: float = Query(0.5, alias="min"),
 ) -> HTMLResponse:
     """Who matches whom: pairwise token similarity across the latest ZIP per student."""
@@ -698,27 +699,34 @@ async def teacher_similarity_report(
         )
         .where(SubjectsStudents.subject_id == subject_id, Student.type == EntityType.REAL)
     )
-    names: dict[int, str] = {}
-    paths: dict[int, Path] = {}
+    # Candidate rows are counted before anything is downloaded: the cap exists to bound
+    # how much object storage traffic one report can trigger, so it has to be checked
+    # against the row count, not against however many downloads happened to succeed.
+    candidates: dict[int, tuple[str, str]] = {}
     for r in rows:
         saved_as = (r.source_metadata or {}).get("saved_as")
-        if not saved_as:
-            continue
-        path = UPLOADS_DIR / saved_as
-        if path.is_file():
-            names[r.sa_row_id] = r.full_name
-            paths[r.sa_row_id] = path
+        if saved_as:
+            candidates[r.sa_row_id] = (r.full_name, saved_as)
 
-    too_many = len(paths) > _SIMILARITY_MAX_ITEMS
+    too_many = len(candidates) > _SIMILARITY_MAX_ITEMS
+    names: dict[int, str] = {}
+    tokens: dict[int, frozenset[str]] = {}
+    if not too_many:
+        storage = get_storage(settings)
+        for sa_row_id, (full_name, saved_as) in candidates.items():
+            # Tokenize each ZIP as soon as it is downloaded and let the bytes go out of
+            # scope immediately: keeping every full ZIP in memory until the whole batch
+            # finished downloading is what made this endpoint OOM a 320MB replica at 300
+            # candidates. The token set is far smaller than the archive it came from.
+            data = await read_submission_zip(storage, saved_as, UPLOADS_DIR)
+            if data is not None:
+                names[sa_row_id] = full_name
+                tokens[sa_row_id] = await asyncio.to_thread(token_set_for_zip, data)
+
     pairs: list[dict[str, Any]] = []
-    if not too_many and len(paths) >= 2:
-
-        def _compute() -> list[tuple[int, int, float]]:
-            tokens = {k: token_set_for_zip(p) for k, p in paths.items()}
-            return pairwise_similarity(tokens)
-
+    if not too_many and len(tokens) >= 2:
         threshold = max(0.0, min(min_score, 1.0))
-        for a, b, score in await asyncio.to_thread(_compute):
+        for a, b, score in await asyncio.to_thread(pairwise_similarity, tokens):
             if score < threshold:
                 break
             pairs.append(
@@ -734,7 +742,7 @@ async def teacher_similarity_report(
             "subject_id": subject_id,
             "pairs": pairs,
             "min": min_score,
-            "compared": len(paths),
+            "compared": len(tokens),
             "too_many": too_many,
         },
     )
@@ -1301,12 +1309,30 @@ async def teacher_review_submission(
     )
 
 
+def _attachment_header(name: str) -> str:
+    """A Content-Disposition value for *name*, exactly as Starlette's FileResponse builds one.
+
+    ``original_filename`` is student-controlled, so this cannot just ASCII-check and then
+    interpolate raw: an ASCII name containing ``"``, ``;`` or a backslash could inject a second
+    ``filename`` parameter into the header. Starlette's own rule is what actually closes that —
+    quote the name, and fall back to the RFC 5987 ``filename*=utf-8''…`` form whenever quoting
+    changed anything (which covers non-ASCII originals — Ukrainian is common here — and any
+    character quoting escapes), using the plain ``filename="…"`` form only when the name needed
+    no escaping at all.
+    """
+    quoted = urllib.parse.quote(name)
+    if quoted != name:
+        return f"attachment; filename*=utf-8''{quoted}"
+    return f'attachment; filename="{name}"'
+
+
 @router.get("/submissions/{submission_id}/download")
 async def teacher_download_submission(
     submission_id: int,
     db: DBSession,
     current_user: TeacherUser,
-) -> FileResponse:
+    settings: AppSettings,
+) -> Response:
     """Serve the student's uploaded archive to the reviewing teacher.
 
     Under the quiz-first review modes nothing runs the submission, so reading the attached
@@ -1334,17 +1360,15 @@ async def teacher_download_submission(
     if not saved_as:
         raise HTTPException(status_code=404, detail="Submission has no stored file")
 
-    uploads_root = UPLOADS_DIR.resolve()
-    path = (uploads_root / saved_as).resolve()
-    # saved_as is server-generated, but never trust a stored path to stay inside its root.
-    if not path.is_file() or uploads_root not in path.parents:
+    data = await read_submission_zip(get_storage(settings), saved_as, UPLOADS_DIR)
+    if data is None:
         raise HTTPException(status_code=404, detail="Submission file is no longer available")
 
-    original = (submission.source_metadata or {}).get("original_filename") or path.name
-    return FileResponse(
-        path,
+    original = (submission.source_metadata or {}).get("original_filename") or saved_as
+    return Response(
+        content=data,
         media_type="application/zip",
-        filename=Path(original).name,
+        headers={"Content-Disposition": _attachment_header(Path(original).name)},
     )
 
 

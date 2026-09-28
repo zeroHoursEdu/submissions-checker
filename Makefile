@@ -1,164 +1,140 @@
-.PHONY: help install dev up down logs test test-integration test-unit lint format clean \
-	observability-up observability-down alloy-logs dashboards-json dashboards alerting
+# Thin aliases. Logic lives in scripts/ (documented in docs/commands.md); run `make help`.
+UV := uv run --frozen --extra dev
+E2E_ENV := E2E_APP_URL=http://localhost:8001 \
+	E2E_DB_URL=postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e
+SHELLCHECK := docker run --rm -v "$(CURDIR):/mnt" -w /mnt koalaman/shellcheck:stable
 
-help: ## Show this help message
-	@echo "Available commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+.PHONY: help install setup vendor-assets up down logs logs-app db-shell health api-docs \
+	test test-unit test-integration test-functional test-ops test-backup \
+	lint lint-fix format format-check type-check shellcheck quality clean \
+	e2e e2e-up e2e-down e2e-logs \
+	observability-up observability-down alloy-logs dashboards-json dashboards alerting \
+	prod-db prod-backup prod-backup-status
 
-venv: ## Create virtual environment
-	@if [ ! -d .venv ]; then \
-		echo "Creating virtual environment..."; \
-		uv venv; \
-		echo "✅ Virtual environment created at .venv"; \
-	else \
-		echo "✅ Virtual environment already exists at .venv"; \
-	fi
+help: ## List targets (details: docs/commands.md)
+	@awk 'BEGIN {FS = ":.*?## "} /^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5)} \
+		/^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-activate: ## Show how to activate virtual environment
-	source .venv/bin/activate
+##@ Dev
+install: ## Install locked Python deps into .venv (after pulling a lockfile change)
+	uv sync --frozen --extra dev
 
-install: venv ## Install dependencies with uv (creates venv if needed)
-	uv pip install -e ".[dev]"
-
-dev: ## Start development server with hot reload
-	docker compose up app
-
-vendor-assets: ## Download the self-hosted proctoring models into static/vendor/
-	python3 scripts/fetch_vendor_assets.py
-
-up: vendor-assets ## Start all Docker services (postgres and app)
-	docker compose up -d
-
-down: ## Stop all Docker services
-	docker compose down
-
-logs: ## View logs from all services
-	docker compose logs -f
-
-logs-app: ## View logs from app service
-	docker compose logs -f app
-
-test: ## Run all tests (unit + integration + functional) with coverage. Needs Docker.
-	pytest --cov=submissions_checker --cov-report=term-missing --cov-report=html
-
-test-unit: ## Run unit tests only (fast, no Docker)
-	pytest tests/unit/ -v
-
-test-integration: ## Run integration tests only (needs Docker for testcontainers)
-	pytest tests/integration/ -v
-
-test-functional: ## Run functional API tests only (real app + Postgres container)
-	pytest tests/functional/ -v
-
-test-watch: ## Run tests in watch mode
-	pytest --watch
-
-db-shell: ## Open PostgreSQL shell
-	docker compose exec postgres psql -U postgres -d submissions_checker
-
-lint: ## Run Ruff linting
-	ruff check src/ tests/
-
-lint-fix: ## Run Ruff linting with auto-fix
-	ruff check --fix src/ tests/
-
-format: ## Format code with Ruff
-	ruff format src/ tests/
-
-format-check: ## Check code formatting without modifying files
-	ruff format --check src/ tests/
-
-type-check: ## Run mypy type checking
-	mypy src/
-
-quality: lint format-check type-check ## Run all code quality checks
-
-shell: ## Open Python shell with app context
-	docker compose run --rm app python
-
-clean: ## Clean up generated files
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name ".coverage" -delete
-
-e2e: vendor-assets ## Run E2E tests (headless). Options: TAGS=@tag SCENARIO="name" FILE=features/foo.feature
-	@echo "Starting E2E stack..."
-	docker compose -f docker-compose.e2e.yml up -d --build --wait
-	@echo "Running E2E tests..."
-	E2E_APP_URL=http://localhost:8001 \
-	E2E_DB_URL=postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e \
-	uv run --extra e2e pytest -c pytest-e2e.ini tests/e2e/ -v \
-		$(if $(TAGS),-m "$(TAGS)",) \
-		$(if $(SCENARIO),-k "$(SCENARIO)",) \
-		$(if $(FILE),$(FILE),) \
-		|| (docker compose -f docker-compose.e2e.yml down; exit 1)
-	docker compose -f docker-compose.e2e.yml down
-
-e2e-headed: ## Run E2E tests with browser visible (for debugging)
-	@echo "Starting E2E stack..."
-	docker compose -f docker-compose.e2e.yml up -d --build --wait
-	@echo "Running E2E tests (headed)..."
-	E2E_APP_URL=http://localhost:8001 \
-	E2E_DB_URL=postgresql://postgres:postgres@localhost:5435/submissions_checker_e2e \
-	uv run --extra e2e pytest -c pytest-e2e.ini tests/e2e/ -v --headed \
-		$(if $(TAGS),-m "$(TAGS)",) \
-		$(if $(SCENARIO),-k "$(SCENARIO)",) \
-		$(if $(FILE),$(FILE),) \
-		|| (docker compose -f docker-compose.e2e.yml down; exit 1)
-	docker compose -f docker-compose.e2e.yml down
-
-e2e-up: ## Start E2E Docker stack without running tests
-	docker compose -f docker-compose.e2e.yml up -d --build --wait
-
-e2e-down: ## Stop E2E Docker stack
-	docker compose -f docker-compose.e2e.yml down
-
-e2e-logs: ## View E2E app logs
-	docker compose -f docker-compose.e2e.yml logs -f app-e2e
-
-setup: vendor-assets ## Run development environment setup
+setup: vendor-assets ## First-time setup: install deps, create .env, start postgres
 	./dev_setup.sh
 
-build: ## Build Docker images
-	docker compose build
+vendor-assets: ## Fetch proctoring models into static/vendor/ (idempotent; up runs it)
+	python3 scripts/fetch_vendor_assets.py
 
-rebuild: ## Rebuild Docker images from scratch
-	docker compose build --no-cache
+up: vendor-assets ## Start dev stack: postgres, minio, app on :8000 (hot reload)
+	docker compose up -d
 
-ps: ## Show running containers
-	docker compose ps
+down: ## Stop dev stack (data volumes kept)
+	docker compose down
 
-health: ## Check health of all services
-	@echo "Checking service health..."
-	@curl -f http://localhost:8000/health || echo "❌ App health check failed"
-	@curl -f http://localhost:8000/health/ready || echo "❌ App readiness check failed"
+logs: ## Follow all dev logs
+	docker compose logs -f
 
-api-docs: ## Open API documentation in browser
-	@echo "Opening API docs at http://localhost:8000/docs"
-	@open http://localhost:8000/docs 2>/dev/null || xdg-open http://localhost:8000/docs 2>/dev/null || echo "Please open http://localhost:8000/docs in your browser"
+logs-app: ## Follow app log only
+	docker compose logs -f app
 
-# --- Observability (docs/observability.md) -----------------------------------------------
+db-shell: ## psql into the dev database
+	docker compose exec postgres psql -U postgres -d submissions_checker
 
-observability-up: ## Prometheus + Grafana + Alloy next to the app; dashboards at http://localhost:3000
+health: ## Probe /health and /health/ready of the dev app
+	@curl -fsS http://localhost:8000/health && echo
+	@curl -fsS http://localhost:8000/health/ready && echo
+
+api-docs: ## Open Swagger UI of the dev app
+	@xdg-open http://localhost:8000/docs 2>/dev/null || open http://localhost:8000/docs 2>/dev/null || echo http://localhost:8000/docs
+
+##@ Test
+test: ## Whole Python suite with coverage (~6 min, needs Docker)
+	$(UV) pytest --cov=submissions_checker --cov-report=term-missing --cov-report=html
+
+test-unit: ## Unit tests only (seconds, no Docker)
+	$(UV) pytest tests/unit -q
+
+test-integration: ## Integration tests (testcontainers Postgres)
+	$(UV) pytest tests/integration -q
+
+test-functional: ## Functional API tests (real app over ASGI)
+	$(UV) pytest tests/functional -q
+
+test-ops: ## Offline checks of scripts/ops (no network)
+	bash tests/ops/test_ops_scripts.sh
+
+test-backup: ## Backup -> destroy -> restore roundtrip in an isolated compose project (~1 min)
+	bash tests/ops/backup_roundtrip.sh
+
+##@ Quality
+lint: ## Ruff lint
+	$(UV) ruff check src tests
+
+lint-fix: ## Ruff lint with autofix
+	$(UV) ruff check --fix src tests
+
+format: ## Ruff format (writes)
+	$(UV) ruff format src tests
+
+format-check: ## Ruff format check (CI)
+	$(UV) ruff format --check src tests
+
+type-check: ## mypy on src
+	$(UV) mypy src
+
+shellcheck: ## shellcheck all shell scripts (via Docker)
+	$(SHELLCHECK) docker/backup/backup.sh docker/minio/init.sh scripts/ops/*.sh tests/ops/*.sh dev_setup.sh
+
+quality: lint format-check type-check shellcheck ## Everything CI checks except tests
+
+clean: ## Remove caches and coverage output
+	find . -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache -o -name htmlcov \) -prune -exec rm -rf {} +
+	rm -f .coverage coverage.xml
+
+##@ E2E
+e2e: vendor-assets ## Browser tests. TAGS=@tag SCENARIO="name" FILE=path HEADED=1
+	docker compose -f docker-compose.e2e.yml up -d --build --wait
+	$(E2E_ENV) uv run --frozen --extra e2e pytest -c pytest-e2e.ini tests/e2e/ -v \
+		$(if $(HEADED),--headed,) $(if $(TAGS),-m "$(TAGS)",) \
+		$(if $(SCENARIO),-k "$(SCENARIO)",) $(if $(FILE),$(FILE),) \
+		|| (docker compose -f docker-compose.e2e.yml down; exit 1)
+	docker compose -f docker-compose.e2e.yml down
+
+e2e-up: ## Start the e2e stack only (to debug against :8001)
+	docker compose -f docker-compose.e2e.yml up -d --build --wait
+
+e2e-down: ## Stop the e2e stack
+	docker compose -f docker-compose.e2e.yml down
+
+e2e-logs: ## Follow e2e app log
+	docker compose -f docker-compose.e2e.yml logs -f app-e2e
+
+##@ Observability (docs/observability.md)
+observability-up: ## Local Prometheus+Grafana+Alloy; Grafana at :3000
 	docker compose --profile observability up -d prometheus grafana alloy
-	@echo "Grafana:    http://localhost:3000/d/subchk-technical  and  /d/subchk-goals"
-	@echo "Prometheus: http://localhost:9090   Alloy: http://localhost:12345"
 
 observability-down: ## Stop the local observability harness
 	docker compose --profile observability rm -sf prometheus grafana alloy
 
-alloy-logs: ## Follow Alloy's log — where a rejected push shows up
+alloy-logs: ## Follow Alloy (rejected pushes show here)
 	docker compose --profile observability logs -f alloy
 
-dashboards-json: ## Regenerate observability/grafana/*.json and alerting/*.yaml (never hand-edit them)
+dashboards-json: ## Regenerate dashboard/alert JSON (never hand-edit them)
 	python3 observability/grafana/build_dashboards.py
 	python3 observability/grafana/build_alerting.py
 
-dashboards: ## Push the two dashboards to Grafana Cloud (GRAFANA_URL + GRAFANA_API_TOKEN in .env)
+dashboards: ## Push dashboards to Grafana Cloud (GRAFANA_* in .env)
 	@set -a; . ./.env; set +a; python3 observability/grafana/push.py dashboards
 
-alerting: ## Push Telegram contact point + 4 alert rules to Grafana Cloud (also TELEGRAM_* in .env)
+alerting: ## Push contact point + alert rules to Grafana Cloud
 	@set -a; . ./.env; set +a; python3 observability/grafana/push.py alerting
+
+##@ Prod ops (need ssh/prod.env; restore has no target on purpose)
+prod-db: ## Read-only psql on prod (scripts/ops/connect-to-prod-db.sh)
+	scripts/ops/connect-to-prod-db.sh
+
+prod-backup: ## Take a prod backup now (before risky deploys)
+	scripts/ops/run-prod-backup.sh --now
+
+prod-backup-status: ## Age of the last good prod backup
+	scripts/ops/run-prod-backup.sh --status

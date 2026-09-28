@@ -13,17 +13,9 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
-# Create virtual environment if it doesn't exist
-if [ ! -d .venv ]; then
-    echo "🔧 Creating virtual environment..."
-    uv venv
-    echo "✅ Virtual environment created"
-    echo ""
-fi
-
-# Install dependencies
-echo "📦 Installing dependencies with uv..."
-uv pip install -e ".[dev]"
+# Install dependencies from the lockfile (creates .venv if needed; never rewrites uv.lock)
+echo "📦 Installing locked dependencies with uv..."
+uv sync --frozen --extra dev
 echo "✅ Dependencies installed"
 echo ""
 
@@ -60,26 +52,17 @@ echo ""
 echo "📚 Next steps:"
 echo ""
 echo "  1. Update .env file with your configuration:"
-echo "     - Set GITHUB_WEBHOOK_SECRET"
-echo "     - Set OPENAI_API_KEY (if using AI features)"
+echo "     - Set SECRET_KEY (openssl rand -hex 32)"
+echo "     - Set OPENAI_API_KEY or ANTHROPIC_API_KEY (if using AI review)"
 echo "     - Update other settings as needed"
 echo ""
-echo "  2. Start development server (migrations run automatically on startup):"
-echo "     make dev"
+echo "  2. Start the dev stack (migrations run automatically on startup):"
+echo "     make up"
 echo ""
 echo "  3. View API documentation:"
 echo "     http://localhost:8000/docs"
 echo ""
 echo "  4. Run tests:"
-echo "     make test"
+echo "     make test-unit"
 echo ""
-echo "Available make commands:"
-echo "  make install        - Install dependencies"
-echo "  make dev           - Start development server"
-echo "  make up            - Start all Docker services"
-echo "  make down          - Stop all Docker services"
-echo "  make test          - Run tests"
-echo "  make migrate       - Run migrations"
-echo "  make lint          - Run linting"
-echo "  make format        - Format code"
-echo ""
+echo "See 'make help' or docs/commands.md for every command."

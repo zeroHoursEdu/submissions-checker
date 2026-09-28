@@ -15,6 +15,7 @@ and tests/integration/test_teacher_digest.py.
 
 from __future__ import annotations
 
+import io
 import zipfile
 from contextlib import asynccontextmanager
 from datetime import date
@@ -855,6 +856,30 @@ def _write_zip(path: Path) -> None:
         zf.writestr("main.py", "print('hi')\n")
 
 
+def _plugin_zip() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("config.yml", "subjectCode: sub\n")
+        zf.writestr("check.py", "print('ok')\n")
+    return buf.getvalue()
+
+
+@pytest.fixture(autouse=True)
+def _default_plugin_cache_dir(test_settings, tmp_path, monkeypatch):
+    """Keep every test's plugin cache under this test's own tmp_path.
+
+    `_seed_check_submission` seeds a real archive by default, so any test that reaches
+    the sandbox path now materializes a tree — it must never land in the real default
+    (`/tmp/subchk-plugins`), and `test_settings` is a session-scoped fixture shared by
+    every test in this module.
+    """
+    monkeypatch.setattr(test_settings, "plugin_cache_dir", str(tmp_path / "plugin-cache"))
+
+
+# Sentinel distinguishing "not passed" from an explicit `zip_data=None` (no stored archive).
+_DEFAULT = object()
+
+
 async def _seed_check_submission(
     db: AsyncSession,
     suffix: str,
@@ -862,6 +887,7 @@ async def _seed_check_submission(
     review_mode: str = "tests_only",
     saved_as: str = "x.zip",
     with_config: bool = True,
+    zip_data: bytes | None = _DEFAULT,  # type: ignore[assignment]
 ):
     """Submission in PENDING with a plugin config and a real ZIP on disk."""
     student, teacher, sa, enr, sub, subject = await _seed_submission(
@@ -884,6 +910,7 @@ async def _seed_check_submission(
                     }
                 },
             },
+            zip_data=_plugin_zip() if zip_data is _DEFAULT else zip_data,
         )
         db.add(cfg)
         await db.flush()
@@ -923,6 +950,53 @@ async def test_check_validation_failed(
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.VALIDATION_FAILED
     assert sub.test_results == {"check_reason": "bad files"}
+
+
+@pytest.mark.asyncio
+async def test_check_reads_zip_from_object_storage(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """With an object store configured the worker reads the ZIP from it, not from disk."""
+    from tests.storage_fake import FakeStorage
+
+    zip_path = tmp_path / "src.zip"
+    _write_zip(zip_path)
+    storage = FakeStorage()
+    storage.objects["submissions/s3.zip"] = zip_path.read_bytes()
+    sub = await _seed_check_submission(db_session, "s3", saved_as="s3.zip")
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path / "empty")
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    monkeypatch.setattr(check_tasks, "get_storage", lambda _s: storage)
+    _patch_run_check(monkeypatch, check_core.CheckOutcome("passed", 1, 1, []))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    await _process(db_session, monkeypatch, message)
+
+    await db_session.refresh(sub)
+    assert sub.status != SubmissionStatus.VALIDATION_FAILED
+
+
+@pytest.mark.asyncio
+async def test_check_zip_missing_everywhere_fails_validation(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    sub = await _seed_check_submission(db_session, "gone", saved_as="gone.zip")
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(monkeypatch, check_core.CheckOutcome("passed", 1, 1, []))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.VALIDATION_FAILED
+    assert "Could not open submitted ZIP" in sub.test_results["check_reason"]
 
 
 @pytest.mark.asyncio
@@ -1341,3 +1415,112 @@ async def test_check_missing_saved_as_raises_and_errors(
     message = await _process(db_session, monkeypatch, message)
 
     assert message.state == OutboxMessageState.ERROR
+
+
+@pytest.mark.asyncio
+async def test_check_uses_tree_unpacked_from_zip_data(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """The archive stored on the config row is unpacked into the plugin cache and mounted."""
+    zip_path = tmp_path / "z.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(db_session, "zd", saved_as="z.zip", zip_data=_plugin_zip())
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(test_settings, "plugin_cache_dir", str(tmp_path / "cache"))
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    seen: dict = {}
+
+    async def fake_run_check(*, plan, submission_dir, plugin_dir, sandbox):
+        seen["plugin_dir"] = plugin_dir
+        seen["has_check"] = (plugin_dir / "check.py").is_file()
+        return check_core.CheckOutcome("passed", 1, 1, [])
+
+    monkeypatch.setattr(check_tasks.check_core, "run_check", fake_run_check)
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    await _process(db_session, monkeypatch, message)
+
+    assert seen["plugin_dir"].parent == tmp_path / "cache"
+    assert seen["has_check"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_without_zip_data_and_no_legacy_tree_fails(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """No stored archive and no legacy tree on disk -> validation fails with a clear reason."""
+    zip_path = tmp_path / "n.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(db_session, "nz", saved_as="n.zip", zip_data=None)
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(test_settings, "plugins_dir", str(tmp_path / "no-plugins"))
+    monkeypatch.setattr(test_settings, "host_plugins_dir", None)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(monkeypatch, check_core.CheckOutcome("passed", 1, 1, []))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    await _process(db_session, monkeypatch, message)
+
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.VALIDATION_FAILED
+    assert sub.test_results["check_reason"] == check_tasks.MISSING_ARCHIVE_REASON
+
+
+@pytest.mark.asyncio
+async def test_check_without_zip_data_uses_legacy_tree(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """Configs applied before migration 0018 have no archive — the extracted tree under
+    plugins_dir is still honoured, resolved via the host path for the sandbox mount."""
+    zip_path = tmp_path / "l.zip"
+    _write_zip(zip_path)
+    (tmp_path / "plugins" / "sub").mkdir(parents=True)
+    sub = await _seed_check_submission(db_session, "lg", saved_as="l.zip", zip_data=None)
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(test_settings, "plugins_dir", str(tmp_path / "plugins"))
+    monkeypatch.setattr(test_settings, "host_plugins_dir", "/host/plugins")
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    seen: dict = {}
+
+    async def fake_run_check(*, plan, submission_dir, plugin_dir, sandbox):
+        seen["plugin_dir"] = plugin_dir
+        return check_core.CheckOutcome("passed", 1, 1, [])
+
+    monkeypatch.setattr(check_tasks.check_core, "run_check", fake_run_check)
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    await _process(db_session, monkeypatch, message)
+
+    assert seen["plugin_dir"] == Path("/host/plugins/sub")
+
+
+@pytest.mark.asyncio
+async def test_check_without_zip_data_and_relative_plugins_dir_fails(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """A legacy tree can exist on disk, but if plugins_dir is relative and there is no
+    host_plugins_dir override, the host Docker daemon has no absolute path to bind-mount
+    (it cannot resolve a container-relative path) — the legacy fallback must not be used."""
+    zip_path = tmp_path / "n.zip"
+    _write_zip(zip_path)
+    (tmp_path / "plugins" / "sub").mkdir(parents=True)
+    sub = await _seed_check_submission(db_session, "relp", saved_as="n.zip", zip_data=None)
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(test_settings, "plugins_dir", "plugins")
+    monkeypatch.setattr(test_settings, "host_plugins_dir", None)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(monkeypatch, check_core.CheckOutcome("passed", 1, 1, []))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    await _process(db_session, monkeypatch, message)
+
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.VALIDATION_FAILED
+    assert sub.test_results["check_reason"] == check_tasks.MISSING_ARCHIVE_REASON

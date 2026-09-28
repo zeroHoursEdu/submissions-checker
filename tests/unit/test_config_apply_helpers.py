@@ -21,7 +21,7 @@ from submissions_checker.services.config_apply import (
 
 @pytest.fixture
 def svc(tmp_path: Path) -> ConfigApplyService:
-    return ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    return ConfigApplyService(storage=None)
 
 
 # ── _parse_deadline ───────────────────────────────────────────────────────────
@@ -295,9 +295,9 @@ def test_quiz_under_reachable_modes_is_fine(svc: ConfigApplyService, mode: str) 
 
 
 async def test_apply_rejects_path_traversal_subject_code(svc: ConfigApplyService) -> None:
-    """The code becomes ``plugins_dir/<code>`` and is ``os.replace``d into place, so a
-    value like ``../templates`` would overwrite an arbitrary sibling directory. Refused
-    before anything touches the database or the disk."""
+    """The code becomes a path segment in every S3 key (``subjects/<code>/...``), so a
+    value like ``../templates`` would target an arbitrary sibling key. Refused before
+    anything touches the database or S3."""
     import io
     import zipfile
 

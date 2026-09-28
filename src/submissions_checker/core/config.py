@@ -119,6 +119,11 @@ class Settings(BaseSettings):
     # to plugins_dir when unset.
     host_plugins_dir: str | None = None
 
+    # Where check workers unpack a subject's stored config archive for the sandbox. Must be
+    # the same path inside the app container and on the host (the daemon resolves bind
+    # mounts on the host) — /tmp is mounted that way in every compose file.
+    plugin_cache_dir: str = "/tmp/subchk-plugins"
+
     # Upper bound on the sandbox resources a subject's config.yml may request. A subject
     # declaring more than the host can give is clamped to these values rather than being
     # honoured, so one subject cannot exhaust the host for every other subject.
@@ -128,7 +133,7 @@ class Settings(BaseSettings):
 
     # S3-compatible object storage (images and assignment content files)
     s3_bucket_name: str = "submissions-checker"
-    s3_endpoint_url: str | None = None  # set to http://localstack:4566 in dev
+    s3_endpoint_url: str | None = None  # set to http://minio:9000 in dev
     s3_public_base_url: str | None = None  # base URL for constructing public file URLs
     aws_access_key_id: str = "test"
     aws_secret_access_key: str = "test"

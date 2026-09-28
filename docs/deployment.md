@@ -20,6 +20,7 @@ needs no inbound access beyond ports 80 and 443.
 - [Creating the first account](#creating-the-first-account)
 - [Rollback](#rollback)
 - [Backups and restore](#backups-and-restore)
+- [Storage migration (this release)](#storage-migration-this-release)
 - [Memory budget](#memory-budget)
 - [Operations](#operations)
 - [Known exposure and accepted risk](#known-exposure-and-accepted-risk)
@@ -123,6 +124,17 @@ echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swap.conf
 sudo sysctl --system
 ```
 
+RHEL-family hosts (Oracle Linux and similar) run `systemd-tmpfiles` against `/tmp` on a
+timer, aging out files it considers unused — including files this app is actively using
+under `PLUGIN_CACHE_DIR` (`/tmp/subchk-plugins`), which has its own idle-pruning logic in
+`plugin_cache.py` and does not need systemd's help. Exclude that one path (a no-op, and
+harmless, on Ubuntu/Debian hosts, which do not run `systemd-tmpfiles` against `/tmp` by
+default):
+
+```bash
+echo 'x /tmp/subchk-plugins' | sudo tee /etc/tmpfiles.d/subchk-plugins.conf
+```
+
 Open only 80, 443 and SSH. On Oracle Cloud this means **both** the VCN security list and
 the instance firewall — Oracle images ship with iptables rules that silently drop
 traffic the security list allows:
@@ -160,25 +172,24 @@ openssl rand -hex 24   # MINIO_ROOT_PASSWORD
 getent group docker | cut -d: -f3   # DOCKER_GID
 ```
 
-`HOST_PLUGINS_DIR` must be a **host-absolute** path (e.g.
-`/opt/submissions-checker/plugins`). The Docker daemon resolves the sandbox's bind
-mounts on the host, so a path that only exists inside the container will not resolve.
-
-Create it and give it to the container's user. The application image runs as the
-unprivileged `app` user, **uid 10001**, and a bind mount keeps its host ownership —
-so a directory made with `sudo mkdir` is owned by root and the app cannot write to
-it. Applying a subject config then fails with `[Errno 13] Permission denied:
-/app/plugins/.tmp-<subject>-...`, after the subject has already been committed to the
-database.
+`HOST_PLUGINS_DIR` is **optional** — a subject's config tree lives in Postgres
+(`subject_plugin_configs.zip_data`) and is unpacked on demand into
+`PLUGIN_CACHE_DIR` (`/tmp/subchk-plugins`, already wired up in the compose file; there
+is nothing to set for it). Leave `HOST_PLUGINS_DIR` unset unless this host still serves
+a subject whose config was applied before migration 0018 (no stored archive), in which
+case the app reads — never writes — the legacy extracted tree from this path:
 
 ```bash
 sudo mkdir -p /opt/submissions-checker/plugins
-sudo chown -R 10001:10001 /opt/submissions-checker/plugins
+sudo chown -R 10001:10001 /opt/submissions-checker/plugins   # app image runs as uid 10001
 ```
 
-The same applies to `BACKUP_DIR`, which the backup container writes to as root, and
-does *not* apply to `uploads`, which is a named volume and inherits the image's
-ownership automatically.
+If set, it must be a **host-absolute** path: the Docker daemon resolves the sandbox's
+bind mounts on the host, so a path that only exists inside the container will not
+resolve. Left unset, it defaults to `./plugins` next to the compose file. `uploads` (a
+named volume, not a bind mount) and the backup service's `rclone.conf` directory (see
+[Backups and restore](#backups-and-restore)) both manage their own ownership and need
+none of this.
 
 ### 4. Registry access
 
@@ -424,43 +435,319 @@ the migration rule above: the previous release is schema-compatible with the mig
 database by construction. If you ever break that rule, rollback stops being safe, which
 is the real reason the rule exists.
 
+**Rolling back past the storage-migration release strands anything that release alone
+knows how to read.** The previous image never reads MinIO and never reads a stored
+config archive — it only understands the local `uploads` volume and a `plugins/` tree on
+disk. If the rollback happens after this release has already taken traffic:
+
+- **Submissions uploaded since the deploy exist only in MinIO** (`submissions/<saved_as>`
+  in the bucket) — the old code cannot see them. Copy them into the `uploads` volume
+  before (or immediately after) rolling back. `-v uploads:/uploads` on its own is **not**
+  the app's `uploads` volume: `backup` never mounts `uploads` itself, and an ad hoc
+  `-v NAME:/path` on `docker compose run` is only translated to the project-scoped volume
+  (`<project>_uploads`) when the *target* service already references that volume by that
+  name — `backup` doesn't, so Docker would silently create and mount a brand new, empty,
+  unprefixed volume literally named `uploads` instead. Resolve the real name first:
+
+  ```bash
+  UPLOADS_VOL=$(docker volume ls --format '{{.Name}}' | grep -E '_uploads$')
+  echo "${UPLOADS_VOL}"   # must print exactly one line — confirm it before using it below
+
+  docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+    -v "${UPLOADS_VOL}:/uploads" --entrypoint sh backup -c \
+    'rclone copy --transfers 2 --checkers 4 --buffer-size 8M \
+      minio:"$S3_BUCKET_NAME"/submissions /uploads'
+  ```
+
+  (`backup` already carries `RCLONE_CONFIG`/`RCLONE_CONFIG_MINIO_*` and `S3_BUCKET_NAME`
+  in its own environment; `-v "${UPLOADS_VOL}:/uploads"` attaches the app's real `uploads`
+  volume to it for this one run only — the service does not mount it normally.)
+
+- **Configs applied since the deploy exist only as `subject_plugin_configs.zip_data`** —
+  the old code only reads a `plugins/` tree on disk. Once the old image is back up,
+  re-apply each affected subject's config ZIP through the teacher portal; the old code
+  writes it to `plugins/` on apply, same as it always did before this release.
+
 ---
 
 ## Backups and restore
 
-The `backup` service runs on an interval (`BACKUP_INTERVAL_SECONDS`, default daily) and
-captures both stores in the same run:
+Everything the app cannot rebuild lives in exactly two stores — PostgreSQL and the
+MinIO bucket — and both are backed up together, off-host, to a Google Drive folder via
+[rclone](https://rclone.org/). There is nothing on the host's own disk to restore from:
+a copy that lives on the same disk as the data does not survive losing that disk.
 
-- `pg_dump --format=custom` → `$BACKUP_DIR/postgres/<timestamp>.dump`
-- `mc mirror` of the MinIO bucket → `$BACKUP_DIR/minio/<bucket>/`
+Skills `run-prod-backup` and `restore-prod-from-backup` wrap the commands below; use
+them from Claude Code, or run the scripts directly.
 
-Both matter. Restoring only the database leaves snapshot rows pointing at objects that
-no longer exist.
+### What is backed up, and where
 
-Dumps older than `BACKUP_RETENTION_DAYS` are pruned — but **only after a successful
-run**, so a failing backup cannot also delete the last good one.
+The `backup` service (`docker/backup/backup.sh`) runs every 6 hours by default
+(`BACKUP_CRON`, busybox crond) and writes this layout under `$RCLONE_REMOTE`
+(e.g. `gdrive:subchk`):
 
-Point `BACKUP_DIR` at a **second block volume**. A backup on the same disk as the data
-protects against corruption, not against losing the disk.
+```
+postgres/<stamp>.dump          pg_dump --format=custom
+minio/current/…                 live mirror of the bucket
+minio/deleted/<stamp>/…         objects a run's sync removed or overwrote
+pre-restore/<stamp>.dump        DB snapshot taken just before a restore
+pre-restore/<stamp>/            bucket snapshot taken just before a restore
+last-success                    stamp of the last backup that finished cleanly
+```
+
+Both stores matter — restoring only the database leaves rows pointing at objects that
+no longer exist. A run dumps the database first and mirrors the bucket second, so every
+row in a given dump already has its object in the mirror.
+
+Dumps and mirror snapshots older than `BACKUP_RETENTION_DAYS` (default 30) are pruned —
+but **only after a run that succeeded end-to-end**, so a failing backup never deletes
+the last good one. A shared lock (the `backup_lock` volume) means a manual run, the
+cron run and a restore can never overlap.
+
+### Enabling it
+
+The service is **opt-in**: nothing runs, and nothing is written anywhere, unless the
+`backup` profile is on.
+
+1. On your own machine (not the host — this needs a browser to authorize Drive):
+
+   ```bash
+   rclone config
+   # n) New remote, name it "gdrive", type "drive", scope "drive.file", auto config: yes
+   ```
+
+   Confirm where that just wrote the config — do not assume the default path, it
+   varies by OS and by whether you already have an `rclone.conf`:
+
+   ```bash
+   rclone config file
+   ```
+
+2. Create the directory on the host (it is gitignored, so it will not already exist
+   from a fresh clone) and copy the config into it — the directory the compose file
+   mounts is `RCLONE_CONFIG_DIR`, default `./docker/backup/rclone`:
+
+   ```bash
+   ssh "$PROD_SSH" "mkdir -p '$PROD_DIR/docker/backup/rclone'"
+   scp "$(rclone config file | tail -1)" "$PROD_SSH:$PROD_DIR/docker/backup/rclone/rclone.conf"
+   ```
+
+   That directory is mounted **read-write**: rclone rewrites the Drive token into
+   `rclone.conf` whenever it refreshes, so the file cannot be read-only.
+
+3. In the host's `.env`, set `COMPOSE_PROFILES` in exactly the one place
+   `.env.prod.example` has it (a second `COMPOSE_PROFILES=` line further down would
+   silently override this one — plain `.env` files are read top-to-bottom):
+
+   ```bash
+   COMPOSE_PROFILES=backup            # or: observability,backup
+   RCLONE_REMOTE=gdrive:subchk
+   ```
+
+   `RCLONE_REMOTE` must look like `name:path`. A value with no colon is refused at
+   startup — it would mean writing backups onto this same host's disk, which defeats
+   the entire point. (`BACKUP_ALLOW_LOCAL_REMOTE=1` exists only so the test harness can
+   point at a local path; never set it in production.)
+
+4. Build and start the sidecar, then take a backup by hand and confirm it:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file .env build backup
+   docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate backup
+
+   scripts/ops/run-prod-backup.sh --now
+   scripts/ops/run-prod-backup.sh --status
+   ```
+
+   Then check the Drive folder itself before trusting it further.
+
+`scripts/ops/run-prod-backup.sh --status` exits non-zero if the last successful backup
+is older than 12 hours (`BACKUP_MAX_AGE_HOURS` inside the image; not currently wired
+through `.env` — raise it by editing `docker-compose.prod.yml` if 12h is ever too
+tight). `--list` prints available restore points; `--logs` follows the container.
 
 ### Restore
 
-```bash
-# Database
-docker compose -f docker-compose.prod.yml stop app
-docker compose -f docker-compose.prod.yml exec -T postgres \
-  pg_restore --clean --if-exists -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-  < /mnt/backups/postgres/<timestamp>.dump
-docker compose -f docker-compose.prod.yml start app
+**This replaces the live database and bucket.** Use the `restore-prod-from-backup`
+skill, or directly:
 
-# Object storage
-docker run --rm -v /mnt/backups:/backups --network submissions-checker_data quay.io/minio/mc sh -c '
-  mc alias set restore http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
-  mc mirror --overwrite /backups/minio/<bucket> restore/<bucket>'
+```bash
+scripts/ops/restore-prod-from-backup.sh <STAMP|latest> [--yes]
 ```
 
-Verify a restore against a scratch database at least once. A backup that has never been
-restored is a backup you do not know you have.
+`latest` means the stamp in `last-success` — the last backup that finished cleanly, not
+simply the newest dump on the remote (a dump can exist for a run that then failed at
+the bucket sync; restoring that would be a mistake `latest` is designed to avoid).
+
+Each store is snapshotted immediately before it is overwritten, not both up front:
+
+1. Saves the **current** database to `pre-restore/<now>.dump` on the remote, then
+   restores it with `pg_restore --clean --if-exists --no-owner --single-transaction`
+   — a failure here rolls back and leaves the database exactly as it was; nothing
+   downstream (including the bucket) is touched.
+2. Only once the database restore has succeeded: saves the **current** bucket to
+   `pre-restore/<now>/` on the remote, then syncs it from `minio/current` (objects are
+   not point-in-time; anything uploaded after the chosen backup and not yet re-synced
+   is simply overwritten back to the older state — recoverable from
+   `minio/deleted/<stamp>/` if it was ever captured by a run).
+
+The host script also stops the app before any of this and **restarts it even if the
+restore failed**, so a bad restore does not also leave the site down.
+
+It works on a fresh host too (no data, `backup` profile not even enabled yet) — it
+creates the bucket if missing. To restore onto a brand new host: bring up
+`postgres`, `minio` and `minio-init`, put `.env` and `rclone.conf` in place, then run
+the restore script as above.
+
+**Restoring across a migration boundary.** `pg_restore --clean` only drops objects that
+exist *in the dump* — if you restore a dump taken **before** a migration that has since
+run, tables/columns the newer schema added are left behind, and the app's own
+startup migration then fails trying to re-apply what it thinks is missing. If the
+chosen stamp predates a migration you know has run since, drop and recreate the
+database first instead of restoring into it. **Stop the app replicas first** —
+`DROP DATABASE` fails while anything is still connected to it:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env stop app
+# Single-quoted: $POSTGRES_USER/$POSTGRES_DB must expand INSIDE the postgres container
+# (where they are set, from its own `environment:`), not on the host shell, which has
+# no such variables exported — that would silently run `psql -U "" -d postgres -c
+# "DROP DATABASE \"\";"` instead.
+docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE \"$POSTGRES_DB\";"'
+docker compose -f docker-compose.prod.yml --env-file .env exec postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE \"$POSTGRES_DB\";"'
+```
+
+Then run the restore script against the now-empty database as usual — it starts the
+app again itself (even if the restore then fails), so you do not need to bring it back
+up by hand. The only case where you do is if you abort here, after dropping the
+database but before running the restore: `docker compose -f docker-compose.prod.yml
+--env-file .env up -d app` (the app will fail to boot until a restore actually
+populates the database). Ordinary same-schema restores (the common case) need none of
+this.
+
+Verify a restore against a scratch database at least once. A backup that has never
+been restored is a backup you do not know you have.
+
+### Undoing a restore
+
+Every restore snapshots what it is about to overwrite to `pre-restore/<stamp>.dump` and
+`pre-restore/<stamp>/` before touching anything (the `restore` output prints that stamp:
+"current database saved to pre-restore/`<stamp>`.dump"). Restoring the wrong stamp, or
+into the wrong environment, is itself undone by putting that snapshot back — as long as
+`BACKUP_RETENTION_DAYS` has not since pruned it.
+
+There is no single `restore` command for this (it restores from `postgres/<stamp>.dump` +
+`minio/current`, not from `pre-restore/`); do it by hand, stopped/started around it same
+as any restore, with everything run against the `backup` container so rclone and the
+Postgres credentials are already configured there — quote each script in single quotes so
+`$RCLONE_REMOTE`/`$POSTGRES_USER`/etc. expand **inside** the container, not on the host:
+
+```bash
+STAMP=20260928T030158Z   # from the restore's own log line, or:
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+  --entrypoint sh backup -c 'rclone lsf "$RCLONE_REMOTE/pre-restore" | sort'
+
+docker compose -f docker-compose.prod.yml --env-file .env stop app
+# Also stop the long-lived scheduled backup service for the duration: its own cron
+# could otherwise fire a `once` run against the half-restored database/bucket while
+# these manual steps are still in progress (the shared lock only serializes against
+# an overlapping restore/backup — it does not delay a run until this section is done).
+docker compose -f docker-compose.prod.yml --env-file .env stop backup
+
+# Database (--transfers/--checkers/--buffer-size match backup.sh's own $RCLONE_FLAGS —
+# this container's memory limit is 128m)
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+  -e STAMP="${STAMP}" --entrypoint sh backup -c '
+    set -eu
+    rclone copyto --transfers 2 --checkers 4 --buffer-size 8M \
+      "$RCLONE_REMOTE/pre-restore/$STAMP.dump" "/tmp/$STAMP.dump"
+    PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner \
+      --single-transaction --host=postgres --username="$POSTGRES_USER" \
+      --dbname="$POSTGRES_DB" "/tmp/$STAMP.dump"
+    rm -f "/tmp/$STAMP.dump"
+  '
+
+# Bucket
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
+  -e STAMP="${STAMP}" --entrypoint sh backup -c \
+  'rclone sync --transfers 2 --checkers 4 --buffer-size 8M \
+    "$RCLONE_REMOTE/pre-restore/$STAMP" minio:"$S3_BUCKET_NAME"'
+
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup up -d app backup
+```
+
+### Privacy
+
+Drive copies are **not encrypted** — the owner's choice, to keep this simple. Mitigate
+it: turn on 2FA for the Google account, never share the backup folder, and treat the
+Drive account credentials as equivalent to database access. Switching to an rclone
+`crypt` remote later needs no code change here — only a different `RCLONE_REMOTE` and
+a rclone-side wrapper remote.
+
+---
+
+## Storage migration (this release)
+
+Two changes ship together in this release and are both non-breaking for the existing
+host, but need a manual step to finish:
+
+1. **Submission ZIPs move to MinIO.** New uploads are written to the bucket; existing
+   submissions still on local disk (`uploads/<saved_as>`) are read as a fallback until
+   backfilled. After the new image is deployed, run the one-time backfill from the
+   host:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml --env-file .env run --rm app \
+     python -m submissions_checker.cli.migrate_uploads
+   ```
+
+   It is idempotent (already-uploaded objects are skipped) and prints how many it
+   copied, how many were already present, and which submissions it could not find
+   locally. It also lists subjects whose **latest** config predates stored config
+   archives (migration 0018) — **re-apply each one** (upload its config ZIP again
+   through the teacher portal) so its check scripts come from Postgres too, not a
+   plugins/ tree on disk.
+
+2. **Rollout order on the existing host**, so nothing is unavailable mid-migration.
+   Deploy at a quiet time — no deadline due and no quiz running — and do not apply any
+   subject config while the rollout is in progress: a submission or a check that starts
+   on the old replica and is served its response by a new one (or vice versa, during the
+   one-at-a-time Watchtower swap) is the scenario the next step detects and fixes up.
+
+   1. Let Watchtower roll out the new app image (or force it — see
+      [Operations](#operations)).
+   2. Run `migrate_uploads` (above); re-apply any subjects it lists.
+   3. Set up backups: `rclone.conf`, `.env` (`COMPOSE_PROFILES`, `RCLONE_REMOTE`),
+      `build backup` + `up -d --force-recreate backup` — see
+      [Backups and restore](#backups-and-restore) above.
+   4. `scripts/ops/run-prod-backup.sh --now` then `--status`; check the Drive folder.
+   5. Only once all of the above is confirmed, delete the **old** `BACKUP_DIR`
+      contents by hand (the previous backup container, if you had one, keeps running
+      harmlessly until you recreate it — nothing forces you to do this on a schedule).
+   6. Check for submissions that hit the mixed-replica window: an upload accepted by a
+      *new* replica stores the ZIP only in MinIO, never to local `uploads/`; if the
+      matching `RUN_CHECKS` outbox message is then picked up by an *old* replica (still
+      running the previous image, which only knows to read `uploads/` from disk), that
+      check fails validation with a "could not open the ZIP" reason. Find them with
+      `scripts/ops/connect-to-prod-db.sh`:
+
+      ```bash
+      scripts/ops/connect-to-prod-db.sh -c "SELECT id, created_at FROM submissions
+        WHERE status = 'VALIDATION_FAILED' AND created_at > '<deploy time>'
+        AND test_results->>'check_reason' LIKE 'Could not open submitted ZIP%';"
+      ```
+
+      For every id it lists, use the "Перезапустити перевірку" (rerun checks) action on
+      that submission's review page in the teacher UI — the ZIP is already durably
+      stored, so a re-run finds it wherever it actually lives.
+
+3. **Phase 2 (a later release, not this one):** once `migrate_uploads` reports zero
+   missing submissions and zero subjects without a stored archive, the `uploads`
+   named volume and the `HOST_PLUGINS_DIR` bind mount can both be removed from
+   `docker-compose.prod.yml`. Not done yet — this release only adds the fallback-free
+   path, it does not remove the fallback.
 
 ---
 
@@ -530,9 +817,12 @@ but the ceilings must still fit or an OOM kill is one burst away.
 | minio | 192M | 64M |
 | app × 2 replicas | 640M | 95M each |
 | watchtower | 48M | ~15M |
-| backup | 48M | idle between runs |
-| **Committed (limits)** | **~1540M** | **~495M actual** |
-| **Free for a check sandbox** | **~500M** | comfortably more in practice |
+| backup | 128M | only with the backup profile |
+| alloy | 96M | only with the observability profile |
+| **Committed (limits, both profiles on)** | **~1716M** | — |
+| **Free for a check sandbox (both profiles on)** | **~320M** | comfortably more with either profile off |
+
+With neither profile on, the committed total is ~1492M and ~548M is free.
 
 Measured figures are from the full stack under light load. The limits are deliberately
 well above them: they exist to contain a leak or a runaway, not to describe normal use.

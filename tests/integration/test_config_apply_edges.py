@@ -96,7 +96,7 @@ async def test_s3_upload_failure_raises_runtime_error_and_persists_nothing(
 
     storage = _mock_storage()
     storage.upload_file = AsyncMock(side_effect=RuntimeError("boom"))
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["gridPicture"] = "grid.png"
@@ -125,7 +125,7 @@ async def test_create_subject_uploads_and_sets_picture_urls(
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["gridPicture"] = "grid.png"
@@ -155,7 +155,7 @@ async def test_reapply_changed_image_removes_old_s3_key(
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["gridPicture"] = "old.png"
@@ -195,7 +195,7 @@ async def test_reapply_updates_all_assignment_field_types(
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     # v1: subject with a grid image + lab1 with one content file.
     cfg = _base_config()
@@ -286,7 +286,7 @@ async def test_reapply_removes_content_file_s3_key(
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "doc.pdf", "displayName": "Doc"}]
@@ -329,7 +329,7 @@ async def test_reapply_existing_content_file_is_reuploaded(
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "keep.pdf", "displayName": "Keep"}]
@@ -360,7 +360,7 @@ async def test_reapply_changes_main_picture_url(db_session: AsyncSession, tmp_pa
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["mainPicture"] = "main_old.png"
@@ -392,7 +392,7 @@ async def test_s3_delete_failure_is_swallowed(db_session: AsyncSession, tmp_path
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["gridPicture"] = "g_old.png"
@@ -430,7 +430,7 @@ async def test_content_file_without_filename_skipped(
     owner = await _make_owner(db_session)
     await db_session.commit()
     storage = _mock_storage()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     # One valid content file + one malformed entry (no filename) → the malformed
@@ -472,7 +472,7 @@ async def test_apply_invalid_deadline_stored_as_null(
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["deadline"] = "not-a-date"

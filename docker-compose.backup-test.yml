@@ -1,0 +1,43 @@
+# Isolated harness for tests/ops/backup_roundtrip.sh. The "remote" is a local directory
+# (rclone accepts plain paths), so the same scripts run without any Google account.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: app}
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 2s, retries: 20}
+  minio:
+    image: quay.io/minio/minio:latest
+    command: ["server", "/data"]
+    environment: {MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin}
+    healthcheck: {test: ["CMD", "mc", "ready", "local"], interval: 2s, retries: 20}
+  minio-init:
+    image: quay.io/minio/mc:latest
+    profiles: ["manual"]
+    environment: {MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin, S3_BUCKET_NAME: submissions-checker}
+    entrypoint: ["/bin/sh", "/init.sh"]
+    volumes: ["./docker/minio/init.sh:/init.sh:ro"]
+  backup:
+    build: {context: ., dockerfile: docker/backup/Dockerfile}
+    profiles: ["manual"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: app
+      S3_BUCKET_NAME: submissions-checker
+      RCLONE_REMOTE: /remote/subchk
+      # Only here: the test remote is a plain path (no Google account needed), which
+      # preflight's "name:" check would otherwise refuse as an accidental local write.
+      BACKUP_ALLOW_LOCAL_REMOTE: "1"
+      RCLONE_CONFIG_MINIO_TYPE: s3
+      RCLONE_CONFIG_MINIO_PROVIDER: Minio
+      RCLONE_CONFIG_MINIO_ENDPOINT: http://minio:9000
+      RCLONE_CONFIG_MINIO_ACCESS_KEY_ID: minioadmin
+      RCLONE_CONFIG_MINIO_SECRET_ACCESS_KEY: minioadmin
+    volumes:
+      - remote:/remote
+      # Shared across every `run --rm backup ...` invocation in the roundtrip test, so
+      # the lock actually serializes concurrent runs (see backup.sh LOCK comment).
+      - lock:/var/lock/backup
+volumes:
+  remote:
+  lock:

@@ -8,6 +8,8 @@ transitions and outbox messages.
 
 from __future__ import annotations
 
+import asyncio
+import io
 import os
 import tempfile
 import time
@@ -20,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.core import metrics
-from submissions_checker.core.config import get_settings
+from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
@@ -40,7 +42,10 @@ from submissions_checker.services import check_core
 from submissions_checker.services.docker_sandbox import DockerSandbox
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
+from submissions_checker.services.plugin_cache import materialize_plugin_tree
+from submissions_checker.services.storage import get_storage
 from submissions_checker.services.subject_config import validate_subject_code
+from submissions_checker.services.submission_files import read_submission_zip
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
@@ -48,6 +53,8 @@ logger = get_logger(__name__)
 
 UPLOADS_DIR = Path("uploads")
 _SANDBOX = DockerSandbox()
+
+MISSING_ARCHIVE_REASON = "Subject config has no stored archive — re-apply the subject config."
 
 # Review modes that examine the student by quiz instead of by automated tests. Assignments in
 # these modes need no `sandbox`/`check_command` block at all: the upload is accepted after an
@@ -75,6 +82,28 @@ async def is_quiz_first_assignment(
         assignment_code, {}
     )
     return plugin_assignment.get("review_mode", "tests_only") in _QUIZ_FIRST_MODES
+
+
+def _resolve_plugin_dir(
+    settings: Settings, subject_code: str, zip_data: bytes | None
+) -> Path | None:
+    """Host path of the subject tree the sandbox mounts, or None when there is none.
+
+    The stored archive is the source of truth. Configs applied before migration 0018 have
+    no archive; for those the legacy extracted tree under plugins_dir is still honoured
+    (checked via the container path, mounted from the host path) — but only when that host
+    path is absolute. A relative plugins_dir with no host_plugins_dir override can't be
+    resolved by the host Docker daemon (it has no notion of the container's cwd), so
+    falling back to it would hand `docker run -v` a meaningless bind-mount source.
+    """
+    if zip_data:
+        return materialize_plugin_tree(Path(settings.plugin_cache_dir), subject_code, zip_data)
+    if not (Path(settings.plugins_dir) / subject_code).is_dir():
+        return None
+    host_dir = settings.host_plugins_dir or settings.plugins_dir
+    if not Path(host_dir).is_absolute():
+        return None
+    return Path(host_dir) / subject_code
 
 
 async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
@@ -123,7 +152,7 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     # Quiz-examined assignments never touch the sandbox — bail out before a check plan is even
     # resolved, since these configs legitimately carry no check_command.
     if review_mode in _QUIZ_FIRST_MODES:
-        _accept_without_checks(submission, review_mode)
+        await _accept_without_checks(submission, review_mode)
         return
 
     # An assignment with no plugin key cannot be matched to anything in config.yml.
@@ -151,7 +180,6 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
         _fail_validation(submission, plan.reason)
         return
 
-    plugins_root = settings.host_plugins_dir or settings.plugins_dir
     # The stored code is joined onto the plugins root and bind-mounted into the sandbox;
     # never trust a stored value to still be a plain directory name.
     try:
@@ -159,18 +187,31 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     except ValueError as exc:
         _fail_validation(submission, f"Invalid subjectCode in plugin config: {exc}")
         return
-    plugin_dir = Path(plugins_root) / subject_code
 
-    # Locate and extract the submitted ZIP
+    try:
+        plugin_dir = await asyncio.to_thread(
+            _resolve_plugin_dir, settings, subject_code, getattr(config_record, "zip_data", None)
+        )
+    except (UnsafeArchiveError, zipfile.BadZipFile) as exc:
+        _fail_validation(submission, f"Stored subject archive is unusable: {exc}")
+        return
+    if plugin_dir is None:
+        _fail_validation(submission, MISSING_ARCHIVE_REASON)
+        return
+
+    # Locate and extract the submitted ZIP — object storage first, legacy uploads/ second.
     saved_as = (submission.source_metadata or {}).get("saved_as")
     if not saved_as:
         raise RuntimeError("Submission has no saved_as in source_metadata")
-    zip_path = UPLOADS_DIR / saved_as
+    zip_bytes = await read_submission_zip(get_storage(settings), saved_as, UPLOADS_DIR)
+    if zip_bytes is None:
+        _fail_validation(submission, "Could not open submitted ZIP: file not found in storage")
+        return
 
     with tempfile.TemporaryDirectory(prefix="submission_") as extract_dir:
         extract_path = Path(extract_dir)
         try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
                 safe_extract(zf, extract_path)
         except (zipfile.BadZipFile, OSError) as exc:
             _fail_validation(submission, f"Could not open submitted ZIP: {exc}")
@@ -271,7 +312,7 @@ def _fail_validation(submission: Submission, reason: str) -> None:
     transition(submission, "validation_failed")
 
 
-def _accept_without_checks(submission: Submission, review_mode: str) -> None:
+async def _accept_without_checks(submission: Submission, review_mode: str) -> None:
     """Accept a quiz-examined submission without running any check.
 
     No sandbox, no check plan — but the archive is still opened and safe-extracted to a
@@ -285,9 +326,14 @@ def _accept_without_checks(submission: Submission, review_mode: str) -> None:
     if not saved_as:
         raise RuntimeError("Submission has no saved_as in source_metadata")
 
+    zip_bytes = await read_submission_zip(get_storage(get_settings()), saved_as, UPLOADS_DIR)
+    if zip_bytes is None:
+        _fail_validation(submission, "Could not open submitted ZIP: file not found in storage")
+        return
+
     with tempfile.TemporaryDirectory(prefix="submission_") as extract_dir:
         try:
-            with zipfile.ZipFile(UPLOADS_DIR / saved_as, "r") as zf:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
                 safe_extract(zf, Path(extract_dir))
         except (zipfile.BadZipFile, OSError) as exc:
             _fail_validation(submission, f"Could not open submitted ZIP: {exc}")
