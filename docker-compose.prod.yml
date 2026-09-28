@@ -330,6 +330,10 @@ services:
       # A directory, not the file, and writable: rclone rewrites rclone.conf (atomically,
       # via a temp file) whenever it refreshes the Drive token.
       - ${RCLONE_CONFIG_DIR:-./docker/backup/rclone}:/config/rclone
+      # Shared across every container of this service — the long-lived scheduler and any
+      # ad hoc `compose run backup once|restore` — so its flock actually serializes them.
+      # A container-local /tmp lock only serializes a `run` against itself.
+      - backup_lock:/var/lock/backup
     depends_on:
       postgres:
         condition: service_healthy
@@ -393,3 +397,4 @@ volumes:
   caddy_config:
   uploads:
   alloy_data:
+  backup_lock:
