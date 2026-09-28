@@ -6,7 +6,6 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-import aiofiles
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import and_, func, nullslast, or_, select
@@ -49,6 +48,8 @@ from submissions_checker.services import squads
 from submissions_checker.services.audit import audit
 from submissions_checker.services.quiz_grants import effective_max_attempts
 from submissions_checker.services.similarity import compare_zip_files
+from submissions_checker.services.storage import get_storage
+from submissions_checker.services.submission_files import read_submission_zip, store_submission_zip
 from submissions_checker.workers.tasks.check_tasks import (
     execute_check_task,
     is_quiz_first_assignment,
@@ -56,8 +57,7 @@ from submissions_checker.workers.tasks.check_tasks import (
 
 router = APIRouter(prefix="/portal", tags=["student-portal"])
 
-UPLOADS_DIR = Path("uploads")
-UPLOADS_DIR.mkdir(exist_ok=True)
+UPLOADS_DIR = Path("uploads")  # legacy fallback dir; the seam prefers object storage
 
 # Statuses that a background worker is going to move on its own, without anyone touching the
 # page. A submission sitting in one of these is why the assignment page has to watch itself:
@@ -501,6 +501,7 @@ async def submit_assignment(
     db: DBSession,
     current_user: StudentUser,
     student_id: StudentId,
+    settings: AppSettings,
     file: UploadFile = File(...),
 ) -> RedirectResponse:
     sa = await db.get(StudentAssignment, sa_id)
@@ -583,9 +584,10 @@ async def submit_assignment(
         raise HTTPException(status_code=413, detail="ZIP file too large (max 50 MB)")
 
     save_name = f"{sa_id}_{uuid.uuid4().hex}.zip"
-    save_path = UPLOADS_DIR / save_name
-    async with aiofiles.open(save_path, "wb") as f:
-        await f.write(content)
+    storage = get_storage(settings)
+    # Object first, row second: if the upload fails, no Submission row points at a
+    # ZIP that was never actually stored.
+    await store_submission_zip(storage, save_name, content, UPLOADS_DIR)
 
     # Compare against all other ZIP submissions for this assignment (plagiarism detection)
     other_subs_result = await db.execute(
@@ -602,12 +604,9 @@ async def submit_assignment(
     max_similarity = 0.0
     for (meta,) in other_subs_result:
         other_name = meta.get("saved_as") if meta else None
-        if other_name:
-            other_path = UPLOADS_DIR / other_name
-            if other_path.exists():
-                sim = compare_zip_files(save_path, other_path)
-                if sim > max_similarity:
-                    max_similarity = sim
+        other = await read_submission_zip(storage, other_name, UPLOADS_DIR)
+        if other is not None:
+            max_similarity = max(max_similarity, compare_zip_files(content, other))
 
     submission = Submission(
         students_assignment_id=sa_id,
