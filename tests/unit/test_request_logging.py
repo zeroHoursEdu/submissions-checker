@@ -29,7 +29,7 @@ def _app() -> FastAPI:
     async def forbidden() -> None:
         raise HTTPException(status_code=403)
 
-    @app.get("/boom")
+    @app.get("/boom", dependencies=[Depends(user)])
     async def boom() -> None:
         raise RuntimeError("boom")
 
@@ -89,6 +89,24 @@ async def test_levels_by_status() -> None:
             await c.get("/nope")
     levels = {(e["status"], e["log_level"]) for e in _entries(logs, "http_request")}
     assert levels == {(403, "warning"), (500, "error"), (404, "info")}
+
+
+async def test_unhandled_exception_is_logged_with_the_request_context() -> None:
+    """uvicorn logs the traceback after the middleware returned and the context is gone,
+    so the middleware logs it itself while request_id/user_id are still bound."""
+    with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as logs:
+        async with _client() as c:
+            resp = await c.get("/boom")
+    assert resp.status_code == 500
+    failed = _entries(logs, "http_request_failed")
+    assert len(failed) == 1
+    line = failed[0]
+    assert line["request_id"] and line["user_id"] == 42 and line["role"] == "STUDENT"
+    assert line["exc_info"] is True
+    assert line["log_level"] == "error"
+    assert line["route"] == "/boom" and line["method"] == "GET"
+    access = _entries(logs, "http_request")[0]
+    assert access["status"] == 500 and access["request_id"] == line["request_id"]
 
 
 async def test_health_is_not_logged() -> None:

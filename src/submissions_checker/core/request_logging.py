@@ -90,6 +90,16 @@ class RequestLoggingMiddleware:
         started = time.perf_counter()
         try:
             await self.app(scope, receive, send_wrapper)
+        except Exception:
+            # Starlette re-raises to the server, which logs the traceback only after this
+            # middleware cleared the context; log it here while request_id/user_id are bound.
+            logger.exception(
+                "http_request_failed",
+                method=scope.get("method"),
+                route=route_template_for(scope),
+                **holder,
+            )
+            raise
         finally:
             _user_holder.reset(token)
             if not scope["path"].startswith(_SKIP_PREFIXES):
@@ -102,4 +112,6 @@ class RequestLoggingMiddleware:
                     duration_ms=round((time.perf_counter() - started) * 1000, 1),
                     **holder,
                 )
+            # Under uvicorn every request has its own task context, but in-process clients
+            # (tests, ASGITransport) share one; clearing keeps later lines free of it.
             structlog.contextvars.clear_contextvars()
