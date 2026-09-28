@@ -1,22 +1,19 @@
 """ZIP-driven subject config apply service.
 
-Accepts a ZIP file uploaded by a teacher, extracts it, computes a field-level
-diff against the current DB state, logs the plan, then executes it in the
-required order: S3 uploads → DB transaction → plugin tree extraction → S3
-cleanup. The plugin tree extraction step writes the full ZIP contents (checker
-scripts, fixtures, config.yml) to plugins_dir/<subjectCode>/, which is what
-check_tasks.py mounts into the sandbox at check time — this is the only way a
-subject's checker code reaches disk, there is no separate startup scan.
+Accepts a ZIP file uploaded by a teacher, extracts it to a temp directory just long
+enough to read config.yml and any referenced content files, computes a field-level
+diff against the current DB state, logs the plan, then executes it in the required
+order: S3 uploads → DB transaction → S3 cleanup. The raw ZIP bytes are stored as
+``subject_plugin_configs.zip_data`` — that stored archive is the only copy of a
+subject's checker code, and check_tasks.py unpacks it on demand at check time;
+there is no separate startup scan and nothing is written to local disk here.
 """
 
 from __future__ import annotations
 
 import hashlib
 import io
-import os
-import shutil
 import tempfile
-import uuid
 import zipfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -89,9 +86,8 @@ class ApplyResult:
 
 
 class ConfigApplyService:
-    def __init__(self, storage: StorageService | None, plugins_dir: Path) -> None:
+    def __init__(self, storage: StorageService | None) -> None:
         self._storage = storage
-        self._plugins_dir = plugins_dir
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -128,8 +124,8 @@ class ConfigApplyService:
         subject_code: str = new_cfg.get("subjectCode", "")
         if not subject_code:
             raise ValueError("config.yml must contain a non-empty 'subjectCode' field")
-        # The code becomes plugins_dir/<code> and is os.replace()d into place below; a
-        # path-like value would overwrite an arbitrary sibling of the plugins directory.
+        # The code becomes a path segment in every S3 key (subjects/<code>/...); a
+        # path-like value would target an arbitrary sibling key.
         validate_subject_code(subject_code)
         self._validate_quiz_questions(new_cfg)
         self._validate_check_commands(new_cfg)
@@ -278,11 +274,7 @@ class ConfigApplyService:
         """Return ApplyResult(changed=False) if this ZIP is the one currently live.
 
         Only the *latest* version is compared: re-uploading an older archive is a
-        rollback and must create a new version (known bug #16). If the extracted
-        plugin tree is missing from disk despite the matching hash — a prior apply's
-        disk extraction never completed (e.g. crashed after the DB commit) —
-        self-heal by re-extracting before returning, rather than leaving the subject
-        permanently uncheckable while the DB claims success.
+        rollback and must create a new version (known bug #16).
         """
         latest_hash = await db.scalar(
             select(SubjectPluginConfig.content_hash)
@@ -293,41 +285,7 @@ class ConfigApplyService:
         if latest_hash != sha256:
             return None
 
-        if not (self._plugins_dir / subject_code).is_dir():
-            self._extract_plugin_tree(zip_bytes, subject_code)
-
         return ApplyResult(changed=False, subject_action="unchanged", subject_name="")
-
-    # ------------------------------------------------------------------
-    # On-disk plugin tree
-    # ------------------------------------------------------------------
-
-    def _extract_plugin_tree(self, zip_bytes: bytes, subject_code: str) -> None:
-        """Extract the full ZIP tree to plugins_dir/<subject_code>/, atomically replacing any
-        previous version so check_tasks.py's plugin_dir resolution always finds a complete tree.
-
-        Extracts to a sibling temp directory *inside* plugins_dir (not the system tempdir) so the
-        swap is a same-filesystem os.replace(), which is atomic — a check resolving plugin_dir
-        during the swap sees either the complete old tree or the complete new one.
-        """
-        self._plugins_dir.mkdir(parents=True, exist_ok=True)
-        tmp_target = self._plugins_dir / f".tmp-{subject_code}-{uuid.uuid4().hex}"
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            try:
-                safe_extract(zf, tmp_target)
-            except UnsafeArchiveError:
-                shutil.rmtree(tmp_target, ignore_errors=True)
-                raise
-
-        final_target = self._plugins_dir / subject_code
-        old_backup = self._plugins_dir / f".old-{subject_code}-{uuid.uuid4().hex}"
-        replaced_old = False
-        if final_target.exists():
-            os.replace(final_target, old_backup)
-            replaced_old = True
-        os.replace(tmp_target, final_target)
-        if replaced_old:
-            shutil.rmtree(old_backup, ignore_errors=True)
 
     # ------------------------------------------------------------------
     # Diff computation (field-level)
@@ -616,11 +574,7 @@ class ConfigApplyService:
             subject_action="created" if subject_created else plan.subject_action,
         )
 
-        # Step 7: extract the full ZIP tree to plugins_dir/<subject_code>/, replacing any
-        # previous version, so this subject is checkable without any manual file placement.
-        self._extract_plugin_tree(zip_bytes, subject_code)
-
-        # Step 8: best-effort S3 cleanup
+        # Step 7: best-effort S3 cleanup
         if self._storage is not None:
             for key in plan.removed_s3_keys:
                 try:
@@ -630,9 +584,9 @@ class ConfigApplyService:
                     logger.warning("config_apply_s3_delete_failed", key=key, error=str(exc))
 
         # Anything that gets this far is a ZIP whose bytes differ from every stored version:
-        # a new config version was inserted and the plugin tree on disk was replaced. Report
-        # that as an update even when no DB column moved — the field-level diff only looks at
-        # the handful of keys mirrored into columns, so edits to the quiz bank, to checker
+        # a new config version (including its zip_data) was inserted. Report that as an
+        # update even when no DB column moved — the field-level diff only looks at the
+        # handful of keys mirrored into columns, so edits to the quiz bank, to checker
         # scripts or to a content file's contents all leave it empty. Calling those
         # "unchanged" tells the teacher their upload was rejected when it was applied.
         action = "created" if subject_created else "updated"

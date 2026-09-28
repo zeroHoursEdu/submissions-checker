@@ -113,7 +113,7 @@ async def test_fresh_apply_creates_subject_assignment_and_config(
     owner = await _make_owner(db_session)
     await db_session.commit()
 
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
     result = await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
 
     assert result.changed is True
@@ -176,7 +176,7 @@ async def test_reapply_updates_subject_assignments_and_bumps_version(
 ) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
     subject = (
@@ -255,7 +255,7 @@ async def test_reapply_updates_subject_assignments_and_bumps_version(
 async def test_reapply_removes_deleted_assignment(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     cfg = _base_config()
     cfg["assignments"]["lab2"] = {"title": "Lab 2", "min_grade": 0, "max_grade": 100}
@@ -291,7 +291,7 @@ async def test_reapply_removes_deleted_assignment(db_session: AsyncSession, tmp_
 async def test_reapply_identical_zip_is_unchanged(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     zip_bytes = _make_zip(_base_config())
     await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
@@ -322,7 +322,7 @@ async def test_reapply_identical_zip_is_unchanged(db_session: AsyncSession, tmp_
 async def test_owner_id_set_on_create(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session, "ownerA")
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
     await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
 
     subject = (
@@ -335,7 +335,7 @@ async def test_non_owner_cannot_reapply(db_session: AsyncSession, tmp_path: Path
     owner = await _make_owner(db_session, "ownerA")
     intruder = await _make_owner(db_session, "ownerB")
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
 
@@ -359,7 +359,7 @@ async def test_create_then_enrolled_students_get_student_assignments(
     owner = await _make_owner(db_session)
     student = await _make_student(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     # Create the subject first (no assignments yet) so we can enroll a student,
     # then add an assignment on re-apply and assert StudentAssignment fan-out.
@@ -403,7 +403,7 @@ async def test_create_then_enrolled_students_get_student_assignments(
 async def test_apply_rejects_non_zip(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
     with pytest.raises(ValueError, match="not a valid ZIP"):
         await svc.apply(b"this is not a zip", owner_id=owner.id, db=db_session)
 
@@ -411,7 +411,7 @@ async def test_apply_rejects_non_zip(db_session: AsyncSession, tmp_path: Path) -
 async def test_apply_rejects_missing_config_yml(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -424,7 +424,7 @@ async def test_apply_rejects_missing_config_yml(db_session: AsyncSession, tmp_pa
 async def test_apply_rejects_empty_subject_code(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
     cfg = _base_config()
     cfg["subjectCode"] = ""
     with pytest.raises(ValueError, match="subjectCode"):
@@ -434,7 +434,7 @@ async def test_apply_rejects_empty_subject_code(db_session: AsyncSession, tmp_pa
 async def test_apply_rejects_oversize_zip(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
     big = b"\x00" * (50 * 1024 * 1024 + 1)
     with pytest.raises(ValueError, match="50 MB limit"):
         await svc.apply(big, owner_id=owner.id, db=db_session)
@@ -449,7 +449,7 @@ async def test_apply_with_storage_uploads_content_files(
     storage = AsyncMock()
     storage.upload_file = AsyncMock(return_value="https://cdn/spec.pdf")
     storage.delete_file = AsyncMock()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "spec.pdf", "displayName": "Spec"}]
@@ -478,7 +478,7 @@ async def test_apply_with_storage_uploads_content_files(
 async def test_apply_null_deadline_when_absent(db_session: AsyncSession, tmp_path: Path) -> None:
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
     cfg = _base_config()
     del cfg["assignments"]["lab1"]["deadline"]
     await svc.apply(_make_zip(cfg), owner_id=owner.id, db=db_session)
@@ -495,16 +495,19 @@ async def test_apply_null_deadline_when_absent(db_session: AsyncSession, tmp_pat
 
 
 # ---------------------------------------------------------------------------
-# Plugin tree extraction: the ZIP upload is the only way checker code reaches disk
+# Config apply writes nothing to local disk: the archive in Postgres is the
+# only copy, and workers unpack it on demand (see check_tasks.py).
 # ---------------------------------------------------------------------------
 
 
-async def test_fresh_apply_extracts_full_zip_tree_to_plugins_dir(
-    db_session: AsyncSession, tmp_path: Path
+async def test_apply_writes_nothing_to_local_disk(
+    db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The archive in Postgres is the only copy; workers unpack it on demand."""
+    monkeypatch.chdir(tmp_path)
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     zip_bytes = _make_zip(
         _base_config(),
@@ -515,78 +518,17 @@ async def test_fresh_apply_extracts_full_zip_tree_to_plugins_dir(
     )
     await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
 
-    subject_dir = tmp_path / "demo101"
-    assert (subject_dir / "config.yml").is_file()
-    assert (subject_dir / "assignments" / "lab1" / "check.py").read_bytes() == b"print('check')"
-    assert (subject_dir / "assignments" / "lab1" / "fixtures" / "input.txt").is_file()
-
-
-async def test_reapply_removes_stale_files_from_plugins_dir(
-    db_session: AsyncSession, tmp_path: Path
-) -> None:
-    owner = await _make_owner(db_session)
-    await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
-
-    cfg = _base_config()
-    await svc.apply(
-        _make_zip(cfg, extra_files={"assignments/lab1/check.py": b"v1", "old_helper.py": b"stale"}),
-        owner_id=owner.id,
-        db=db_session,
-    )
-    subject_dir = tmp_path / "demo101"
-    assert (subject_dir / "old_helper.py").is_file()
-
-    cfg["description"] = "changed so the hash differs"
-    await svc.apply(
-        _make_zip(cfg, extra_files={"assignments/lab1/check.py": b"v2"}),
-        owner_id=owner.id,
-        db=db_session,
-    )
-
-    assert not (subject_dir / "old_helper.py").exists()
-    assert (subject_dir / "assignments" / "lab1" / "check.py").read_bytes() == b"v2"
-
-
-async def test_duplicate_zip_with_missing_disk_dir_still_extracts(
-    db_session: AsyncSession, tmp_path: Path
-) -> None:
-    """A hash match alone must not skip extraction forever: if a prior apply's disk
-    swap never completed (e.g. crashed after the DB commit), the on-disk tree is
-    missing despite the DB claiming success. Re-uploading the identical ZIP must
-    self-heal by re-extracting, while still reporting 'unchanged' and NOT inserting
-    a second SubjectPluginConfig row for the same content hash."""
-    owner = await _make_owner(db_session)
-    await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
-
-    zip_bytes = _make_zip(_base_config(), extra_files={"assignments/lab1/check.py": b"code"})
-    await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
-
-    subject_dir = tmp_path / "demo101"
-    assert subject_dir.is_dir()
-    import shutil
-
-    shutil.rmtree(subject_dir)
-    assert not subject_dir.exists()
-
-    result = await svc.apply(zip_bytes, owner_id=owner.id, db=db_session)
-
-    assert result.changed is False
-    assert result.subject_action == "unchanged"
-    assert (subject_dir / "assignments" / "lab1" / "check.py").read_bytes() == b"code"
+    assert list(tmp_path.iterdir()) == []
 
     subject = (
         await db_session.execute(select(Subject).where(Subject.code == "demo101"))
     ).scalar_one()
-    version_count = (
+    cfg = (
         await db_session.execute(
-            select(func.count())
-            .select_from(SubjectPluginConfig)
-            .where(SubjectPluginConfig.subject_id == subject.id)
+            select(SubjectPluginConfig).where(SubjectPluginConfig.subject_id == subject.id)
         )
     ).scalar_one()
-    assert version_count == 1, "self-heal must not insert a duplicate SubjectPluginConfig row"
+    assert cfg.zip_data == zip_bytes
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +545,7 @@ async def test_reapply_quiz_only_change_reports_updated(
     their edit was rejected when in fact a new version was stored."""
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["review_mode"] = "tests_then_quiz"
@@ -643,11 +585,12 @@ async def test_reapply_quiz_only_change_reports_updated(
 async def test_reapply_file_only_change_reports_updated(
     db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    """config.yml identical, checker script edited: the plugin tree on disk is
-    replaced, so this is an update, not a no-op."""
+    """config.yml identical, checker script edited: the ZIP bytes (and therefore the
+    content hash) differ, so this is an update, not a no-op, even though nothing in
+    the diffed JSONB columns moved."""
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     cfg = _base_config()
     await svc.apply(
@@ -662,7 +605,20 @@ async def test_reapply_file_only_change_reports_updated(
     )
 
     assert result.subject_action == "updated"
-    assert (tmp_path / "demo101" / "assignments" / "lab1" / "check.py").read_bytes() == b"new"
+
+    subject = (
+        await db_session.execute(select(Subject).where(Subject.code == "demo101"))
+    ).scalar_one()
+    latest = (
+        await db_session.execute(
+            select(SubjectPluginConfig)
+            .where(SubjectPluginConfig.subject_id == subject.id)
+            .order_by(SubjectPluginConfig.version.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    zf = zipfile.ZipFile(io.BytesIO(latest.zip_data))
+    assert zf.read("assignments/lab1/check.py") == b"new"
 
 
 async def test_reapply_edited_content_file_is_reuploaded(
@@ -684,7 +640,7 @@ async def test_reapply_edited_content_file_is_reuploaded(
     storage = AsyncMock()
     storage.upload_file = AsyncMock(side_effect=_capture)
     storage.delete_file = AsyncMock()
-    svc = ConfigApplyService(storage=storage, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=storage)
 
     cfg = _base_config()
     cfg["assignments"]["lab1"]["contentFiles"] = [{"filename": "task.md", "displayName": "Task"}]
@@ -714,7 +670,7 @@ async def test_apply_claims_ownerless_subject(db_session: AsyncSession, tmp_path
     owner = await _make_owner(db_session, "claimer")
     db_session.add(Subject(code="demo101", name="Old", owner_id=None, status=SubjectStatus.ACTIVE))
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     await svc.apply(_make_zip(_base_config()), owner_id=owner.id, db=db_session)
 
@@ -731,7 +687,7 @@ async def test_reapplying_an_older_config_is_accepted(
     against the latest version only, known bug #16)."""
     owner = await _make_owner(db_session)
     await db_session.commit()
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
 
     cfg_a = _base_config()
     cfg_b = _base_config()
@@ -766,7 +722,7 @@ async def test_reapplying_an_older_config_is_accepted(
 async def test_apply_writes_and_clears_squad_max_size(
     db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    svc = ConfigApplyService(storage=None, plugins_dir=tmp_path)
+    svc = ConfigApplyService(storage=None)
     owner = User(username="own", password_hash="x", role=UserRole.TEACHER, is_active=True)
     db_session.add(owner)
     await db_session.flush()

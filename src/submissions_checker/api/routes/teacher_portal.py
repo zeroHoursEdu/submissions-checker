@@ -69,7 +69,7 @@ from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
 from submissions_checker.services.squads import SquadError
-from submissions_checker.services.storage import StorageService
+from submissions_checker.services.storage import StorageService, get_storage
 from submissions_checker.utils.csv_export import csv_safe
 from submissions_checker.workers.tasks.notification_tasks import (
     enqueue_teacher_review_notification,
@@ -154,8 +154,7 @@ async def apply_subject_config(
     settings: AppSettings,
     config_zip: UploadFile,
 ) -> RedirectResponse:
-    storage = StorageService(settings) if settings.s3_endpoint_url else None
-    service = ConfigApplyService(storage, plugins_dir=Path(settings.plugins_dir))
+    service = ConfigApplyService(get_storage(settings))
     try:
         zip_bytes = await config_zip.read()
         result = await service.apply(zip_bytes, owner_id=current_user.user_id, db=db)
