@@ -30,7 +30,11 @@ async def test_start_then_resume(student_client: AsyncClient, db, student_user) 
     assert started["attempt_id"] == attempt_id
     assert started["student_id"] == student_user.student_id
     assert started["question_count"] > 0
-    assert _one(logs, "quiz_attempt_resumed")["attempt_id"] == attempt_id
+    resumed = _one(logs, "quiz_attempt_resumed")
+    assert resumed["attempt_id"] == attempt_id
+    assert "assignment_id" in resumed
+    assert "squad_id" in resumed
+    assert resumed["question_count"] > 0
 
 
 async def test_submit_logs_the_finish(student_client: AsyncClient, db, student_user) -> None:

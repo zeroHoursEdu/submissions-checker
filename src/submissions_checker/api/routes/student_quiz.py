@@ -760,7 +760,14 @@ async def start_or_resume_quiz(
 
     in_progress = next((a for a in existing if a.status == QuizAttemptStatus.IN_PROGRESS), None)
     if in_progress:
-        logger.info("quiz_attempt_resumed", attempt_id=in_progress.id, student_id=student_id)
+        logger.info(
+            "quiz_attempt_resumed",
+            attempt_id=in_progress.id,
+            student_id=student_id,
+            assignment_id=sa.subjects_assignment_id,
+            squad_id=latest_sub.squad_id,
+            question_count=len(in_progress.questions_snapshot or []),
+        )
         return RedirectResponse(url=f"/portal/quiz/{in_progress.id}", status_code=303)
 
     passed = next((a for a in existing if a.is_passed), None)
