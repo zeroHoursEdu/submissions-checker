@@ -11,6 +11,15 @@ Runs the listeners extracted verbatim from `templates/_quiz_anticheat.html` agai
 two-page harness served through Playwright routing: no app server, DB or docker stack.
 Firefox carries the regression, so it is parametrised over every installed engine
 rather than using the chromium-only `page` fixture.
+
+The `browser` fixture below launches off pytest-playwright's own session-scoped
+`playwright` fixture instead of opening a second `sync_playwright()` session of its
+own: almost every other file under `tests/e2e/` drives its BDD steps through the
+plugin's `page` fixture, and once that fixture's machinery has run anywhere in the
+session, a later bare `with sync_playwright() as p:` here hits Playwright's
+"already inside a running asyncio loop" guard — collect any such file (e.g.
+`test_feedback.py`) ahead of this one and every test here errors at fixture setup.
+Reusing the plugin's `playwright` fixture avoids opening that second session.
 """
 
 from __future__ import annotations
@@ -19,7 +28,7 @@ import json
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, sync_playwright
+from playwright.sync_api import Browser, Playwright
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "templates" / "_quiz_anticheat.html"
 
@@ -70,14 +79,13 @@ def _question_html(number: int) -> str:
 
 
 @pytest.fixture(params=ENGINES)
-def browser(request: pytest.FixtureRequest):
-    with sync_playwright() as p:
-        try:
-            b: Browser = getattr(p, request.param).launch()
-        except Exception as exc:  # engine not installed locally
-            pytest.skip(f"{request.param} unavailable: {str(exc).splitlines()[0]}")
-        yield b
-        b.close()
+def browser(request: pytest.FixtureRequest, playwright: Playwright):
+    try:
+        b: Browser = getattr(playwright, request.param).launch()
+    except Exception as exc:  # engine not installed locally
+        pytest.skip(f"{request.param} unavailable: {str(exc).splitlines()[0]}")
+    yield b
+    b.close()
 
 
 def test_answering_questions_reports_no_violation(browser: Browser) -> None:

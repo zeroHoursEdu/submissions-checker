@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
 import structlog
 from fastapi import Depends, FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
@@ -12,8 +11,6 @@ from structlog.testing import capture_logs
 
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.request_logging import RequestLoggingMiddleware, bind_user, level_for
-
-pytestmark = pytest.mark.asyncio
 
 
 def _app() -> FastAPI:
