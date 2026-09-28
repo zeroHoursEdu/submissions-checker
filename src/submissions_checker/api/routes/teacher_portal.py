@@ -710,24 +710,23 @@ async def teacher_similarity_report(
 
     too_many = len(candidates) > _SIMILARITY_MAX_ITEMS
     names: dict[int, str] = {}
-    blobs: dict[int, bytes] = {}
+    tokens: dict[int, frozenset[str]] = {}
     if not too_many:
         storage = get_storage(settings)
         for sa_row_id, (full_name, saved_as) in candidates.items():
+            # Tokenize each ZIP as soon as it is downloaded and let the bytes go out of
+            # scope immediately: keeping every full ZIP in memory until the whole batch
+            # finished downloading is what made this endpoint OOM a 320MB replica at 300
+            # candidates. The token set is far smaller than the archive it came from.
             data = await read_submission_zip(storage, saved_as, UPLOADS_DIR)
             if data is not None:
                 names[sa_row_id] = full_name
-                blobs[sa_row_id] = data
+                tokens[sa_row_id] = await asyncio.to_thread(token_set_for_zip, data)
 
     pairs: list[dict[str, Any]] = []
-    if not too_many and len(blobs) >= 2:
-
-        def _compute() -> list[tuple[int, int, float]]:
-            tokens = {k: token_set_for_zip(b) for k, b in blobs.items()}
-            return pairwise_similarity(tokens)
-
+    if not too_many and len(tokens) >= 2:
         threshold = max(0.0, min(min_score, 1.0))
-        for a, b, score in await asyncio.to_thread(_compute):
+        for a, b, score in await asyncio.to_thread(pairwise_similarity, tokens):
             if score < threshold:
                 break
             pairs.append(
@@ -743,7 +742,7 @@ async def teacher_similarity_report(
             "subject_id": subject_id,
             "pairs": pairs,
             "min": min_score,
-            "compared": len(blobs),
+            "compared": len(tokens),
             "too_many": too_many,
         },
     )

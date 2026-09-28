@@ -1446,3 +1446,65 @@ async def test_similarity_report_reads_object_storage(
     body = resp.text
     assert "Alice Cloud" in body and "Bob Cloud" in body
     assert "100%" in body
+
+
+async def test_similarity_report_tokenizes_each_zip_before_downloading_the_next(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """Regression for F1: at most one ZIP's raw bytes are held at a time.
+
+    300 candidates x a full ZIP each would OOM a 320MB replica if every download were
+    kept around until the whole batch finished. Each download must be converted to its
+    (much smaller) token set immediately, before the next download starts.
+    """
+    import io
+    import zipfile
+
+    from submissions_checker.api.routes import teacher_portal as teacher_portal_module
+    from tests.storage_fake import FakeStorage
+
+    def _zip_bytes(source: str) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("main.py", source)
+        return buf.getvalue()
+
+    subject = await _make_subject(db, owner_id=teacher.id)
+    sa = await _make_assignment(db, subject.id)
+    storage = FakeStorage()
+    src = "def solve(x):\n    return x * 2\n"
+    for i, name in enumerate(["Alice Order", "Bob Order", "Carol Order"]):
+        student = await make_student(full_name=name, email=f"order{i}@example.com")
+        await _enroll(db, subject.id, student.id)
+        sub = await _make_submission(db, sa.id, student.id, status=SubmissionStatus.COMPLETED)
+        saved_as = f"order-{i}.zip"
+        sub.source_metadata = {"saved_as": saved_as}
+        storage.objects[f"submissions/{saved_as}"] = _zip_bytes(src)
+    await db.commit()
+
+    events: list[str] = []
+    real_read = teacher_portal_module.read_submission_zip
+    real_tokenize = teacher_portal_module.token_set_for_zip
+
+    async def spy_read(*args, **kwargs):
+        result = await real_read(*args, **kwargs)
+        events.append("read")
+        return result
+
+    def spy_tokenize(data):
+        events.append("token")
+        return real_tokenize(data)
+
+    authenticate(client, teacher)
+    with (
+        patch.object(teacher_portal_module, "get_storage", return_value=storage),
+        patch.object(teacher_portal_module, "read_submission_zip", spy_read),
+        patch.object(teacher_portal_module, "token_set_for_zip", spy_tokenize),
+    ):
+        resp = await client.get(
+            f"/teacher/subjects/{subject.id}/assignments/{sa.id}/similarity?min=0.1"
+        )
+    assert resp.status_code == 200
+    # A "token" must follow each "read" immediately — never all three reads before any
+    # tokenizing, which is what a batch-at-the-end implementation would produce.
+    assert events == ["read", "token"] * 3
