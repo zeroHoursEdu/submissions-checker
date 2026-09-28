@@ -173,7 +173,10 @@ services:
       GRAFANA_CLOUD_LOKI_USER: local
       GRAFANA_CLOUD_LOKI_TOKEN: local
       SUBCHK_ENV: local
-      SUBCHK_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-submissions-checker}
+      # Compose does not export its resolved project name for interpolation (unlike the
+      # labels it stamps on containers), so this must be set by whoever invokes compose
+      # (see `make observability-up`) rather than read from a Compose-provided var.
+      SUBCHK_COMPOSE_PROJECT: ${SUBCHK_COMPOSE_PROJECT:-submissions-checker}
       APP_METRICS_HOST: app
     ports:
       - "12345:12345"

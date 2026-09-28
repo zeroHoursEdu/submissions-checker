@@ -111,7 +111,11 @@ e2e-logs: ## Follow e2e app log
 
 ##@ Observability (docs/observability.md)
 observability-up: ## Local Prometheus+Loki+Grafana+Alloy; Grafana at :3000
-	docker compose --profile observability up -d prometheus loki grafana alloy
+	# Compose's resolved project name (not just this dir's basename, e.g. in a worktree)
+	# has to be passed in explicitly, or Alloy's Docker discovery filters on the wrong
+	# label and silently tails nothing.
+	SUBCHK_COMPOSE_PROJECT="$$(docker compose config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')" \
+		docker compose --profile observability up -d prometheus loki grafana alloy
 
 observability-down: ## Stop the local observability harness
 	docker compose --profile observability rm -sf prometheus loki grafana alloy

@@ -27,6 +27,11 @@ schema_config:
 
 limits_config:
   retention_period: 24h
+  # discover_log_levels / discover_service_name default true here. The resulting
+  # `detected_level` and `service_name` labels are Loki-derived mirrors of the `level`
+  # and `service` labels we already set (one-to-one, so no extra streams), Grafana
+  # Cloud's Loki does the same by default, and Grafana's Logs Drilldown view needs
+  # `service_name` to work at all. Left on deliberately, not an oversight.
 
 compactor:
   working_directory: /loki/compactor
