@@ -25,12 +25,14 @@ from submissions_checker.api.dependencies import (
 from submissions_checker.core import metrics
 from submissions_checker.core.i18n import get_vocab
 from submissions_checker.core.logging import get_logger
+from submissions_checker.core.rate_limit import client_ip
 from submissions_checker.core.state_machine import transition
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     OutboxMessage,
     QuizAnswer,
     QuizAttempt,
+    QuizAttemptEvent,
     QuizAttemptPause,
     QuizAttemptSnapshot,
     Student,
@@ -44,6 +46,7 @@ from submissions_checker.db.models.enums import (
     OutboxMessageState,
     QuizAttemptStatus,
     QuizDisputeStatus,
+    QuizEventOutcome,
 )
 from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
@@ -53,6 +56,11 @@ from submissions_checker.services.air_raid.geo import resolve_region
 from submissions_checker.services.audit import audit
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
+from submissions_checker.services.quiz_events import (
+    INFORMATIONAL_EVENT_TYPES,
+    MAX_EVENTS_STORED_PER_ATTEMPT,
+    sanitize_ctx,
+)
 from submissions_checker.services.quiz_grants import effective_max_attempts
 from submissions_checker.services.quiz_scoring import (
     apply_question_overrides,
@@ -941,8 +949,12 @@ async def show_quiz(
     )
 
 
-async def _read_event_type(request: Request) -> str:
-    """Parse the anti-cheat event body: a small JSON object with a well-formed ``type``."""
+async def _read_event(request: Request) -> tuple[str, dict[str, Any]]:
+    """Parse the anti-cheat event body: a well-formed ``type`` plus an optional ``ctx``.
+
+    A bad ``type`` is refused (400) as before; a bad ``ctx`` is dropped to ``{}`` so the event
+    itself is always recorded.
+    """
     declared = request.headers.get("content-length")
     if declared is not None and declared.isdigit() and int(declared) > _MAX_EVENT_BODY_BYTES:
         raise HTTPException(status_code=413, detail="Event body too large")
@@ -958,7 +970,7 @@ async def _read_event_type(request: Request) -> str:
     event_type = data.get("type")
     if not isinstance(event_type, str) or not _EVENT_TYPE_RE.fullmatch(event_type):
         raise HTTPException(status_code=400, detail="type must be a short snake_case name")
-    return event_type
+    return event_type, sanitize_ctx(data.get("ctx"))
 
 
 def _looks_like(content_type: str, data: bytes) -> bool:
@@ -970,6 +982,54 @@ def _looks_like(content_type: str, data: bytes) -> bool:
     return True
 
 
+async def _record_event(
+    db: DBSession,
+    request: Request,
+    attempt: QuizAttempt,
+    student_id: int,
+    event_type: str,
+    ctx: dict[str, Any],
+    outcome: QuizEventOutcome,
+    *,
+    action: str = "none",
+    count_after: int | None = None,
+    rule_threshold: int | None = None,
+) -> None:
+    """Log the event and, below the per-attempt cap, add its timeline row (caller commits)."""
+    log = logger.warning if action != "none" else logger.info
+    log(
+        "quiz_anticheat_event",
+        attempt_id=attempt.id,
+        student_id=student_id,
+        event_type=event_type,
+        outcome=outcome.value,
+        action=action,
+        count_after=count_after,
+        rule_threshold=rule_threshold,
+        ctx=ctx,
+    )
+    stored = await db.scalar(
+        select(func.count())
+        .select_from(QuizAttemptEvent)
+        .where(QuizAttemptEvent.attempt_id == attempt.id)
+    )
+    if (stored or 0) >= MAX_EVENTS_STORED_PER_ATTEMPT:
+        return
+    db.add(
+        QuizAttemptEvent(
+            attempt_id=attempt.id,
+            event_type=event_type,
+            count_after=count_after,
+            rule_threshold=rule_threshold,
+            action=action,
+            outcome=outcome,
+            client_ctx=ctx,
+            ip=client_ip(request)[:64],
+            user_agent=(request.headers.get("user-agent") or "")[:256] or None,
+        )
+    )
+
+
 @router.post("/quiz/{attempt_id}/event")
 async def report_violation(
     attempt_id: int,
@@ -978,8 +1038,9 @@ async def report_violation(
     current_user: StudentUser,
     student_id: StudentId,
 ) -> JSONResponse:
-    """Receive a client-side anti-cheat event and evaluate configured rules."""
-    event_type = await _read_event_type(request)
+    """Receive a client-side anti-cheat event, evaluate configured rules, and record it on the
+    attempt's timeline."""
+    event_type, ctx = await _read_event(request)
 
     attempt = await db.get(QuizAttempt, attempt_id)
     if attempt is None:
@@ -997,18 +1058,46 @@ async def report_violation(
     )  # narrows for mypy; _assert_attempt_owner already raised otherwise
 
     if attempt.status != QuizAttemptStatus.IN_PROGRESS:
+        await _record_event(
+            db,
+            request,
+            attempt,
+            student_id,
+            event_type,
+            ctx,
+            QuizEventOutcome.IGNORED_NOT_IN_PROGRESS,
+        )
+        await db.commit()
         return JSONResponse({"action": "none", "violation_count": 0})
+
+    if event_type in INFORMATIONAL_EVENT_TYPES:
+        # "How long were they away" — evidence for the teacher, never a violation.
+        await _record_event(
+            db, request, attempt, student_id, event_type, ctx, QuizEventOutcome.INFORMATIONAL
+        )
+        await db.commit()
+        return JSONResponse(
+            {"action": "none", "seconds_remaining": None, "message": "", "violation_count": 0}
+        )
 
     if attempt.paused_at is not None:
         # Anti-cheat is suspended during an air-raid pause. Returning before `violations` is
         # touched is the point: a student running for a shelter must not accumulate
         # tab-switch counts, let alone cross a _force_fail threshold.
+        await _record_event(
+            db, request, attempt, student_id, event_type, ctx, QuizEventOutcome.IGNORED_PAUSED
+        )
+        await db.commit()
         return JSONResponse({"action": "none", "violation_count": 0, "paused": True})
 
     violations = dict(attempt.violations or {})
     if event_type not in violations and len(violations) >= _MAX_DISTINCT_EVENT_TYPES:
         # A client can invent names; the blob must not grow without bound. Nothing is
         # recorded and no rule can match a name the config never mentions anyway.
+        await _record_event(
+            db, request, attempt, student_id, event_type, ctx, QuizEventOutcome.IGNORED_TYPE_CAP
+        )
+        await db.commit()
         return JSONResponse(
             {"action": "none", "seconds_remaining": None, "message": "", "violation_count": 0}
         )
@@ -1029,9 +1118,11 @@ async def report_violation(
     response_action = "none"
     seconds_remaining = None
     message = ""
+    matched_threshold: int | None = None
 
     for rule in anti_cheat.get("rules", []):
         if rule["event"] == event_type and count >= rule["threshold"]:
+            matched_threshold = int(rule["threshold"])
             action = rule["action"]
             action_type = action["type"]
             penalty = int(action.get("penalty_seconds", 60))
@@ -1078,6 +1169,28 @@ async def report_violation(
             break
 
     attempt.violations = violations
+    await _record_event(
+        db,
+        request,
+        attempt,
+        student_id,
+        event_type,
+        ctx,
+        QuizEventOutcome.APPLIED,
+        action=response_action,
+        count_after=count,
+        rule_threshold=matched_threshold,
+    )
+    if response_action == "fail":
+        logger.warning(
+            "quiz_attempt_force_failed",
+            attempt_id=attempt.id,
+            student_id=student_id,
+            event_type=event_type,
+            count_after=count,
+            rule_threshold=matched_threshold,
+            violations={k: v for k, v in violations.items() if not k.startswith("_")},
+        )
     await db.commit()
 
     return JSONResponse(
