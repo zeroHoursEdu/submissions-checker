@@ -28,8 +28,12 @@ plugins/
 Zip this directory (with `config.yml` at the ZIP's root) and upload it through the teacher
 portal's "Apply config" form, or `POST` it directly to `/teacher/subjects/apply-config` as an
 authenticated teacher. There is no startup scan and no manual file placement — uploading is the
-only way a subject's code and config reach the system. The upload extracts the full ZIP contents
-to the server's `plugins_dir/<subjectCode>/`, which is what the sandbox mounts at check time.
+only way a subject's code and config reach the system. **The ZIP itself is the only copy of a
+subject's check scripts that matters**: the raw bytes are stored in the database
+(`subject_plugin_configs.zip_data`), and a check worker unpacks that stored archive on demand
+into a cache directory for the sandbox to mount. Nothing is extracted to a `plugins/` directory
+on disk any more, so your ZIP must contain the **full** subject tree — `config.yml` and every
+script it references — or a check will fail to find them at run time.
 
 ---
 
@@ -397,14 +401,14 @@ broken by it — at check time the duplicate is dropped and a warning is logged.
 
 1. Build a local `<subjectCode>/config.yml` with the full config, plus validate/check scripts for each assignment, laid out as shown above.
 2. Zip the directory (`config.yml` must be at the ZIP's root).
-3. Upload the ZIP via the teacher portal's "Apply config" form (or `POST /teacher/subjects/apply-config`). This creates the subject, its assignments, and extracts the checker code to the server — no restart needed.
+3. Upload the ZIP via the teacher portal's "Apply config" form (or `POST /teacher/subjects/apply-config`). This creates the subject, its assignments, and stores the checker code (the ZIP itself) on the server — no restart needed.
 4. Enroll students via the teacher portal (use the subject's CSV template).
 
 ---
 
 ## Updating a Subject
 
-Edit your local copy of `config.yml` (and/or the check scripts), re-zip the whole directory, and upload it again through the same form/endpoint. The service detects the changed content hash, inserts a new config version, and replaces the on-disk checker code with the new tree — nothing to delete or merge by hand. In-progress submission checks continue using the previous version; new checks use the updated one. Uploading an identical ZIP again is a no-op.
+Edit your local copy of `config.yml` (and/or the check scripts), re-zip the whole directory, and upload it again through the same form/endpoint. The service detects the changed content hash, inserts a new config version, and stores the new ZIP — nothing to delete or merge by hand. In-progress submission checks continue using the previous version's stored ZIP; new checks use the updated one. Uploading an identical ZIP again is a no-op.
 
 ---
 

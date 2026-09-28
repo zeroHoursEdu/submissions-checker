@@ -14,13 +14,13 @@ must be running** for everything except `tests/unit`.
 ## Setup
 
 ```bash
-make install          # installs the project + [dev] extra (incl. pytest, testcontainers, redis client)
+uv sync --frozen --extra dev   # or: make install
 ```
 
 For the e2e layer also install the `e2e` extra and Playwright browsers:
 
 ```bash
-uv pip install -e ".[dev,e2e]"
+uv sync --frozen --extra dev --extra e2e
 playwright install chromium
 playwright install firefox   # only for test_quiz_anticheat_navigation.py
 ```

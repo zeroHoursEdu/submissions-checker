@@ -73,6 +73,12 @@ socket. Teachers are semi-trusted, but a teacher account is one phished password
 Fix: accept only `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$` with no `..`, reject at apply time.
 `check_tasks` builds the same path from the stored config; same guard applied there.
 
+> **Note (2026-09-28):** `ConfigApplyService` no longer extracts to `plugins_dir` at
+> all — a config ZIP's bytes are stored in Postgres and unpacked on demand by check
+> workers (see `docs/superpowers/specs/2026-09-28-storage-and-backups-design.md`).
+> This finding described the mechanism as it existed on 2026-09-17; left as-is above
+> since this is a historical audit.
+
 ---
 
 ## MEDIUM
