@@ -7,6 +7,10 @@ import re
 import zipfile
 from pathlib import Path
 
+from submissions_checker.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 ZipSource = Path | bytes
 
 _CODE_EXTENSIONS = {".py", ".java", ".c", ".cpp", ".h", ".js", ".ts", ".cs", ".go", ".rs"}
@@ -40,8 +44,8 @@ def _extract_tokens(src: ZipSource) -> list[str]:
                         tokens.extend(_normalize(file_src))
                     except Exception:
                         continue
-    except Exception:
-        pass
+    except Exception as exc:  # a broken archive must not break the upload that triggered it
+        logger.warning("similarity_tokenize_failed", error=str(exc))
     return tokens
 
 

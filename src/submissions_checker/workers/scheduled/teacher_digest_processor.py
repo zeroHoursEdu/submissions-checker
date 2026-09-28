@@ -128,11 +128,10 @@ async def flush_teacher_digests() -> None:
 
                     try:
                         await dispatcher.notify(email, subject, body)
-                    except Exception as exc:  # leave rows pending, retry next interval
-                        logger.error(
+                    except Exception:  # leave rows pending, retry next interval
+                        logger.exception(
                             "teacher_digest_send_failed",
                             teacher_id=teacher_id,
-                            error=str(exc),
                         )
                         continue
 
@@ -158,5 +157,5 @@ async def flush_teacher_digests() -> None:
                     {"lock_id": TEACHER_DIGEST_LOCK_ID},
                 )
 
-    except Exception as exc:
-        logger.error("teacher_digest_flush_error", error=str(exc))
+    except Exception:
+        logger.exception("teacher_digest_flush_error")

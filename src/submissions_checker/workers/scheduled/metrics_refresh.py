@@ -130,6 +130,6 @@ async def refresh_metrics() -> None:
             values = await compute_gauges(db)
         _apply(values)
         metrics.app_db_healthy.set(1)
-    except Exception as exc:  # noqa: BLE001 — any failure means "cannot read the database"
+    except Exception:  # noqa: BLE001 — any failure means "cannot read the database"
         metrics.app_db_healthy.set(0)
-        logger.error("metrics_refresh_failed", error=str(exc))
+        logger.exception("metrics_refresh_failed")

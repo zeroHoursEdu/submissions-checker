@@ -137,3 +137,71 @@ async def test_dispatch_still_errors_on_a_truly_unhandled_event_type() -> None:
     message = SimpleNamespace(id=1, event_type=SimpleNamespace(value="SOMETHING_ELSE"))
     with pytest.raises(ValueError, match="Unknown event type"):
         await dispatch_outbox_message(db=None, message=message)
+
+
+@pytest.mark.asyncio
+async def test_outbox_failure_is_logged_with_message_context(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    import structlog
+    from structlog.testing import capture_logs
+
+    from submissions_checker.core.logging import get_logger
+
+    inner = get_logger("t.task")
+
+    async def failing_dispatch(db, message):
+        inner.info("inside_task")
+        raise ValueError("boom")
+
+    message = OutboxMessage(event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": 77})
+    db_session.add(message)
+    await db_session.commit()
+    await db_session.refresh(message)
+
+    _patch_processor_session(monkeypatch, db_session)
+    monkeypatch.setattr(outbox_processor, "dispatch_outbox_message", failing_dispatch)
+    with capture_logs(processors=[structlog.contextvars.merge_contextvars]) as logs:
+        await outbox_processor.process_outbox_messages()
+
+    inside = next(e for e in logs if e["event"] == "inside_task")
+    assert inside["outbox_id"] == message.id and inside["submission_id"] == 77
+    assert inside["attempt_no"] == 1
+    failed = next(e for e in logs if e["event"] == "outbox_failed")
+    assert failed["log_level"] == "error" and failed["exc_info"]
+    # Nothing leaks into the next job's lines.
+    assert "outbox_id" not in structlog.contextvars.get_contextvars()
+
+
+@pytest.mark.asyncio
+async def test_outbox_last_retry_is_logged_as_dead(db_session: AsyncSession, monkeypatch) -> None:
+    from structlog.testing import capture_logs
+
+    from submissions_checker.core.config import get_settings
+
+    async def failing_dispatch(db, message):
+        raise ValueError("boom")
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS,
+        payload={"submission_id": 78},
+        retry_count=get_settings().outbox_max_retries - 1,
+    )
+    db_session.add(message)
+    await db_session.commit()
+
+    _patch_processor_session(monkeypatch, db_session)
+    monkeypatch.setattr(outbox_processor, "dispatch_outbox_message", failing_dispatch)
+    with capture_logs() as logs:
+        await outbox_processor.process_outbox_messages()
+    assert any(e["event"] == "outbox_dead" for e in logs)
+
+
+@pytest.mark.asyncio
+async def test_idle_outbox_tick_logs_nothing_at_info(db_session: AsyncSession, monkeypatch) -> None:
+    from structlog.testing import capture_logs
+
+    _patch_processor_session(monkeypatch, db_session)
+    with capture_logs() as logs:
+        await outbox_processor.process_outbox_messages()
+    assert [e for e in logs if e["log_level"] != "debug"] == []

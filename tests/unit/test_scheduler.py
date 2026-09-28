@@ -151,6 +151,15 @@ async def test_shutdown_scheduler_noop_when_not_running() -> None:
     sched.shutdown.assert_not_called()
 
 
+def test_registered_jobs_are_wrapped_with_job_context(monkeypatch) -> None:
+    sched = _fake_scheduler()
+    _install_fake_scheduler(monkeypatch, sched)
+    scheduler_module.init_scheduler()
+    for call in sched.add_job.call_args_list:
+        func = call.args[0] if call.args else call.kwargs["func"]
+        assert hasattr(func, "__wrapped__"), call.kwargs.get("id")
+
+
 def test_deadline_reminders_job_is_opt_in(monkeypatch) -> None:
     sched = _fake_scheduler()
     _install_fake_scheduler(monkeypatch, sched)

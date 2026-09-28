@@ -1,5 +1,8 @@
 """Transactional outbox message processor."""
 
+from typing import Any
+
+import structlog
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +34,15 @@ logger = get_logger(__name__)
 OUTBOX_PROCESSOR_LOCK_ID = 7919  # Prime number for lock identification
 
 
+def _payload_ids(payload: dict[str, Any] | None) -> dict[str, int]:
+    """Ids worth searching by, when the message carries them."""
+    return {
+        key: value
+        for key, value in (payload or {}).items()
+        if key in ("submission_id", "attempt_id", "student_id") and isinstance(value, int)
+    }
+
+
 async def process_outbox_messages() -> None:
     """
     Process pending outbox messages (scheduled job).
@@ -52,7 +64,7 @@ async def process_outbox_messages() -> None:
     Advisory lock ensures only one processor runs at a time across all instances.
     """
     settings = get_settings()
-    logger.info("process_outbox_messages_started")
+    logger.debug("process_outbox_messages_started")
 
     finished_count = 0
     error_count = 0
@@ -67,7 +79,7 @@ async def process_outbox_messages() -> None:
             lock_acquired = lock_result.scalar()
 
             if not lock_acquired:
-                logger.info(
+                logger.debug(
                     "outbox_processor_lock_not_acquired",
                     message="Another processor is already running, skipping this execution",
                 )
@@ -91,46 +103,57 @@ async def process_outbox_messages() -> None:
                 )
                 messages = result.scalars().all()
 
-                logger.info("outbox_messages_fetched", count=len(messages))
+                if messages:
+                    logger.info("outbox_messages_fetched", count=len(messages))
+                else:
+                    logger.debug("outbox_messages_fetched", count=0)
 
                 for message in messages:
-                    try:
-                        # Dispatch message to appropriate task based on event type
-                        # Pass db session for transactional execution
-                        await dispatch_outbox_message(db, message)
+                    with structlog.contextvars.bound_contextvars(
+                        outbox_id=message.id,
+                        event_type=message.event_type.value,
+                        attempt_no=message.retry_count + 1,
+                        **_payload_ids(message.payload),
+                    ):
+                        try:
+                            # Dispatch message to appropriate task based on event type
+                            # Pass db session for transactional execution
+                            await dispatch_outbox_message(db, message)
 
-                        # Mark as finished
-                        message.mark_finished()
-                        finished_count += 1
-                        metrics.outbox_processed_total.labels(
-                            event_type=message.event_type.value, outcome="finished"
-                        ).inc()
+                            # Mark as finished
+                            message.mark_finished()
+                            finished_count += 1
+                            metrics.outbox_processed_total.labels(
+                                event_type=message.event_type.value, outcome="finished"
+                            ).inc()
 
-                    except Exception as e:
-                        logger.error(
-                            "outbox_message_dispatch_failed",
-                            message_id=message.id,
-                            event_type=message.event_type.value,
-                            state=message.state.value,
-                            retry_count=message.retry_count,
-                            error=str(e),
-                        )
+                        except Exception as e:
+                            logger.exception("outbox_failed")
 
-                        # Mark as error and increment retry count
-                        message.mark_error(str(e))
-                        error_count += 1
-                        metrics.outbox_processed_total.labels(
-                            event_type=message.event_type.value, outcome="error"
-                        ).inc()
+                            # Mark as error and increment retry count
+                            message.mark_error(str(e))
+                            error_count += 1
+                            metrics.outbox_processed_total.labels(
+                                event_type=message.event_type.value, outcome="error"
+                            ).inc()
+                            if message.retry_count >= settings.outbox_max_retries:
+                                logger.error("outbox_dead", retries=message.retry_count)
 
                 # Commit all changes (finished and error messages)
                 await db.commit()
 
-                logger.info(
-                    "process_outbox_messages_completed",
-                    finished=finished_count,
-                    error=error_count,
-                )
+                if finished_count or error_count:
+                    logger.info(
+                        "process_outbox_messages_completed",
+                        finished=finished_count,
+                        error=error_count,
+                    )
+                else:
+                    logger.debug(
+                        "process_outbox_messages_completed",
+                        finished=finished_count,
+                        error=error_count,
+                    )
 
             finally:
                 # Always release the advisory lock
@@ -140,8 +163,8 @@ async def process_outbox_messages() -> None:
                 )
                 logger.debug("outbox_processor_lock_released", lock_id=OUTBOX_PROCESSOR_LOCK_ID)
 
-    except Exception as e:
-        logger.error("process_outbox_messages_error", error=str(e))
+    except Exception:
+        logger.exception("process_outbox_messages_error")
 
 
 async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> None:
@@ -160,7 +183,7 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
     Raises:
         Exception: If dispatch fails
     """
-    logger.info(
+    logger.debug(
         "dispatching_outbox_message",
         message_id=message.id,
         event_type=message.event_type.value,
@@ -207,4 +230,4 @@ async def dispatch_outbox_message(db: AsyncSession, message: OutboxMessage) -> N
         )
         raise ValueError(f"Unknown event type: {message.event_type}")
 
-    logger.info("outbox_message_dispatched", message_id=message.id)
+    logger.info("outbox_dispatched", message_id=message.id)

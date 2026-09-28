@@ -171,10 +171,8 @@ async def apply_subject_config(
     except ValueError as exc:
         encoded = urllib.parse.quote(str(exc))
         return RedirectResponse(f"/teacher?apply_error={encoded}", status_code=303)
-    except Exception as exc:
-        from submissions_checker.core.logging import get_logger
-
-        get_logger(__name__).error("config_apply_unexpected_error", error=str(exc))
+    except Exception:
+        logger.exception("config_apply_unexpected_error")
         encoded = urllib.parse.quote("An unexpected error occurred while applying the config.")
         return RedirectResponse(f"/teacher?apply_error={encoded}", status_code=303)
 
