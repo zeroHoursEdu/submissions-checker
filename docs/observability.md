@@ -164,7 +164,9 @@ Only `level` is pulled out of the JSON body into a Loki label (via `stage.json` 
 expects `service_name` to exist, so they're kept rather than disabled.
 
 Non-JSON stdout (Postgres, MinIO) still arrives in Loki unlabelled by `level` — it's
-there for grepping, just not level-filterable.
+there for grepping, just not level-filterable. All container logs ship, including
+Postgres error lines whose `DETAIL` can contain row values (e.g. the email in a
+duplicate-key violation) — they land in Grafana Cloud with the same ~14-day retention.
 
 ### Labels
 
