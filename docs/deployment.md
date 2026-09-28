@@ -442,18 +442,26 @@ disk. If the rollback happens after this release has already taken traffic:
 
 - **Submissions uploaded since the deploy exist only in MinIO** (`submissions/<saved_as>`
   in the bucket) — the old code cannot see them. Copy them into the `uploads` volume
-  before (or immediately after) rolling back:
+  before (or immediately after) rolling back. `-v uploads:/uploads` on its own is **not**
+  the app's `uploads` volume: `backup` never mounts `uploads` itself, and an ad hoc
+  `-v NAME:/path` on `docker compose run` is only translated to the project-scoped volume
+  (`<project>_uploads`) when the *target* service already references that volume by that
+  name — `backup` doesn't, so Docker would silently create and mount a brand new, empty,
+  unprefixed volume literally named `uploads` instead. Resolve the real name first:
 
   ```bash
+  UPLOADS_VOL=$(docker volume ls --format '{{.Name}}' | grep -E '_uploads$')
+  echo "${UPLOADS_VOL}"   # must print exactly one line — confirm it before using it below
+
   docker compose -f docker-compose.prod.yml --env-file .env --profile backup run --rm \
-    -v uploads:/uploads --entrypoint sh backup -c \
+    -v "${UPLOADS_VOL}:/uploads" --entrypoint sh backup -c \
     'rclone copy --transfers 2 --checkers 4 --buffer-size 8M \
       minio:"$S3_BUCKET_NAME"/submissions /uploads'
   ```
 
   (`backup` already carries `RCLONE_CONFIG`/`RCLONE_CONFIG_MINIO_*` and `S3_BUCKET_NAME`
-  in its own environment; `-v uploads:/uploads` attaches the app's `uploads` volume to it
-  for this one run only — the service does not mount it normally.)
+  in its own environment; `-v "${UPLOADS_VOL}:/uploads"` attaches the app's real `uploads`
+  volume to it for this one run only — the service does not mount it normally.)
 
 - **Configs applied since the deploy exist only as `subject_plugin_configs.zip_data`** —
   the old code only reads a `plugins/` tree on disk. Once the old image is back up,
@@ -642,6 +650,11 @@ docker compose -f docker-compose.prod.yml --env-file .env --profile backup run -
   --entrypoint sh backup -c 'rclone lsf "$RCLONE_REMOTE/pre-restore" | sort'
 
 docker compose -f docker-compose.prod.yml --env-file .env stop app
+# Also stop the long-lived scheduled backup service for the duration: its own cron
+# could otherwise fire a `once` run against the half-restored database/bucket while
+# these manual steps are still in progress (the shared lock only serializes against
+# an overlapping restore/backup — it does not delay a run until this section is done).
+docker compose -f docker-compose.prod.yml --env-file .env stop backup
 
 # Database (--transfers/--checkers/--buffer-size match backup.sh's own $RCLONE_FLAGS —
 # this container's memory limit is 128m)
@@ -662,7 +675,7 @@ docker compose -f docker-compose.prod.yml --env-file .env --profile backup run -
   'rclone sync --transfers 2 --checkers 4 --buffer-size 8M \
     "$RCLONE_REMOTE/pre-restore/$STAMP" minio:"$S3_BUCKET_NAME"'
 
-docker compose -f docker-compose.prod.yml --env-file .env up -d app
+docker compose -f docker-compose.prod.yml --env-file .env --profile backup up -d app backup
 ```
 
 ### Privacy
@@ -713,10 +726,11 @@ host, but need a manual step to finish:
    5. Only once all of the above is confirmed, delete the **old** `BACKUP_DIR`
       contents by hand (the previous backup container, if you had one, keeps running
       harmlessly until you recreate it — nothing forces you to do this on a schedule).
-   6. Check for submissions that hit the mixed-replica window: a validation started on
-      an old replica (still writing to local `uploads/`) can be picked up for checking
-      by a new replica that only knows to read the ZIP from MinIO, and fails validation
-      with a "could not open the ZIP" reason. Find them with
+   6. Check for submissions that hit the mixed-replica window: an upload accepted by a
+      *new* replica stores the ZIP only in MinIO, never to local `uploads/`; if the
+      matching `RUN_CHECKS` outbox message is then picked up by an *old* replica (still
+      running the previous image, which only knows to read `uploads/` from disk), that
+      check fails validation with a "could not open the ZIP" reason. Find them with
       `scripts/ops/connect-to-prod-db.sh`:
 
       ```bash
