@@ -45,13 +45,20 @@ def configure_logging() -> None:
     )
 
     final_processors: list[Processor] = [structlog.stdlib.ProcessorFormatter.remove_processors_meta]
+    # Tracebacks never render frame locals: a failing SEND_CREDENTIALS or /auth/login frame
+    # holds passwords, tokens and emails. structlog's `dict_tracebacks` shows them by
+    # default, and the rich console formatter would too if rich were ever installed.
     if log_format == "json":
         final_processors += [
-            structlog.processors.dict_tracebacks,
+            structlog.processors.ExceptionRenderer(
+                structlog.tracebacks.ExceptionDictTransformer(show_locals=False)
+            ),
             structlog.processors.JSONRenderer(),
         ]
     else:
-        final_processors.append(structlog.dev.ConsoleRenderer())
+        final_processors.append(
+            structlog.dev.ConsoleRenderer(exception_formatter=structlog.dev.plain_traceback)
+        )
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(

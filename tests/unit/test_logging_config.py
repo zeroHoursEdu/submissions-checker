@@ -90,3 +90,52 @@ def test_reconfiguring_does_not_duplicate_handlers(reconfigure: None) -> None:
     configure_logging()
     configure_logging()
     assert len(logging.getLogger().handlers) == 1
+
+
+def _fail_holding_secret() -> None:
+    password = "S3cret-pass"  # noqa: F841 - the frame local that must never be rendered
+    raise RuntimeError("boom")
+
+
+def test_json_traceback_never_renders_frame_locals(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], reconfigure: None
+) -> None:
+    """Frame locals of a failing credentials/login path would ship passwords to Loki."""
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    get_settings.cache_clear()
+    configure_logging()
+
+    try:
+        _fail_holding_secret()
+    except RuntimeError:
+        get_logger("t").exception("structlog_failed")
+    try:
+        _fail_holding_secret()
+    except RuntimeError:
+        logging.getLogger("t.stdlib").exception("stdlib failed")
+
+    out = capsys.readouterr().out
+    lines = {x["event"]: x for x in _json_lines(out)}
+    for event in ("structlog_failed", "stdlib failed"):
+        exc = lines[event]["exception"]
+        assert exc[0]["exc_type"] == "RuntimeError"
+        assert all("locals" not in frame for frame in exc[0]["frames"])
+    assert '"locals"' not in out
+    assert "S3cret-pass" not in out
+
+
+def test_console_traceback_never_renders_frame_locals(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], reconfigure: None
+) -> None:
+    monkeypatch.setenv("LOG_FORMAT", "console")
+    get_settings.cache_clear()
+    configure_logging()
+
+    try:
+        _fail_holding_secret()
+    except RuntimeError:
+        get_logger("t").exception("console_failed")
+
+    out = capsys.readouterr().out
+    assert "RuntimeError" in out
+    assert "S3cret-pass" not in out
