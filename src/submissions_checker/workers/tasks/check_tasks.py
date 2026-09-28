@@ -91,13 +91,19 @@ def _resolve_plugin_dir(
 
     The stored archive is the source of truth. Configs applied before migration 0018 have
     no archive; for those the legacy extracted tree under plugins_dir is still honoured
-    (checked via the container path, mounted from the host path).
+    (checked via the container path, mounted from the host path) — but only when that host
+    path is absolute. A relative plugins_dir with no host_plugins_dir override can't be
+    resolved by the host Docker daemon (it has no notion of the container's cwd), so
+    falling back to it would hand `docker run -v` a meaningless bind-mount source.
     """
     if zip_data:
         return materialize_plugin_tree(Path(settings.plugin_cache_dir), subject_code, zip_data)
-    if (Path(settings.plugins_dir) / subject_code).is_dir():
-        return Path(settings.host_plugins_dir or settings.plugins_dir) / subject_code
-    return None
+    if not (Path(settings.plugins_dir) / subject_code).is_dir():
+        return None
+    host_dir = settings.host_plugins_dir or settings.plugins_dir
+    if not Path(host_dir).is_absolute():
+        return None
+    return Path(host_dir) / subject_code
 
 
 async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:

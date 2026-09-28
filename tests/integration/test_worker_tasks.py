@@ -1496,3 +1496,31 @@ async def test_check_without_zip_data_uses_legacy_tree(
     await _process(db_session, monkeypatch, message)
 
     assert seen["plugin_dir"] == Path("/host/plugins/sub")
+
+
+@pytest.mark.asyncio
+async def test_check_without_zip_data_and_relative_plugins_dir_fails(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """A legacy tree can exist on disk, but if plugins_dir is relative and there is no
+    host_plugins_dir override, the host Docker daemon has no absolute path to bind-mount
+    (it cannot resolve a container-relative path) — the legacy fallback must not be used."""
+    zip_path = tmp_path / "n.zip"
+    _write_zip(zip_path)
+    (tmp_path / "plugins" / "sub").mkdir(parents=True)
+    sub = await _seed_check_submission(db_session, "relp", saved_as="n.zip", zip_data=None)
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(test_settings, "plugins_dir", "plugins")
+    monkeypatch.setattr(test_settings, "host_plugins_dir", None)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(monkeypatch, check_core.CheckOutcome("passed", 1, 1, []))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    await _process(db_session, monkeypatch, message)
+
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.VALIDATION_FAILED
+    assert sub.test_results["check_reason"] == check_tasks.MISSING_ARCHIVE_REASON
