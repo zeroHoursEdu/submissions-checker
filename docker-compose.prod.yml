@@ -68,6 +68,8 @@ services:
       ENVIRONMENT: production
       DEBUG: "false"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Alloy ships stdout to Loki and parses JSON.
+      LOG_FORMAT: json
       SECRET_KEY: "${SECRET_KEY:?generate with openssl rand -hex 32}"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       # replicas * (pool + overflow) must stay under postgres max_connections (30),

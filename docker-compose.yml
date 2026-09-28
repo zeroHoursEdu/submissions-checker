@@ -58,6 +58,7 @@ services:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/submissions_checker
       - LOG_LEVEL=INFO
+      - LOG_FORMAT=${LOG_FORMAT:-console}
       - DEBUG=true
       - WATCHFILES_FORCE_POLLING=true
       - S3_ENDPOINT_URL=http://minio:9000
