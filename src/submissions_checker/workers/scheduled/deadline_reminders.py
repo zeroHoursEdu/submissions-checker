@@ -145,5 +145,5 @@ async def run_deadline_reminders() -> None:
                     text("SELECT pg_advisory_unlock(:lock_id)"),
                     {"lock_id": DEADLINE_REMINDERS_LOCK_ID},
                 )
-    except Exception as exc:  # noqa: BLE001 — matches the other jobs' top-level catch
-        logger.error("deadline_reminders_error", error=str(exc))
+    except Exception:  # noqa: BLE001 — matches the other jobs' top-level catch
+        logger.exception("deadline_reminders_error")

@@ -18,10 +18,14 @@ def add_app_context(logger: Any, method_name: str, event_dict: EventDict) -> Eve
 
 
 def configure_logging() -> None:
-    """Configure structured logging for the application."""
-    settings = get_settings()
+    """Configure structlog and route stdlib/uvicorn records through the same chain.
 
-    # Shared processors for both structlog and stdlib logging
+    One processor chain, two renderers: every line on stdout is either a JSON object (what
+    Alloy ships to Loki) or a console line, never a mix. Safe to call more than once.
+    """
+    settings = get_settings()
+    log_format = settings.effective_log_format
+
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
@@ -31,41 +35,51 @@ def configure_logging() -> None:
         add_app_context,
     ]
 
-    if settings.is_development:
-        # Human-readable output for development
-        structlog.configure(
-            processors=[
-                *shared_processors,
-                structlog.dev.ConsoleRenderer(),
-            ],
-            wrapper_class=structlog.stdlib.BoundLogger,
-            context_class=dict,
-            logger_factory=structlog.stdlib.LoggerFactory(),
-            cache_logger_on_first_use=True,
-        )
-    else:
-        # JSON output for production
-        structlog.configure(
-            processors=[
-                *shared_processors,
-                structlog.processors.dict_tracebacks,
-                structlog.processors.JSONRenderer(),
-            ],
-            wrapper_class=structlog.stdlib.BoundLogger,
-            context_class=dict,
-            logger_factory=structlog.stdlib.LoggerFactory(),
-            cache_logger_on_first_use=True,
-        )
-
-    # Configure standard library logging
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=getattr(logging, settings.log_level.upper()),
+    structlog.configure(
+        processors=[*shared_processors, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        # Cached loggers ignore later reconfiguration, which breaks capture_logs in tests.
+        cache_logger_on_first_use=settings.is_production,
     )
 
-    # Set third-party loggers to WARNING to reduce noise
+    final_processors: list[Processor] = [structlog.stdlib.ProcessorFormatter.remove_processors_meta]
+    # Tracebacks never render frame locals: a failing SEND_CREDENTIALS or /auth/login frame
+    # holds passwords, tokens and emails. structlog's `dict_tracebacks` shows them by
+    # default, and the rich console formatter would too if rich were ever installed.
+    if log_format == "json":
+        final_processors += [
+            structlog.processors.ExceptionRenderer(
+                structlog.tracebacks.ExceptionDictTransformer(show_locals=False)
+            ),
+            structlog.processors.JSONRenderer(),
+        ]
+    else:
+        final_processors.append(
+            structlog.dev.ConsoleRenderer(exception_formatter=structlog.dev.plain_traceback)
+        )
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=shared_processors, processors=final_processors
+        )
+    )
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(getattr(logging, settings.log_level.upper()))
+
+    # uvicorn installs its own plain-text handlers before importing the app; hand its
+    # records to the root handler instead so they are rendered like everything else.
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers.clear()
+        uv_logger.propagate = True
+
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
+    # Replaced by the `http_request` line from RequestLoggingMiddleware.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 
 

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ vocab.teacher.timeline_title }} · {{ vocab.teacher.attempt_label }} #{{ attempt.id }}{% endblock %}
+
+{% block breadcrumbs %}
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher" class="text-indigo-200 hover:text-white text-sm transition">{{ vocab.teacher.dashboard_title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/subjects/{{ subject.id }}" class="text-indigo-200 hover:text-white text-sm transition">{{ subject.name }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <a href="/teacher/subjects/{{ subject.id }}/assignments/{{ assignment.id }}" class="text-indigo-200 hover:text-white text-sm transition">{{ assignment.title }}</a>
+  <span class="text-indigo-400 mx-1">/</span>
+  <span class="text-indigo-100 text-sm font-medium">{{ vocab.teacher.timeline_title }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto space-y-4">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+    <h1 class="text-lg font-semibold text-slate-900">{{ vocab.teacher.timeline_title }} · {{ vocab.teacher.attempt_label }} #{{ attempt.id }}</h1>
+    <p class="text-sm text-slate-600 mt-1">
+      {{ student.full_name if student else "—" }} · {{ subject.name }} · {{ assignment.title }}
+    </p>
+    <p class="text-xs text-slate-500 mt-1">
+      {{ attempt.started_at.strftime("%d.%m.%Y %H:%M:%S") }}
+      {% if attempt.submitted_at %} → {{ attempt.submitted_at.strftime("%H:%M:%S") }}{% endif %}
+      · <span class="font-mono">{{ attempt.status.value }}</span>
+      {% if attempt.score is not none %} · {{ attempt.score }}/{{ attempt.max_score }}{% endif %}
+    </p>
+  </div>
+
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+    {% if rows %}
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+        <tr>
+          <th class="px-3 py-2 text-left">{{ vocab.teacher.timeline_col_time }}</th>
+          <th class="px-3 py-2 text-left">{{ vocab.teacher.timeline_col_event }}</th>
+          <th class="px-3 py-2 text-right">{{ vocab.teacher.timeline_col_count }}</th>
+          <th class="px-3 py-2 text-left">{{ vocab.teacher.timeline_col_action }}</th>
+          <th class="px-3 py-2 text-left">{{ vocab.teacher.timeline_col_context }}</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for r in rows %}
+        {% set c = r.ctx %}
+        <tr class="{% if r.outcome.startswith('IGNORED') or r.outcome == 'INFORMATIONAL' %}text-slate-400{% endif %}">
+          <td class="px-3 py-1.5 font-mono">{{ r.offset }}</td>
+          <td class="px-3 py-1.5 font-mono">{{ r.event_type }}</td>
+          <td class="px-3 py-1.5 text-right">{{ r.count_after if r.count_after is not none else "" }}</td>
+          <td class="px-3 py-1.5">
+            {% if r.outcome == 'APPLIED' %}
+              <span class="{% if r.action == 'fail' %}text-red-700 font-semibold{% elif r.action != 'none' %}text-amber-700{% endif %}">{{ r.action }}</span>
+            {% else %}
+              {{ vocab.teacher['timeline_outcome_' ~ r.outcome | lower] }}
+            {% endif %}
+          </td>
+          <td class="px-3 py-1.5 text-xs">
+            {% if c.away_ms is defined %}{{ vocab.teacher.timeline_away }} {{ (c.away_ms / 1000) | round(1) }} с · {% endif %}
+            {% if c.from_w is defined %}{{ c.from_w }}×{{ c.from_h }} → {{ c.to_w }}×{{ c.to_h }} · {% elif c.vw is defined %}{{ c.vw }}×{{ c.vh }} · {% endif %}
+            {% if c.visibility == 'hidden' %}{{ vocab.teacher.timeline_hidden }} · {% endif %}
+            {% if c.has_focus is defined and not c.has_focus %}{{ vocab.teacher.timeline_no_focus }} · {% endif %}
+            {% if c.faces is defined %}{{ vocab.teacher.timeline_faces }}: {{ c.faces }} · {% endif %}
+            {% if c.yaw is defined %}yaw {{ c.yaw }}° pitch {{ c.pitch }}° · {% endif %}
+            {% if c.combo is defined %}<span class="font-mono">{{ c.combo }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if rows | length >= row_cap %}<p class="px-3 py-2 text-xs text-slate-500">{{ vocab.teacher.timeline_capped }}</p>{% endif %}
+    {% else %}
+    <p class="p-5 text-sm text-slate-500">{{ vocab.teacher.timeline_empty }}</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

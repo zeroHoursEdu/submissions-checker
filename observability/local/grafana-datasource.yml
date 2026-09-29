@@ -7,3 +7,10 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
+
+  # Same uid as the hosted Loki in Grafana Cloud, so one dashboard JSON renders in both.
+  - name: Loki
+    type: loki
+    uid: grafanacloud-logs
+    access: proxy
+    url: http://loki:3100

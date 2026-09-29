@@ -134,3 +134,16 @@ class EntityType(enum.StrEnum):
 
     def __str__(self) -> str:
         return self.value
+
+
+class QuizEventOutcome(enum.StrEnum):
+    """What the server did with one anti-cheat event from the browser."""
+
+    APPLIED = "APPLIED"
+    INFORMATIONAL = "INFORMATIONAL"
+    IGNORED_PAUSED = "IGNORED_PAUSED"
+    IGNORED_NOT_IN_PROGRESS = "IGNORED_NOT_IN_PROGRESS"
+    IGNORED_TYPE_CAP = "IGNORED_TYPE_CAP"
+
+    def __str__(self) -> str:
+        return self.value

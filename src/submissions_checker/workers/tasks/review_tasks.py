@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -241,8 +243,18 @@ def _validate_verdict(parsed: dict[str, Any]) -> None:
 
 async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     submission_id = payload.get("submission_id")
+    if submission_id is None:
+        await _execute_ai_review(db, payload, submission_id)
+        return
+    with structlog.contextvars.bound_contextvars(submission_id=submission_id):
+        await _execute_ai_review(db, payload, submission_id)
+
+
+async def _execute_ai_review(
+    db: AsyncSession, payload: dict[str, Any], submission_id: int | None
+) -> None:
     next_step = payload.get("next_step", "completed")
-    logger.info("execute_ai_review_task_started", submission_id=submission_id)
+    logger.info("execute_ai_review_task_started", submission_id=submission_id, next_step=next_step)
 
     result = await db.execute(
         select(Submission)
@@ -268,11 +280,13 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> N
     user_prompt = f"Assignment task:\n{task_text}\n\nStudent code:\n{code_text}"
 
     provider = get_ai_provider()
+    started = time.perf_counter()
     try:
         verdict = await provider.review(_SYSTEM_PROMPT, user_prompt, _VERDICT_SCHEMA)
         _validate_verdict(verdict)
     except AIProviderError:
         metrics.ai_reviews_total.labels(outcome="error").inc()
+        logger.exception("ai_review_failed", provider=provider.name)
         # Record the failed state; the outbox processor commits it alongside the
         # message's ERROR state and retries per the configured policy.
         transition(submission, "ai_review_failed")
@@ -282,6 +296,14 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> N
     verdict["provider"] = provider.name
     verdict["model"] = provider.model
     submission.ai_review = verdict
+
+    logger.info(
+        "ai_review_finished",
+        provider=provider.name,
+        model=provider.model,
+        code_mark=verdict.get("code_mark"),
+        duration_ms=round((time.perf_counter() - started) * 1000),
+    )
 
     if next_step == "quiz":
         if is_flagged(verdict, ai_review_cfg):

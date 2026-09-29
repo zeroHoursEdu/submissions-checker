@@ -129,6 +129,7 @@
             {% if a.student_name %}<span class="text-xs text-slate-500">{{ a.student_name }}</span>{% endif %}
             <span class="text-slate-400 text-xs">{{ a.started_at.strftime("%d.%m.%Y %H:%M") }}</span>
             <span class="text-xs px-2 py-0.5 rounded-full {% if a.force_fail %}bg-red-100 text-red-700{% elif a.is_passed %}bg-green-100 text-green-700{% else %}bg-slate-100 text-slate-600{% endif %}">{{ a.status }}</span>
+            <a href="/teacher/quiz-attempts/{{ a.attempt_id }}/events" class="text-xs text-indigo-600 hover:underline">{{ vocab.teacher.timeline_link }}</a>
           </div>
           {% if a.violations %}
           <ul class="mt-2 flex flex-wrap gap-1.5">

@@ -244,6 +244,38 @@ docker compose -f docker-compose.prod.yml --env-file .env logs --tail 50 alloy  
 
 and that *Replicas up* on the Technical dashboard reads 2 (see `docs/observability.md`).
 
+### Logs (Grafana Cloud Loki)
+
+Same Alloy, same `observability` profile, no extra service: it now also tails every
+container's stdout over the read-only Docker socket and pushes to Grafana Cloud Loki.
+Three more vars, already templated in `.env.prod.example` right after the
+`GRAFANA_CLOUD_PROM_*` block — fill them in there (or in the host's `.env`, copied
+from it) (`docs/observability.md#logs` has the full pipeline and query examples):
+
+```dotenv
+GRAFANA_CLOUD_LOKI_URL=      # …/loki/api/v1/push
+GRAFANA_CLOUD_LOKI_USER=     # numeric Loki user id
+GRAFANA_CLOUD_LOKI_TOKEN=    # access-policy token, scope logs:write
+```
+
+Set `LOG_FORMAT=json` (the prod compose file already does) so the lines Alloy ships are
+structured JSON, not the human-readable console format.
+
+Adding or changing these on an already-running host does not restart Alloy by itself —
+it only rereads `.env` on recreate. Use the wrapper script instead of a bare SSH
+session, so the exact remote command is visible before it runs:
+
+```bash
+scripts/ops/prod-compose.sh --profile observability up -d --force-recreate alloy
+scripts/ops/prod-compose.sh --profile observability logs --tail 50 alloy   # no push/auth errors
+```
+
+`scripts/ops/prod-compose.sh` is a thin wrapper over the same SSH plumbing
+`run-prod-backup.sh`/`connect-to-prod-db.sh` use (`scripts/ops/_prod.sh`); it runs
+`docker compose -f docker-compose.prod.yml --env-file .env <args>` in `$PROD_DIR` on
+`$PROD_SSH`. It is not destructive on its own — whatever compose subcommand you pass it
+is.
+
 ---
 
 ## The migration rule (read this before writing one)
@@ -818,9 +850,9 @@ but the ceilings must still fit or an OOM kill is one burst away.
 | app × 2 replicas | 640M | 95M each |
 | watchtower | 48M | ~15M |
 | backup | 128M | only with the backup profile |
-| alloy | 96M | only with the observability profile |
-| **Committed (limits, both profiles on)** | **~1716M** | — |
-| **Free for a check sandbox (both profiles on)** | **~320M** | comfortably more with either profile off |
+| alloy | 128M | only with the observability profile (raised from 96M when it took on shipping logs, not just scraping metrics) |
+| **Committed (limits, both profiles on)** | **~1748M** | — |
+| **Free for a check sandbox (both profiles on)** | **~288M** | comfortably more with either profile off |
 
 With neither profile on, the committed total is ~1492M and ~548M is free.
 

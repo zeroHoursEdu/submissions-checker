@@ -85,5 +85,5 @@ async def refresh_subject_gradebook_stats() -> None:
                     {"lock_id": SUBJECT_STATS_REFRESH_LOCK_ID},
                 )
 
-    except Exception as exc:  # noqa: BLE001 — matches teacher_digest_processor's top-level catch
-        logger.error("subject_stats_refresh_error", error=str(exc))
+    except Exception:  # noqa: BLE001 — matches teacher_digest_processor's top-level catch
+        logger.exception("subject_stats_refresh_error")

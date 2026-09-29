@@ -22,6 +22,7 @@ from submissions_checker.db.models.base import Base, TimestampMixin
 from submissions_checker.db.models.enums import QuizAttemptStatus
 
 if TYPE_CHECKING:
+    from submissions_checker.db.models.quiz_attempt_event import QuizAttemptEvent
     from submissions_checker.db.models.quiz_attempt_pause import QuizAttemptPause
     from submissions_checker.db.models.quiz_attempt_snapshot import QuizAttemptSnapshot
     from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
@@ -99,6 +100,9 @@ class QuizAttempt(Base, TimestampMixin):
     )
     pauses: Mapped[list[QuizAttemptPause]] = relationship(
         "QuizAttemptPause", back_populates="attempt", cascade="all, delete-orphan"
+    )
+    events: Mapped[list[QuizAttemptEvent]] = relationship(
+        "QuizAttemptEvent", back_populates="attempt", cascade="all, delete-orphan"
     )
 
     __table_args__ = (

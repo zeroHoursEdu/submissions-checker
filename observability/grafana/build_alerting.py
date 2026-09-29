@@ -5,10 +5,12 @@
 
 `rules()` is the provisioning-API body push.py sends to Grafana Cloud; `file_provisioning()`
 is the YAML the local Grafana loads from observability/grafana/alerting/. Both come from the
-same four definitions, so the laptop shows the rules production alerts on.
+same definitions, so the laptop shows the rules production alerts on.
 
-Four rules, on purpose. Each one is a failure a teacher would otherwise learn about from a
-student; anything finer belongs on the Technical dashboard, not in Telegram.
+Six rules, on purpose. Each one is a failure a teacher would otherwise learn about from a
+student; anything finer belongs on the Technical or Logs dashboard, not in Telegram. Four
+read Prometheus; the last two read Loki and fire only on production logs (`env="prod"`), so
+a laptop run of the app can never page anyone.
 """
 
 from __future__ import annotations
@@ -70,13 +72,38 @@ _RULES: list[tuple[str, str, str, str, str, str]] = [
     ),
 ]
 
+LOGS_DS_UID = "grafanacloud-logs"
 
-def _data(expr: str) -> list[dict[str, Any]]:
+# Log rules read production only: a laptop run must never page.
+_PROD_APP = '{app="subchk", env="prod", service="app"}'
+_LOG_RULES: list[tuple[str, str, str, str, str, str, int]] = [
+    (
+        "subchk-quiz-force-fail-spike",
+        "QuizForceFailSpike",
+        f'sum(count_over_time({_PROD_APP} | json | event="quiz_attempt_force_failed" [10m])) > 5',
+        "0m",
+        "OK",
+        "More than 5 quiz attempts auto-failed in 10 minutes: a rule or a browser change is likely misfiring. Open the Quiz investigation dashboard.",
+        600,
+    ),
+    (
+        "subchk-outbox-dead",
+        "OutboxDead",
+        f'sum(count_over_time({_PROD_APP} | json | event="outbox_dead" [15m])) > 0',
+        "0m",
+        "OK",
+        "A background job exhausted its retries (check, AI review or email lost). See the Logs dashboard.",
+        900,
+    ),
+]
+
+
+def _data(expr: str, *, ds_uid: str = DS_UID, range_s: int = 600) -> list[dict[str, Any]]:
     return [
         {
             "refId": "A",
-            "relativeTimeRange": {"from": 600, "to": 0},
-            "datasourceUid": DS_UID,
+            "relativeTimeRange": {"from": range_s, "to": 0},
+            "datasourceUid": ds_uid,
             "model": {
                 "refId": "A",
                 "expr": expr,
@@ -98,12 +125,22 @@ def _data(expr: str) -> list[dict[str, Any]]:
     ]
 
 
-def _rule(uid: str, title: str, expr: str, for_: str, no_data: str, summary: str) -> dict[str, Any]:
+def _rule(
+    uid: str,
+    title: str,
+    expr: str,
+    for_: str,
+    no_data: str,
+    summary: str,
+    *,
+    ds_uid: str = DS_UID,
+    range_s: int = 600,
+) -> dict[str, Any]:
     return {
         "uid": uid,
         "title": title,
         "condition": "B",
-        "data": _data(expr),
+        "data": _data(expr, ds_uid=ds_uid, range_s=range_s),
         "for": for_,
         "noDataState": no_data,
         "execErrState": "Error",
@@ -114,13 +151,17 @@ def _rule(uid: str, title: str, expr: str, for_: str, no_data: str, summary: str
 
 def rules() -> list[dict[str, Any]]:
     """Provisioning-API bodies (POST/PUT /api/v1/provisioning/alert-rules)."""
-    return [
-        {**_rule(*spec), "folderUID": FOLDER_UID, "ruleGroup": GROUP, "orgID": 1} for spec in _RULES
+    all_specs = [_rule(*spec) for spec in _RULES] + [
+        _rule(*spec[:6], ds_uid=LOGS_DS_UID, range_s=spec[6]) for spec in _LOG_RULES
     ]
+    return [{**spec, "folderUID": FOLDER_UID, "ruleGroup": GROUP, "orgID": 1} for spec in all_specs]
 
 
 def file_provisioning() -> dict[str, Any]:
     """File-provisioning document (/etc/grafana/provisioning/alerting/*.yaml)."""
+    all_rules = [_rule(*spec) for spec in _RULES] + [
+        _rule(*spec[:6], ds_uid=LOGS_DS_UID, range_s=spec[6]) for spec in _LOG_RULES
+    ]
     return {
         "apiVersion": 1,
         "groups": [
@@ -129,7 +170,7 @@ def file_provisioning() -> dict[str, Any]:
                 "name": GROUP,
                 "folder": FOLDER_TITLE,
                 "interval": "1m",
-                "rules": [_rule(*spec) for spec in _RULES],
+                "rules": all_rules,
             }
         ],
     }

@@ -28,6 +28,7 @@ from submissions_checker.core.i18n import load_vocabularies
 from submissions_checker.core.logging import configure_logging, get_logger
 from submissions_checker.core.metrics_middleware import PrometheusMiddleware
 from submissions_checker.core.migrations import run_migrations
+from submissions_checker.core.request_logging import RequestLoggingMiddleware
 from submissions_checker.core.scheduler import (
     init_scheduler,
     shutdown_scheduler,
@@ -125,6 +126,8 @@ def create_app() -> FastAPI:
     app.add_middleware(OriginCheckMiddleware)
     # Browser hardening headers on every response, including errors and static files.
     app.add_middleware(SecurityHeadersMiddleware)
+    # request_id / user_id on every log line, plus one `http_request` line per request.
+    app.add_middleware(RequestLoggingMiddleware)
     # Outermost of the app middlewares: counts every request by route template.
     app.add_middleware(PrometheusMiddleware)
 

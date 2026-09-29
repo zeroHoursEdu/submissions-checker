@@ -100,13 +100,24 @@
     playAlertSound();
   }
 
-  async function report(type) {
+  const loadedAt = performance.now();
+  // Only what the server whitelists (services/quiz_events.py); everything else is dropped.
+  function baseCtx() {
+    return {
+      visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible',
+      has_focus: document.hasFocus(),
+      vw: innerWidth, vh: innerHeight,
+      ms_since_load: Math.round(performance.now() - loadedAt),
+    };
+  }
+
+  async function report(type, extra) {
     if (window.__acLeaving) return;   // answering a question is not a violation
     try {
       const res = await fetch(`/portal/quiz/${attemptId}/event`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({type}),
+        body: JSON.stringify({type, ctx: Object.assign(baseCtx(), extra || {})}),
       });
       const d = await res.json();
       if (d.action === 'fail') {
@@ -122,20 +133,36 @@
   }
 
   if (hasRule('tab_switch')) {
+    // tab_return tells the teacher how long the student was gone; it is never a violation.
+    let hiddenAt = null;
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) report('tab_switch');
+      if (document.hidden) {
+        hiddenAt = performance.now();
+        report('tab_switch');
+      } else if (hiddenAt !== null) {
+        report('tab_return', {away_ms: Math.round(performance.now() - hiddenAt)});
+        hiddenAt = null;
+      }
     });
   }
 
   if (hasRule('window_blur')) {
-    window.addEventListener('blur', () => report('window_blur'));
+    let blurredAt = null;
+    window.addEventListener('blur', () => { blurredAt = performance.now(); report('window_blur'); });
+    window.addEventListener('focus', () => {
+      if (blurredAt === null) return;
+      report('focus_return', {away_ms: Math.round(performance.now() - blurredAt)});
+      blurredAt = null;
+    });
   }
 
   if (hasRule('resize')) {
     let lw = innerWidth, lh = innerHeight;
     window.addEventListener('resize', function() {
       if (Math.abs(innerWidth - lw) > 150 || Math.abs(innerHeight - lh) > 150) {
-        lw = innerWidth; lh = innerHeight; report('resize');
+        const change = {from_w: lw, from_h: lh, to_w: innerWidth, to_h: innerHeight};
+        lw = innerWidth; lh = innerHeight;
+        report('resize', change);
       }
     });
   }
@@ -165,7 +192,13 @@
                   (mod && e.shiftKey && 'ijc'.includes(key)) ||
                   (mod && e.altKey && 'ijc'.includes(key)) ||
                   e.key === 'F12' || e.key === 'PrintScreen';
-      if (sus) { e.preventDefault(); report('keyboard_shortcut'); }
+      if (sus) {
+        e.preventDefault();
+        // Modifiers plus the one key — never anything the student typed.
+        const mods = ['ctrl', 'alt', 'meta', 'shift'].filter(m => e[m + 'Key']);
+        const k = key.replace(/[^a-z0-9]/g, '').slice(0, 12) || 'key';
+        report('keyboard_shortcut', {combo: mods.concat(k).join('+')});
+      }
     });
   }
 
@@ -254,12 +287,17 @@ async function captureSnapshot(eventType) {
 }
 
 // Report a camera event through the existing rule engine, then react to the action.
-async function report(type) {
+async function report(type, extra) {
   if (window.__acLeaving) return;   // see the intentional-navigation guard above
   try {
+    const ctx = Object.assign({
+      visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible',
+      has_focus: document.hasFocus(),
+      vw: innerWidth, vh: innerHeight,
+    }, extra || {});
     const res = await fetch(`/portal/quiz/${attemptId}/event`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({type}),
+      body: JSON.stringify({type, ctx}),
     });
     const d = await res.json();
     const action = d.action || 'none';
@@ -349,16 +387,20 @@ async function start() {
       let res; try { res = landmarker.detectForVideo(video, now); } catch (_) { res = null; }
       if (res) {
         const faces = (res.faceLandmarks || []).length;
-        if (det.face_absent && det.face_absent.enabled && faceAbsentGate(faces === 0, now)) report('camera_face_absent');
-        if (det.multiple_faces && det.multiple_faces.enabled && multiFaceGate(faces > 1, now)) report('camera_multiple_faces');
+        const heldMs = key => Math.round(((det[key] || {}).sustain_seconds || (key === 'multiple_faces' ? 1 : 3)) * 1000);
+        if (det.face_absent && det.face_absent.enabled && faceAbsentGate(faces === 0, now))
+          report('camera_face_absent', {faces, held_ms: heldMs('face_absent')});
+        if (det.multiple_faces && det.multiple_faces.enabled && multiFaceGate(faces > 1, now))
+          report('camera_multiple_faces', {faces, held_ms: heldMs('multiple_faces')});
         if (det.looking_away && det.looking_away.enabled) {
-          let away = false;
+          let away = false, yaw = 0, pitch = 0;
           const mats = res.facialTransformationMatrixes || [];
           if (faces === 1 && mats.length) {
-            const { yaw, pitch } = headAngles(mats[0]);
+            ({ yaw, pitch } = headAngles(mats[0]));
             away = Math.abs(yaw) > yawDeg || Math.abs(pitch) > pitchDeg;
           }
-          if (lookAwayGate(away, now)) report('camera_looking_away');
+          if (lookAwayGate(away, now))
+            report('camera_looking_away', {faces, yaw: Math.round(yaw), pitch: Math.round(pitch), held_ms: heldMs('looking_away')});
         }
       }
     }

@@ -1,7 +1,10 @@
 """Background task scheduler using APScheduler."""
 
+import functools
 import logging
+from collections.abc import Awaitable, Callable
 
+import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -36,6 +39,23 @@ def init_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
+def with_job_context(
+    job_id: str, func: Callable[[], Awaitable[None]]
+) -> Callable[[], Awaitable[None]]:
+    """Run a scheduled job with only `job` bound — nothing from another job or request."""
+
+    @functools.wraps(func)
+    async def run() -> None:
+        structlog.contextvars.clear_contextvars()
+        try:
+            with structlog.contextvars.bound_contextvars(job=job_id):
+                await func()
+        finally:
+            structlog.contextvars.clear_contextvars()
+
+    return run
+
+
 def _register_jobs() -> None:
     """Register all scheduled jobs with the scheduler."""
     from submissions_checker.core.config import get_settings
@@ -54,7 +74,7 @@ def _register_jobs() -> None:
 
     # Outbox processor - runs every 10 seconds
     scheduler.add_job(
-        process_outbox_messages,
+        with_job_context("outbox_processor", process_outbox_messages),
         trigger=IntervalTrigger(seconds=10),
         id="outbox_processor",
         name="Process Outbox Messages",
@@ -67,7 +87,7 @@ def _register_jobs() -> None:
     # Teacher digest flusher - coalesces review-queue emails per teacher
     flush_interval = settings.teacher_digest_flush_interval
     scheduler.add_job(
-        flush_teacher_digests,
+        with_job_context("teacher_digest_processor", flush_teacher_digests),
         trigger=IntervalTrigger(seconds=flush_interval),
         id="teacher_digest_processor",
         name="Flush Teacher Review Digests",
@@ -79,7 +99,7 @@ def _register_jobs() -> None:
 
     # Metrics refresh - DB-derived gauges for the Grafana dashboards
     scheduler.add_job(
-        refresh_metrics,
+        with_job_context("metrics_refresh", refresh_metrics),
         trigger=IntervalTrigger(seconds=settings.metrics_refresh_interval),
         id="metrics_refresh",
         name="Refresh Prometheus gauges",
@@ -91,7 +111,7 @@ def _register_jobs() -> None:
 
     # Subject gradebook stats — cached Панель stat-card numbers
     scheduler.add_job(
-        refresh_subject_gradebook_stats,
+        with_job_context("subject_stats_refresh", refresh_subject_gradebook_stats),
         trigger=IntervalTrigger(seconds=settings.subject_stats_refresh_interval),
         id="subject_stats_refresh",
         name="Refresh subject gradebook stats",
@@ -108,7 +128,7 @@ def _register_jobs() -> None:
     # Opt-in (DEADLINE_REMINDERS_ENABLED=true): see the setting's comment.
     if settings.deadline_reminders_enabled:
         scheduler.add_job(
-            run_deadline_reminders,
+            with_job_context("deadline_reminders", run_deadline_reminders),
             trigger=IntervalTrigger(seconds=settings.deadline_reminder_interval),
             id="deadline_reminders",
             name="Enqueue deadline reminders",

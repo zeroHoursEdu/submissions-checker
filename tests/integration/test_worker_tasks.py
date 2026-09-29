@@ -251,6 +251,33 @@ async def test_ai_review_completed_path(db_session: AsyncSession, monkeypatch) -
 
 
 @pytest.mark.asyncio
+async def test_ai_review_completed_path_logs_ai_review_finished(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """ai_review_finished carries the fields the Grafana dashboards read."""
+    from structlog.testing import capture_logs
+
+    _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-logfin")
+
+    fake = _FakeProvider(verdict=_verdict(code_mark=77))
+    _patch_provider(monkeypatch, fake)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_AI_REVIEW,
+        payload={"submission_id": sub.id, "next_step": "completed"},
+    )
+    with capture_logs() as logs:
+        message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    finished = next(e for e in logs if e["event"] == "ai_review_finished")
+    assert finished["provider"] == "fake"
+    assert finished["model"] == "fake-model"
+    assert finished["code_mark"] == 77
+    assert isinstance(finished["duration_ms"], int)
+
+
+@pytest.mark.asyncio
 async def test_ai_review_teacher_path_enqueues_review(
     db_session: AsyncSession, monkeypatch
 ) -> None:
@@ -307,6 +334,32 @@ async def test_ai_review_unusable_output_marks_failed(
     assert message.retry_count == 1
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.AI_REVIEW_FAILED
+
+
+@pytest.mark.asyncio
+async def test_ai_review_failure_logs_ai_review_failed_with_traceback(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """ai_review_failed carries the provider and a traceback (exc_info)."""
+    from structlog.testing import capture_logs
+
+    _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-logfail")
+
+    fake = _FakeProvider(raises=AIProviderError("provider returned empty content"))
+    _patch_provider(monkeypatch, fake)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_AI_REVIEW,
+        payload={"submission_id": sub.id, "next_step": "completed"},
+    )
+    with capture_logs() as logs:
+        message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.ERROR
+    failed = next(e for e in logs if e["event"] == "ai_review_failed")
+    assert failed["provider"] == "fake"
+    assert failed["log_level"] == "error"
+    assert failed["exc_info"]
 
 
 @pytest.mark.asyncio
@@ -1085,6 +1138,45 @@ async def test_check_passed_tests_only_completes(
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.COMPLETED
     assert sub.test_results["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_check_logs_started_and_finished(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path
+) -> None:
+    """check_started/check_finished carry the fields the Grafana dashboards read."""
+    from structlog.testing import capture_logs
+
+    zip_path = tmp_path / "logok.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(
+        db_session, "logok", review_mode="tests_only", saved_as="logok.zip"
+    )
+
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    _patch_run_check(
+        monkeypatch,
+        check_core.CheckOutcome("passed", 2, 2, [{"name": "t1", "passed": True}]),
+    )
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    with capture_logs() as logs:
+        message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    started = next(e for e in logs if e["event"] == "check_started")
+    assert started["assignment"] == "lab1"
+    assert started["subject_id"]
+
+    finished = next(e for e in logs if e["event"] == "check_finished")
+    assert finished["status"] == "passed"
+    assert finished["passed"] is True
+    assert finished["score"] == 2
+    assert finished["max_score"] == 2
+    assert isinstance(finished["duration_ms"], int)
 
 
 @pytest.mark.asyncio

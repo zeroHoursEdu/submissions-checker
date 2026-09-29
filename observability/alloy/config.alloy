@@ -43,3 +43,64 @@ prometheus.remote_write "out" {
 		}
 	}
 }
+
+// ── Logs → Loki ─────────────────────────────────────────────────────────────
+//
+// Tails every container of this compose project through the Docker socket (read-only
+// mount). Only four labels: app, service, env and level; ids stay in the JSON line and are
+// read with `| json` at query time, which keeps the free tier's stream count tiny.
+
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+
+	filter {
+		name   = "label"
+		values = ["com.docker.compose.project=" + coalesce(sys.env("SUBCHK_COMPOSE_PROJECT"), "submissions-checker")]
+	}
+}
+
+discovery.relabel "containers" {
+	targets = []
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+}
+
+loki.source.docker "containers" {
+	host          = "unix:///var/run/docker.sock"
+	targets       = discovery.docker.containers.targets
+	relabel_rules = discovery.relabel.containers.rules
+	labels        = {
+		app = "subchk",
+		env = coalesce(sys.env("SUBCHK_ENV"), "local"),
+	}
+	forward_to = [loki.process.levels.receiver]
+}
+
+loki.process "levels" {
+	// app and caddy log JSON with a `level` key; other lines (postgres) pass through as-is.
+	stage.json {
+		expressions = {level = ""}
+	}
+
+	stage.labels {
+		values = {level = ""}
+	}
+
+	forward_to = [loki.write.out.receiver]
+}
+
+loki.write "out" {
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_LOKI_URL")
+
+		basic_auth {
+			// Grafana Cloud: username is the numeric Loki user id, password an access-policy
+			// token with logs:write. The local Loki ignores both.
+			username = sys.env("GRAFANA_CLOUD_LOKI_USER")
+			password = sys.env("GRAFANA_CLOUD_LOKI_TOKEN")
+		}
+	}
+}

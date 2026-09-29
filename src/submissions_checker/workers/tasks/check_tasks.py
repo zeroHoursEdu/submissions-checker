@@ -17,6 +17,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -108,7 +109,11 @@ def _resolve_plugin_dir(
 
 async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     submission_id: int = payload["submission_id"]
+    with structlog.contextvars.bound_contextvars(submission_id=submission_id):
+        await _execute_check(db, submission_id)
 
+
+async def _execute_check(db: AsyncSession, submission_id: int) -> None:
     result = await db.execute(
         select(Submission)
         .where(Submission.id == submission_id)
@@ -126,6 +131,7 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
     student_assignment = submission.students_assignment
     subjects_assignment = student_assignment.subjects_assignment
     subject = subjects_assignment.subject
+    logger.info("check_started", subject_id=subject.id, assignment=subjects_assignment.code)
 
     # Pin config version if not already pinned (only pin once when check starts)
     if submission.plugin_config_id is None:
@@ -245,6 +251,14 @@ async def execute_check_task(db: AsyncSession, payload: dict[str, Any]) -> None:
             _fail_validation(submission, str(exc))
             return
         metrics.check_duration_seconds.observe(time.perf_counter() - started)
+        logger.info(
+            "check_finished",
+            status=outcome.status,
+            passed=outcome.passed,
+            score=outcome.score,
+            max_score=outcome.max_score,
+            duration_ms=round((time.perf_counter() - started) * 1000),
+        )
 
         if outcome.status == "validation_failed":
             metrics.checks_total.labels(outcome="validation_failed").inc()

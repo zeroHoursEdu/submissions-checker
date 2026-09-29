@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Application
     environment: Literal["development", "test", "production"] = "development"
     log_level: str = "INFO"
+    # "json" for anything a machine reads (prod, the local Loki); "console" for a human
+    # watching `make logs-app`. Unset means: console in development, json elsewhere.
+    log_format: Literal["json", "console"] | None = None
     secret_key: str = Field(..., min_length=32)
     debug: bool = False
 
@@ -175,6 +178,12 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Check if running in development mode."""
         return self.environment == "development"
+
+    @property
+    def effective_log_format(self) -> Literal["json", "console"]:
+        if self.log_format is not None:
+            return self.log_format
+        return "console" if self.is_development else "json"
 
     @property
     def is_production(self) -> bool:

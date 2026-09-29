@@ -268,6 +268,7 @@ async def resolve_dispute(
     logger.info(
         "quiz_dispute_resolved",
         dispute_id=dispute.id,
+        question_id=dispute.question_id,
         accepted=accept,
         rescored=len(rescored),
         also_resolved=len(resolved_ids) - 1,
