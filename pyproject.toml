@@ -17,7 +17,7 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "structlog>=24.4.0",
     "python-multipart>=0.0.12",
-    "pyjwt>=2.10",
+    "pyjwt>=2.15",
     # Fernet for secrets that wait in a database row (core/sealed.py).
     "cryptography>=44",
     "bcrypt>=4.0.0",
