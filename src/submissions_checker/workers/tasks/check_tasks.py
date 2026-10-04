@@ -60,7 +60,9 @@ MISSING_ARCHIVE_REASON = "Subject config has no stored archive — re-apply the 
 # Review modes that examine the student by quiz instead of by automated tests. Assignments in
 # these modes need no `sandbox`/`check_command` block at all: the upload is accepted after an
 # archive-safety check and the submission goes straight to the quiz.
-_QUIZ_FIRST_MODES = frozenset({"quiz_only", "quiz_then_teacher"})
+# quiz_and_teacher_scores is normally opened with no upload at all (services.quiz_open); a
+# legacy ZIP that reaches the worker is accepted the same check-free way.
+_QUIZ_FIRST_MODES = frozenset({"quiz_only", "quiz_then_teacher", "quiz_and_teacher_scores"})
 
 
 async def is_quiz_first_assignment(

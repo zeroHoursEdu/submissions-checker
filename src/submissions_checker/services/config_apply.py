@@ -30,6 +30,7 @@ from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.services import teacher_scores
 from submissions_checker.services.subject_config import validate_subject_code
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 
@@ -48,6 +49,7 @@ _QUIZ_REACHABLE_MODES = frozenset(
         "tests_then_ai_then_quiz",
         "quiz_only",
         "quiz_then_teacher",
+        "quiz_and_teacher_scores",
         "tests_then_teacher",
         "tests_then_ai_then_teacher",
         "tests_then_ai_teacher",
@@ -130,6 +132,7 @@ class ConfigApplyService:
         self._validate_quiz_questions(new_cfg)
         self._validate_check_commands(new_cfg)
         self._validate_quiz_reachability(new_cfg)
+        self._validate_teacher_scores(new_cfg)
         self._parse_squad_max_size(new_cfg)
 
         sha256 = hashlib.sha256(zip_bytes).hexdigest()
@@ -196,6 +199,12 @@ class ConfigApplyService:
                     f"assignment '{code}' has a quiz but review_mode '{mode}' never sends it; "
                     f"use one of: {', '.join(sorted(_QUIZ_REACHABLE_MODES))}"
                 )
+
+    def _validate_teacher_scores(self, new_cfg: dict[str, Any]) -> None:
+        """Reject a quiz_and_teacher_scores assignment whose points cannot add up."""
+        for code, a_cfg in (new_cfg.get("assignments") or {}).items():
+            if teacher_scores.is_scored_mode(a_cfg):
+                teacher_scores.validate_assignment(code, a_cfg or {})
 
     @staticmethod
     def _parse_squad_max_size(new_cfg: dict[str, Any]) -> int | None:

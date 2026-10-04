@@ -393,3 +393,43 @@ async def test_quiz_under_tests_only_is_rejected_on_upload(
     assert resp.status_code == 303
     assert "never sends it" in urllib.parse.unquote(resp.headers["location"])
     assert (await db.execute(select(func.count()).select_from(Subject))).scalar_one() == 0
+
+
+def _scored_config(max_grade: int) -> dict[str, Any]:
+    cfg = _base_config()
+    lab = cfg["assignments"]["lab1"]
+    del lab["sandbox"]
+    lab.update(
+        review_mode="quiz_and_teacher_scores",
+        max_grade=max_grade,
+        grading={
+            "quiz_points": 8,
+            "teacher_criteria": [
+                {"key": "report", "title": "Звіт", "max": 5},
+                {"key": "star", "title": "Зірочка", "max": 3, "optional": True},
+            ],
+        },
+        quiz={"questions": [{"type": "true_false", "text": "?", "correct": True}]},
+    )
+    return cfg
+
+
+async def test_quiz_and_teacher_scores_is_accepted(
+    teacher_client: AsyncClient, db: AsyncSession
+) -> None:
+    resp = await _post(teacher_client, _make_zip(_scored_config(16)))
+    assert resp.status_code == 303
+    assert _redirect_query(resp)["apply_result"] == ["created"]
+    asg = (await db.execute(select(SubjectsAssignment))).scalar_one()
+    assert asg.max_grade == 16
+    assert asg.config["review_mode"] == "quiz_and_teacher_scores"
+    assert [c["key"] for c in asg.config["grading"]["teacher_criteria"]] == ["report", "star"]
+
+
+async def test_quiz_and_teacher_scores_with_bad_total_is_rejected(
+    teacher_client: AsyncClient, db: AsyncSession
+) -> None:
+    resp = await _post(teacher_client, _make_zip(_scored_config(15)))
+    assert resp.status_code == 303
+    assert "must equal" in urllib.parse.unquote(resp.headers["location"])
+    assert (await db.execute(select(func.count()).select_from(Subject))).scalar_one() == 0

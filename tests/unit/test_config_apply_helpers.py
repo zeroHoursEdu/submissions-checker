@@ -327,3 +327,43 @@ def test_squads_max_size_is_read(svc: ConfigApplyService) -> None:
 def test_squads_block_is_validated(svc: ConfigApplyService, block) -> None:
     with pytest.raises(ValueError, match="squads.maxAllowedSize"):
         svc._parse_squad_max_size({"squads": block})
+
+
+# ── quiz_and_teacher_scores ──────────────────────────────────────────────────
+
+
+def _scored_cfg(max_grade: int) -> dict:  # type: ignore[type-arg]
+    return {
+        "assignments": {
+            "lab1": {
+                "review_mode": "quiz_and_teacher_scores",
+                "max_grade": max_grade,
+                "grading": {
+                    "quiz_points": 8,
+                    "teacher_criteria": [{"key": "report", "title": "Звіт", "max": 5}],
+                },
+                "quiz": {"questions": [{"text": "q"}]},
+            }
+        }
+    }
+
+
+def test_validate_teacher_scores_rejects_bad_total(svc: ConfigApplyService) -> None:
+    with pytest.raises(ValueError, match="lab1"):
+        svc._validate_teacher_scores(_scored_cfg(14))
+
+
+def test_validate_teacher_scores_accepts_matching_total(svc: ConfigApplyService) -> None:
+    svc._validate_teacher_scores(_scored_cfg(13))
+
+
+def test_validate_teacher_scores_ignores_other_modes(svc: ConfigApplyService) -> None:
+    svc._validate_teacher_scores({"assignments": {"lab1": {"review_mode": "quiz_then_teacher"}}})
+
+
+def test_scored_mode_is_quiz_reachable_and_quiz_first() -> None:
+    from submissions_checker.services.config_apply import _QUIZ_REACHABLE_MODES
+    from submissions_checker.workers.tasks.check_tasks import _QUIZ_FIRST_MODES
+
+    assert "quiz_and_teacher_scores" in _QUIZ_REACHABLE_MODES
+    assert "quiz_and_teacher_scores" in _QUIZ_FIRST_MODES
