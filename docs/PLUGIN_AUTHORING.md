@@ -122,6 +122,7 @@ archive and the student goes straight to the quiz:
 |----------------------|-----------------------------------------------------------------------|
 | `quiz_only`          | Upload accepted → quiz → COMPLETED on a pass                          |
 | `quiz_then_teacher`  | Upload accepted → quiz → AWAITING_TEACHER_REVIEW → teacher approves    |
+| `quiz_and_teacher_scores` | **No upload** → quiz any time; teacher enters per-criterion points; grade = quiz points + points (see below) |
 
 Under `tests_then_teacher` and `tests_then_ai_then_teacher` a configured `quiz:` block is sent
 automatically when the teacher approves the submission — there is no separate
@@ -139,6 +140,44 @@ grading:
   code_weight: 0
   quiz_weight: 1
 ```
+
+#### `quiz_and_teacher_scores` — quiz any time, teacher grades the work
+
+For courses where the platform examines only the *defence* and the teacher grades the work
+itself outside the platform (on paper, in class). The student **uploads nothing**: the
+assignment page shows «Почати тест» from the start, and the first open creates an
+upload-less submission (`source_type = QUIZ_ONLY`). The teacher types per-criterion points
+in the assignment board's row for each student, before or after the quiz.
+
+```yaml
+lab3:
+  min_grade: 0
+  max_grade: 16
+  review_mode: quiz_and_teacher_scores
+  grading:
+    quiz_points: 8                    # the quiz is worth up to 8 points
+    teacher_criteria:                 # one input per criterion on the board
+      - { key: report, title: "Звіт", max: 5 }
+      - { key: star,   title: "Завдання з зірочкою", max: 3, optional: true }
+  quiz: { ... }                       # required
+```
+
+- **Grade** = `quiz_pct × quiz_points` (rounded half up; squads round up) + the sum of the
+  criteria. An `optional` criterion left empty counts as 0; a required one left empty
+  means no grade yet.
+- **The quiz is a gate**: without a passed attempt there is no grade. A student who uses
+  every attempt goes to FAILED; the board's «Додаткова спроба тесту» reopens it.
+- **Flow**: a pass with every required point already entered → COMPLETED; otherwise →
+  AWAITING_TEACHER_REVIEW until the teacher saves the points. Editing the points of a
+  COMPLETED submission re-grades it; clearing a required criterion of a graded one is refused.
+  «Підтвердити» on the review page is refused until the points exist.
+- **Breakdown** ("Тест 6/8 · Звіт 4/5 · …") is always shown to the student, on the board,
+  and as the gradebook cell's tooltip.
+- **Apply config rejects** the assignment unless: it has quiz questions; `quiz_points` is an
+  integer ≥ 0; `teacher_criteria` is non-empty; keys match `[a-z0-9_]+` and are unique; each
+  `max` is an integer > 0; and `quiz_points + Σ max == max_grade − min_grade`.
+- Uploads are refused in this mode, and "re-run checks" is refused for a `QUIZ_ONLY`
+  submission (there is no archive).
 
 ---
 

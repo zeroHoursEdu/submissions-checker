@@ -150,6 +150,12 @@ This is the main working page for a task. It shows:
 
 You submit work as a single **ZIP file**.
 
+Some labs take **no upload at all**: the teacher grades your work in class and the platform
+only holds the defence quiz. On such a lab the page shows a **Тест-захист** card with an
+**«Почати тест»** button instead of an upload form — open the quiz whenever you are ready.
+After a pass the page says it is waiting for the teacher's points; once they are in you see
+the grade and where it came from, e.g. *Тест 6/8 · Звіт 4/5 · Завдання з зірочкою 2/3*.
+
 **How to submit:**
 
 1. On the assignment detail page, choose your `.zip` file and submit it.

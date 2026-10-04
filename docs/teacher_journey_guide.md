@@ -286,6 +286,16 @@ the current grade. It also surfaces **integrity flags** from any associated quiz
 - **webcam proctoring thumbnails** captured when a quiz violation was flagged (if the
   subject enabled webcam proctoring and the student consented).
 
+**Labs graded by points (`review_mode: quiz_and_teacher_scores`).** When the platform
+examines only the defence quiz and you grade the work yourself, the board gains a **Тест**
+column (the quiz half in points, or "не складено (used/cap)"), one number input per
+criterion from the config (e.g. *Звіт /5*, *Завдання з зірочкою /3*), a **Разом** column
+and a **Зберегти** button per row. Type the points whenever you like — before or after the
+student's quiz — and save the row. Once the quiz is passed and every required criterion has
+points, the work is graded automatically; changing the points later re-grades it. Empty
+optional criteria count as 0. «Підтвердити» on the review page is refused for these labs
+until the points are in.
+
 ### 6.2 Reviewing one submission
 
 `GET /teacher/submissions/{id}/review` opens a submission that is awaiting your review. You

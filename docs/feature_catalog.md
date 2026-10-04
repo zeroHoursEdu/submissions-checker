@@ -102,6 +102,7 @@ See [`docs/features/squads.md`](features/squads.md) for the full squad feature.
 | Re-run checks (any non-terminal or failed status → PENDING, config pin dropped; audited `rerun_checks`) | Owner / ADMIN | `POST /teacher/submissions/{id}/rerun-checks` |
 | Retry a failed AI review / hand it to manual review (from `AI_REVIEW_FAILED`; audited) | Owner / ADMIN | `POST /teacher/submissions/{id}/retry-ai-review`, `POST /teacher/submissions/{id}/send-to-teacher` |
 | Grant one more quiz attempt to a student who exhausted `max_quiz_attempts` (from `FAILED`, or `QUIZ_SENT` for a second squad member; attempt history kept; student notified in-app; audited `grant_quiz_attempt`) | Owner / ADMIN | `POST /teacher/submissions/{id}/grant-quiz-attempt` (form `student_id`) |
+| Enter a student's per-criterion work points for a `quiz_and_teacher_scores` assignment (form `student_id`, `score_<key>`; empty = not entered; ints `0..max` else 422; squad points shared; completes an AWAITING_TEACHER_REVIEW submission whose quiz is passed, re-grades a COMPLETED one; audited `teacher_scores_set`) | Owner / ADMIN | `POST /teacher/subjects/{subject_id}/assignments/{sa_id}/scores` |
 | Similarity report: pairwise token similarity of the latest ZIP per student, threshold `?min=` | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}/similarity` |
 | Export grades CSV (Операції tab) | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
 
@@ -112,6 +113,7 @@ The current ("precise") flow:
 
 ```
 PENDING ──start_validation──▶ VALIDATING
+        ──quiz_opened──▶ QUIZ_SENT          (quiz_and_teacher_scores: quiz opened, nothing uploaded)
 VALIDATING ──validation_passed──▶ TESTING
            ──validation_failed──▶ VALIDATION_FAILED
 TESTING ──test_failed──▶ TEST_FAILED
@@ -145,6 +147,7 @@ FAILED ──quiz_attempt_granted──▶ QUIZ_SENT      (teacher grants one mo
 | `tests_then_teacher` | → AWAITING_TEACHER_REVIEW | Yes |
 | `tests_then_ai_then_teacher` | AI review → AWAITING_TEACHER_REVIEW | Yes |
 | `tests_then_quiz` | → QUIZ_SENT (student takes a quiz) | No |
+| `quiz_and_teacher_scores` | no upload; quiz opens any time; teacher types per-criterion points on the board; grade = quiz points + points | Yes (points) |
 
 AI verdicts (cheating / AI-generated flags with confidence and reason, a code mark, a
 student-facing comment) are shown to the teacher on the review page and as a red badge on the
@@ -158,7 +161,7 @@ names/details a student sees is controlled by the subject config.
 
 | Feature | Who | Route(s) |
 |---|---|---|
-| Start / resume a quiz (consent required; resumes an in-progress attempt; redirects to result if already passed; enforces `max_quiz_attempts`) | STUDENT (owner) | `GET /portal/subjects/{subject}/assignments/{sa_id}/quiz` |
+| Start / resume a quiz (consent required; resumes an in-progress attempt; redirects to result if already passed; enforces `max_quiz_attempts`; under `quiz_and_teacher_scores` creates the upload-less `QUIZ_ONLY` submission on first open) | STUDENT (owner) | `GET /portal/subjects/{subject}/assignments/{sa_id}/quiz` |
 | Take the quiz (snapshotted questions, optional shuffle, optional timer) | STUDENT (owner) | `GET /portal/quiz/{attempt_id}` |
 | Report an anti-cheat event (tab-switch, blur, copy, shortcut, fullscreen exit, …; may warn / flag / penalize time / fail) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/event` |
 | Submit a webcam proctoring snapshot (browser-side MediaPipe face detection, models served from `/static/vendor/`; when enabled + consented; skipped silently if storage absent) | STUDENT (owner) | `POST /portal/quiz/{attempt_id}/snapshot` |
