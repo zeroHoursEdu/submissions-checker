@@ -13,6 +13,8 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from submissions_checker.db.models import (
+    AuditLog,
+    OutboxMessage,
     QuizAttempt,
     StudentAssignment,
     Subject,
@@ -21,6 +23,7 @@ from submissions_checker.db.models import (
     Submission,
 )
 from submissions_checker.db.models.enums import (
+    OutboxEventType,
     QuizAttemptStatus,
     SubmissionSourceType,
     SubmissionStatus,
@@ -407,3 +410,212 @@ async def test_dispute_regrade_waits_for_teacher_without_points(db, teacher, mak
     await db.refresh(sub)
     assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
 
+
+# ── Teacher enters points on the board ───────────────────────────────────────
+
+
+def _scores_url(subject, asg) -> str:
+    return f"/teacher/subjects/{subject.id}/assignments/{asg.id}/scores"
+
+
+def _form(student, **scores: str) -> dict[str, str]:
+    return {"student_id": str(student.id), **{f"score_{k}": v for k, v in scores.items()}}
+
+
+async def _reload(db, *objs) -> None:
+    for o in objs:
+        await db.refresh(o)
+
+
+async def test_teacher_saves_points_before_quiz(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report="4", star=""), follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    await _reload(db, sa)
+    assert sa.teacher_scores == {"report": 4}
+    assert sa.grade is None
+    log = (
+        await db.execute(select(AuditLog).where(AuditLog.action == "teacher_scores_set"))
+    ).scalar_one()
+    assert log.detail["new"] == {"report": 4}
+    assert log.detail["student_id"] == student.id
+
+
+async def test_saving_points_completes_waiting_submission(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    await _attempt(db, sub, student.id, is_passed=True, score=3, max_score=4)
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report="4", star="2"), follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    await _reload(db, sa, sub)
+    assert sub.status == SubmissionStatus.COMPLETED
+    assert sa.grade == 12
+    outbox = (
+        await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.event_type == OutboxEventType.SUBMISSION_REVIEWED
+            )
+        )
+    ).scalar_one()
+    assert outbox.payload["submission_id"] == sub.id
+
+
+async def test_legacy_zip_submission_completes_on_points(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, sa, sub = await _arrange_scored(
+        db,
+        teacher,
+        make_student,
+        status=SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+    )
+    await _attempt(db, sub, student.id, is_passed=True, review_mode="quiz_then_teacher")
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report="5"), follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    await _reload(db, sa, sub)
+    assert sub.status == SubmissionStatus.COMPLETED
+    assert sa.grade == 13
+
+
+async def test_editing_points_after_completion_regrades(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.COMPLETED, scores={"report": 4}
+    )
+    await _attempt(db, sub, student.id, is_passed=True)
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report="5"), follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    await _reload(db, sa, sub)
+    assert sa.grade == 13
+    assert sub.status == SubmissionStatus.COMPLETED
+
+
+async def test_clearing_required_after_completion_refused(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, sa, _sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.COMPLETED, scores={"report": 4}
+    )
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report=""), follow_redirects=False
+    )
+    assert r.status_code == 422
+    await _reload(db, sa)
+    assert sa.teacher_scores == {"report": 4}
+
+
+@pytest.mark.parametrize("value", ["abc", "-1", "6"])
+async def test_bad_value_rejected(
+    client: AsyncClient, db, teacher, make_student, value: str
+) -> None:
+    subject, asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report=value), follow_redirects=False
+    )
+    assert r.status_code == 422
+    await _reload(db, sa)
+    assert sa.teacher_scores is None
+
+
+async def test_scores_route_other_teacher_403(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, asg, student, _sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    other = await make_user(role=UserRole.TEACHER, username="other")
+    authenticate(client, other)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report="4"), follow_redirects=False
+    )
+    assert r.status_code == 403
+
+
+async def test_scores_route_not_scored_mode_409(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, _sa = await _arrange_scored_no_sub(
+        db, teacher, make_student, mode="quiz_then_teacher"
+    )
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(student, report="4"), follow_redirects=False
+    )
+    assert r.status_code == 409
+
+
+async def test_scores_route_unenrolled_student_404(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, _student, _sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    stranger = await make_student(full_name="Not Enrolled")
+    authenticate(client, teacher)
+    r = await client.post(
+        _scores_url(subject, asg), data=_form(stranger, report="4"), follow_redirects=False
+    )
+    assert r.status_code == 404
+
+
+async def test_review_approve_refused_without_points(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    _s, _a, student, _sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    await _attempt(db, sub, student.id, is_passed=True)
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/review", data={"action": "approve"}, follow_redirects=False
+    )
+    assert r.status_code == 409
+    await _reload(db, sub)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
+async def test_bulk_approve_skips_without_points(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, _sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    await _attempt(db, sub, student.id, is_passed=True)
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/subjects/{subject.id}/assignments/{asg.id}/bulk",
+        data={"action": "approve", "submission_ids": [str(sub.id)]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].endswith("?bulk=0,1")
+    await _reload(db, sub)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
+async def test_rerun_refused_for_quiz_only(client: AsyncClient, db, teacher, make_student) -> None:
+    _s, _a, _st, _sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.FAILED
+    )
+    authenticate(client, teacher)
+    r = await client.post(f"/teacher/submissions/{sub.id}/rerun-checks", follow_redirects=False)
+    assert r.status_code == 409
+    await _reload(db, sub)
+    assert sub.status == SubmissionStatus.FAILED

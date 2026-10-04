@@ -54,11 +54,12 @@ from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
     SubjectStatus,
+    SubmissionSourceType,
     SubmissionStatus,
     UserRole,
 )
 from submissions_checker.db.models.group import Group
-from submissions_checker.services import quiz_grants, squads
+from submissions_checker.services import quiz_grants, squads, teacher_scores
 from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
@@ -1438,6 +1439,19 @@ async def teacher_download_submission(
     )
 
 
+class ScoresIncompleteError(Exception):
+    """A quiz_and_teacher_scores submission was approved before its work points exist."""
+
+
+async def _quiz_passed(db: DBSession, submission: Submission) -> bool:
+    passed_id = await db.scalar(
+        select(QuizAttempt.id)
+        .where(QuizAttempt.submission_id == submission.id, QuizAttempt.is_passed.is_(True))
+        .limit(1)
+    )
+    return passed_id is not None
+
+
 async def _apply_review_decision(
     db: DBSession,
     submission: Submission,
@@ -1454,6 +1468,12 @@ async def _apply_review_decision(
     subjects_assignment = submission.students_assignment.subjects_assignment
     clean_reason = reason.strip()
     if action == "approve":
+        if teacher_scores.is_scored_mode(subjects_assignment.config):
+            # Approving here would grade the work from the quiz alone; the work points are
+            # entered on the board, which completes the submission itself.
+            crits = teacher_scores.criteria((subjects_assignment.config or {}).get("grading"))
+            if not teacher_scores.is_complete(crits, submission.students_assignment.teacher_scores):
+                raise ScoresIncompleteError
         has_quiz = False
         if submission.plugin_config and subjects_assignment.code:
             asgn_cfg = submission.plugin_config.config.get("assignments", {}).get(
@@ -1464,15 +1484,7 @@ async def _apply_review_decision(
             # Under `quiz_then_teacher` the quiz already happened and this review IS the last
             # step — without this guard such a submission would be sent back into its quiz on
             # every approval and could never complete.
-            already_passed = await db.scalar(
-                select(QuizAttempt.id)
-                .where(
-                    QuizAttempt.submission_id == submission.id,
-                    QuizAttempt.is_passed.is_(True),
-                )
-                .limit(1)
-            )
-            if already_passed is not None:
+            if await _quiz_passed(db, submission):
                 has_quiz = False
         event = "teacher_send_quiz" if has_quiz else "teacher_approve"
         transition(submission, event)
@@ -1536,7 +1548,12 @@ async def teacher_review_submission_action(
     subjects_assignment = submission.students_assignment.subjects_assignment
     await require_subject_access(db, subjects_assignment.subject_id, current_user)
 
-    await _apply_review_decision(db, submission, action, reason, current_user)
+    try:
+        await _apply_review_decision(db, submission, action, reason, current_user)
+    except ScoresIncompleteError as exc:
+        raise HTTPException(
+            status_code=409, detail="Enter the work points on the assignment board first"
+        ) from exc
     await db.commit()
 
     return RedirectResponse(
@@ -1598,7 +1615,11 @@ async def teacher_bulk_board_action(
             skipped += 1
             continue
         else:
-            await _apply_review_decision(db, sub, action, reason, current_user)
+            try:
+                await _apply_review_decision(db, sub, action, reason, current_user)
+            except ScoresIncompleteError:
+                skipped += 1
+                continue
         applied += 1
 
     await audit(
@@ -1664,8 +1685,11 @@ def _requeue_checks(db: DBSession, submission: Submission) -> None:
 
     The config pin is dropped so a re-run after a config fix picks up the latest
     version; previous results are cleared so the board does not show stale output.
-    Raises InvalidTransitionError from a status that has no way back (COMPLETED).
+    Raises InvalidTransitionError from a status that has no way back (COMPLETED), and for
+    an upload-less QUIZ_ONLY submission — there is no archive for the checks to read.
     """
+    if submission.source_type == SubmissionSourceType.QUIZ_ONLY:
+        raise InvalidTransitionError("QUIZ_ONLY submission has nothing to re-check")
     transition(submission, "requeue_checks")
     submission.plugin_config_id = None
     submission.test_results = None
@@ -1814,6 +1838,103 @@ async def teacher_grant_quiz_attempt(
         )
     await db.commit()
     return RedirectResponse(url=_board_url(submission), status_code=303)
+
+
+@router.post("/subjects/{subject_id}/assignments/{sa_id}/scores")
+async def teacher_save_scores(
+    request: Request,
+    subject_id: int,
+    sa_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> RedirectResponse:
+    """Store one student's per-criterion work points (quiz_and_teacher_scores).
+
+    Points may arrive before or after the quiz. When the quiz is already passed the
+    submission completes here; on a completed one the grade follows the edit. A squad's
+    points are shared, like its grade.
+    """
+    await require_subject_access(db, subject_id, current_user)
+    assignment = await db.get(SubjectsAssignment, sa_id)
+    if assignment is None or assignment.subject_id != subject_id:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if not teacher_scores.is_scored_mode(assignment.config):
+        raise HTTPException(status_code=409, detail="This assignment takes no teacher points")
+    form = await request.form()
+    try:
+        student_id = int(str(form.get("student_id", "")))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="student_id is required") from exc
+    enrolled = await db.scalar(
+        select(SubjectsStudents.student_id).where(
+            SubjectsStudents.subject_id == subject_id,
+            SubjectsStudents.student_id == student_id,
+        )
+    )
+    if enrolled is None:
+        raise HTTPException(status_code=404, detail="Student is not enrolled")
+    crits = teacher_scores.criteria((assignment.config or {}).get("grading"))
+    try:
+        new_scores = teacher_scores.parse_form(crits, {k: str(v) for k, v in form.items()})
+    except teacher_scores.ScoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    own = await db.scalar(
+        select(StudentAssignment)
+        .where(
+            StudentAssignment.student_id == student_id,
+            StudentAssignment.subjects_assignment_id == sa_id,
+        )
+        .with_for_update()
+    )
+    if own is None:
+        own = StudentAssignment(student_id=student_id, subjects_assignment_id=sa_id)
+        db.add(own)
+        await db.flush()
+    submission = await squads.latest_submission(db, own)
+    complete = teacher_scores.is_complete(crits, new_scores)
+    if submission is not None and submission.status == SubmissionStatus.COMPLETED and not complete:
+        raise HTTPException(status_code=422, detail="A graded work cannot lose a required score")
+
+    squad = await squads.squad_of(db, subject_id, student_id)
+    target_ids = await squads.member_sa_ids(db, squad, sa_id) if squad else [own.id]
+    old = dict(own.teacher_scores or {})
+    for row_id in target_ids:
+        row = await db.get(StudentAssignment, row_id)
+        if row is not None:
+            row.teacher_scores = dict(new_scores)
+    await audit(
+        db,
+        action="teacher_scores_set",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="student_assignment",
+        target_id=own.id,
+        student_id=student_id,
+        old=old,
+        new=new_scores,
+    )
+
+    if submission is not None and complete:
+        await db.flush()
+        if submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW and await _quiz_passed(
+            db, submission
+        ):
+            transition(submission, "teacher_approve")
+            await finalize_grade(db, submission)
+            db.add(
+                OutboxMessage(
+                    event_type=OutboxEventType.SUBMISSION_REVIEWED,
+                    state=OutboxMessageState.PENDING,
+                    payload={"submission_id": submission.id, "action": "approve", "reason": ""},
+                )
+            )
+        elif submission.status == SubmissionStatus.COMPLETED:
+            await finalize_grade(db, submission)
+    await db.commit()
+    return RedirectResponse(
+        url=f"/teacher/subjects/{subject_id}/assignments/{sa_id}", status_code=303
+    )
 
 
 @router.post("/subjects/{subject_id}/enroll/{student_id_param}")
