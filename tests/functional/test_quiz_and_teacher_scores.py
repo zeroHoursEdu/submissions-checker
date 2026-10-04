@@ -24,6 +24,7 @@ from submissions_checker.db.models.enums import (
     SubmissionStatus,
 )
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from submissions_checker.services.grading import finalize_grade
 
 pytestmark = pytest.mark.asyncio
 
@@ -179,3 +180,48 @@ async def test_quiz_only_submission_and_teacher_scores_round_trip(
     await db.refresh(sub)
     assert sub.source_type == SubmissionSourceType.QUIZ_ONLY
     assert sa.teacher_scores == {"report": 4}
+
+
+# ── finalize_grade ───────────────────────────────────────────────────────────
+
+
+async def test_finalize_scored_writes_sum_and_breakdown(db, teacher, make_student) -> None:
+    *_, sa, sub = await _arrange_scored(
+        db,
+        teacher,
+        make_student,
+        status=SubmissionStatus.COMPLETED,
+        scores={"report": 4, "star": 2},
+    )
+    await _attempt(db, sub, sa.student_id, is_passed=True, score=3, max_score=4)  # 75%
+    await finalize_grade(db, sub)
+    await db.commit()
+    await db.refresh(sa)
+    await db.refresh(sub)
+    assert sa.grade == 12
+    assert sub.grade_breakdown["quiz"] == {"pct": 75.0, "points": 6, "max": 8}
+    assert sub.grade_breakdown["criteria"][0] == {
+        "key": "report",
+        "title": "Звіт",
+        "points": 4,
+        "max": 5,
+    }
+
+
+async def test_finalize_scored_noop_without_required_points(db, teacher, make_student) -> None:
+    *_, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.COMPLETED, scores={"star": 2}
+    )
+    await _attempt(db, sub, sa.student_id, is_passed=True)
+    assert await finalize_grade(db, sub) is None
+    await db.commit()
+    await db.refresh(sa)
+    assert sa.grade is None
+
+
+async def test_finalize_scored_noop_without_passed_quiz(db, teacher, make_student) -> None:
+    *_, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.COMPLETED, scores={"report": 5}
+    )
+    await _attempt(db, sub, sa.student_id, is_passed=False)
+    assert await finalize_grade(db, sub) is None

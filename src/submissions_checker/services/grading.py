@@ -23,6 +23,7 @@ from sqlalchemy.orm import selectinload
 
 from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models import StudentAssignment, SubjectsAssignment, Submission
+from submissions_checker.services import teacher_scores
 
 logger = get_logger(__name__)
 
@@ -129,13 +130,15 @@ def squad_quiz_pct(attempts: Iterable[Any]) -> tuple[float | None, list[dict[str
     return sum(best.values()) / len(best), members
 
 
-async def finalize_grade(db: AsyncSession, submission: Submission) -> GradeBreakdown | None:
+async def finalize_grade(db: AsyncSession, submission: Submission) -> dict[str, Any] | None:
     """Compute and persist the final grade for a completed submission.
 
     Reads the works score from ``test_results``, the AI mark from ``ai_review``,
-    and the quiz score from the submission's passed quiz attempt (if any); writes
-    ``StudentAssignment.grade`` and ``submission.grade_breakdown``. Returns the
-    breakdown, or None if the owning assignment could not be resolved.
+    and the quiz score from the submission's passed quiz attempt (if any) — or, under
+    ``quiz_and_teacher_scores``, the quiz plus the teacher's points; writes
+    ``StudentAssignment.grade`` and ``submission.grade_breakdown``. Returns the stored
+    breakdown, or None if the owning assignment could not be resolved or (scored mode)
+    a half of the grade is still missing.
     """
     result = await db.execute(
         select(Submission)
@@ -175,15 +178,35 @@ async def finalize_grade(db: AsyncSession, submission: Submission) -> GradeBreak
     if squad is not None:
         quiz_pct, squad_members = squad_quiz_pct(sub.quiz_attempts)
 
-    breakdown = compute_grade(
-        grading_cfg,
-        subjects_assignment.min_grade,
-        subjects_assignment.max_grade,
-        works_pct=works_pct,
-        ai_mark=ai_mark,
-        quiz_pct=quiz_pct,
-        round_up=squad is not None,
-    )
+    if teacher_scores.is_scored_mode(subjects_assignment.config):
+        # quiz_and_teacher_scores: the quiz is a gate and half of the grade; the teacher's
+        # points are the other half. Both must be in, or there is no grade yet.
+        crits = teacher_scores.criteria(grading_cfg)
+        scores = sa.teacher_scores or {}
+        if quiz_pct is None or not teacher_scores.is_complete(crits, scores):
+            logger.info("finalize_grade_scored_incomplete", submission_id=submission.id)
+            return None
+        breakdown_dict = teacher_scores.compute(
+            grading_cfg,
+            subjects_assignment.min_grade,
+            subjects_assignment.max_grade,
+            quiz_pct=quiz_pct,
+            scores=scores,
+            round_up=squad is not None,
+        )
+        grade = int(breakdown_dict["grade"])
+    else:
+        breakdown = compute_grade(
+            grading_cfg,
+            subjects_assignment.min_grade,
+            subjects_assignment.max_grade,
+            works_pct=works_pct,
+            ai_mark=ai_mark,
+            quiz_pct=quiz_pct,
+            round_up=squad is not None,
+        )
+        grade = breakdown.grade
+        breakdown_dict = breakdown.to_dict()
 
     target_sa_ids = [sa.id]
     if squad is not None:
@@ -191,17 +214,16 @@ async def finalize_grade(db: AsyncSession, submission: Submission) -> GradeBreak
     for sa_id in target_sa_ids:
         row = await db.get(StudentAssignment, sa_id)
         if row is not None:
-            row.grade = breakdown.grade
-    breakdown_dict = breakdown.to_dict()
+            row.grade = grade
     if squad is not None:
         breakdown_dict["squad"] = {"unified": True, "squad_id": squad.id, "members": squad_members}
     sub.grade_breakdown = breakdown_dict
     logger.info(
         "finalize_grade",
         submission_id=submission.id,
-        grade=breakdown.grade,
+        grade=grade,
         works=works_pct,
         quality=ai_mark,
         quiz=quiz_pct,
     )
-    return breakdown
+    return breakdown_dict
