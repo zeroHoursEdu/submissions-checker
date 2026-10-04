@@ -72,6 +72,25 @@ class Settings(BaseSettings):
     air_raid_pause_enabled: bool = True
     air_raid_cache_seconds: int = 30
 
+    # Google Classroom ingest. Off unless a client id AND secret are set; the refresh tokens
+    # are stored encrypted with google_token_encryption_key (a Fernet key).
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_token_encryption_key: str | None = None
+
+    # LLM judge sidecar (nightly grading of Classroom work). The window is local time in
+    # llm_grading_timezone: the loop starts at start_hour and takes no new job once the
+    # clock reaches end_hour; nightly_cap bounds the jobs per night.
+    llm_judge_provider: Literal["claude_cli"] = "claude_cli"
+    llm_judge_url: str = "http://llm-judge:8090"
+    llm_judge_token: str | None = None
+    llm_judge_model: str = "opus"
+    llm_judge_timeout: float = 600.0
+    llm_grading_start_hour: int = 3
+    llm_grading_end_hour: int = 4
+    llm_grading_nightly_cap: int = 40
+    llm_grading_timezone: str = "Europe/Kyiv"
+
     # SMTP (all optional — if smtp_host is unset, email channel is disabled)
     smtp_host: str | None = None
     smtp_port: int = 587
@@ -168,6 +187,18 @@ class Settings(BaseSettings):
         if self.environment == "production" and self.debug:
             raise ValueError("DEBUG must be false when ENVIRONMENT=production")
         return self
+
+    @model_validator(mode="after")
+    def _require_token_key_for_google(self) -> Self:
+        """Refresh tokens must never be stored unencrypted."""
+        if self.google_client_id and not self.google_token_encryption_key:
+            raise ValueError("GOOGLE_TOKEN_ENCRYPTION_KEY is required when GOOGLE_CLIENT_ID is set")
+        return self
+
+    @property
+    def classroom_enabled(self) -> bool:
+        """Classroom ingest is available only when the OAuth client is configured."""
+        return bool(self.google_client_id and self.google_client_secret)
 
     @property
     def cookie_secure(self) -> bool:

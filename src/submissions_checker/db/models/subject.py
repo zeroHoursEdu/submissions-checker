@@ -66,6 +66,17 @@ class Subject(Base, TimestampMixin):
     # From config.yml `squads.maxAllowedSize`; NULL = squads disabled on this subject.
     squad_max_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Google Classroom link (all NULL until a teacher connects a course).
+    classroom_course_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    classroom_course_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    classroom_connection_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("google_connections.id", ondelete="SET NULL"), nullable=True
+    )
+    classroom_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    classroom_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     assignments: Mapped[list[SubjectsAssignment]] = relationship(
         "SubjectsAssignment", back_populates="subject"
     )

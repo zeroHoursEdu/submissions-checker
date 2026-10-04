@@ -106,3 +106,22 @@ def test_debug_is_refused_in_production() -> None:
 
 def test_debug_allowed_outside_production() -> None:
     assert _settings(environment="development", debug=True).debug is True
+
+
+# ── Classroom / LLM grading ───────────────────────────────────────────────────
+
+
+def test_classroom_disabled_by_default() -> None:
+    assert _settings().classroom_enabled is False
+
+
+def test_google_client_requires_encryption_key() -> None:
+    with pytest.raises(ValueError, match="GOOGLE_TOKEN_ENCRYPTION_KEY"):
+        _settings(google_client_id="id", google_client_secret="sec")
+
+
+def test_classroom_enabled_with_client_and_key() -> None:
+    s = _settings(
+        google_client_id="id", google_client_secret="sec", google_token_encryption_key="k"
+    )
+    assert s.classroom_enabled is True

@@ -149,3 +149,33 @@ class QuizEventOutcome(enum.StrEnum):
 
     def __str__(self) -> str:
         return self.value
+
+
+class GoogleConnectionStatus(enum.StrEnum):
+    ACTIVE = "ACTIVE"
+    ERROR = "ERROR"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ClassroomLinkMethod(enum.StrEnum):
+    EMAIL = "EMAIL"
+    NAME = "NAME"
+    MANUAL = "MANUAL"
+    IGNORED = "IGNORED"
+    NONE = "NONE"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class LLMGradingStatus(enum.StrEnum):
+    WAITING_LINK = "WAITING_LINK"
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    DONE = "DONE"
+    FAILED = "FAILED"
+
+    def __str__(self) -> str:
+        return self.value

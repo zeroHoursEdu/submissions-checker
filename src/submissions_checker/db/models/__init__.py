@@ -1,8 +1,16 @@
 """Database models and enums."""
 
 from submissions_checker.db.models.audit_log import AuditLog
+from submissions_checker.db.models.classroom import (
+    ClassroomStudentLink,
+    ClassroomWork,
+    LLMGrading,
+)
 from submissions_checker.db.models.enums import (
+    ClassroomLinkMethod,
     EntityType,
+    GoogleConnectionStatus,
+    LLMGradingStatus,
     NotificationCase,
     NotificationMethod,
     OutboxEventType,
@@ -20,6 +28,7 @@ from submissions_checker.db.models.enums import (
 from submissions_checker.db.models.feedback_request import FeedbackRequest
 from submissions_checker.db.models.feedback_response import FeedbackResponse
 from submissions_checker.db.models.feedback_token import FeedbackToken
+from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.db.models.group import Group
 from submissions_checker.db.models.notification import Notification
 from submissions_checker.db.models.notification_preference import NotificationPreference
@@ -48,6 +57,13 @@ from submissions_checker.db.models.user import User
 from submissions_checker.db.models.user_login import UserLogin
 
 __all__ = [
+    "ClassroomLinkMethod",
+    "ClassroomStudentLink",
+    "ClassroomWork",
+    "GoogleConnection",
+    "GoogleConnectionStatus",
+    "LLMGrading",
+    "LLMGradingStatus",
     "AuditLog",
     "FeedbackRequest",
     "FeedbackResponse",

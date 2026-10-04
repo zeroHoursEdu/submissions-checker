@@ -65,6 +65,9 @@ class SubjectsAssignment(Base, TimestampMixin):
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     # Uploaded content files (PDFs, docs) for this assignment — [{url, display_name, filename}]
     content_files: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    # Google Classroom coursework this assignment is linked to.
+    classroom_coursework_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    classroom_coursework_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     subject: Mapped[Subject] = relationship("Subject", back_populates="assignments")
     students_assignments: Mapped[list[StudentAssignment]] = relationship(
