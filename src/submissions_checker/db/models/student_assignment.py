@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from submissions_checker.db.models.base import Base, TimestampMixin
@@ -27,6 +28,8 @@ class StudentAssignment(Base, TimestampMixin):
     )
     grade: Mapped[int | None] = mapped_column(Integer, nullable=True)
     variant: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # quiz_and_teacher_scores: per-criterion points the teacher typed, {criterion_key: int}.
+    teacher_scores: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     student: Mapped[Student] = relationship("Student", back_populates="students_assignments")
     subjects_assignment: Mapped[SubjectsAssignment] = relationship(

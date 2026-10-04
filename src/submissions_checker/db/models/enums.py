@@ -23,6 +23,8 @@ class SubmissionStatus(enum.StrEnum):
 
 class SubmissionSourceType(enum.StrEnum):
     ZIP_UPLOAD = "ZIP_UPLOAD"
+    # quiz_and_teacher_scores: created when the student opens the quiz; carries no file.
+    QUIZ_ONLY = "QUIZ_ONLY"
 
     def __str__(self) -> str:
         return self.value

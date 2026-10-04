@@ -26,6 +26,7 @@ class _Sub:
 LEGAL = [
     # New precise flow
     (S.PENDING, "start_validation", S.VALIDATING),
+    (S.PENDING, "quiz_opened", S.QUIZ_SENT),
     (S.VALIDATING, "validation_passed", S.TESTING),
     (S.VALIDATING, "validation_failed", S.VALIDATION_FAILED),
     (S.TESTING, "test_failed", S.TEST_FAILED),

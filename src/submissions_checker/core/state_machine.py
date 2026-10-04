@@ -11,6 +11,8 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     # ── New precise flow ──────────────────────────────────────────────────────
     SubmissionStatus.PENDING: {
         "start_validation": SubmissionStatus.VALIDATING,
+        # quiz_and_teacher_scores: the student opened the quiz with nothing to check.
+        "quiz_opened": SubmissionStatus.QUIZ_SENT,
     },
     SubmissionStatus.VALIDATING: {
         "validation_passed": SubmissionStatus.TESTING,
