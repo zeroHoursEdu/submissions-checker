@@ -16,6 +16,7 @@ from submissions_checker.services.gradebook import (
     GridSourceRow,
     IntegrityRow,
     RosterRow,
+    breakdown_line,
     build_student_grid,
     cell_status,
     compute_cached_stats,
@@ -292,3 +293,20 @@ def test_waiting_partner_cell_and_squad_name_survive_grid_build() -> None:
     grid = build_student_grid([row])
     assert grid.rows[0].squad_name == "Alpha"
     assert grid.rows[0].cells[10].status == "waiting_partner"
+
+
+def test_breakdown_line_for_scored_mode() -> None:
+    bd = {
+        "mode": "quiz_and_teacher_scores",
+        "quiz": {"pct": 75.0, "points": 6, "max": 8},
+        "criteria": [
+            {"key": "report", "title": "Звіт", "points": 4, "max": 5},
+            {"key": "star", "title": "Зірочка", "points": 2, "max": 3},
+        ],
+    }
+    assert breakdown_line(bd) == "Тест 6/8 · Звіт 4/5 · Зірочка 2/3"
+
+
+def test_breakdown_line_none_for_other_modes() -> None:
+    assert breakdown_line({"quiz_score": 50.0}) is None
+    assert breakdown_line(None) is None

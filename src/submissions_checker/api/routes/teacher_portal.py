@@ -53,6 +53,7 @@ from submissions_checker.db.models import (
 from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
+    QuizAttemptStatus,
     SubjectStatus,
     SubmissionSourceType,
     SubmissionStatus,
@@ -482,6 +483,7 @@ async def teacher_assignment(
             Student.full_name,
             StudentAssignment.id.label("student_assignment_id"),
             StudentAssignment.grade,
+            StudentAssignment.teacher_scores,
             Submission.id.label("submission_id"),
             Submission.status.label("submission_status"),
             Submission.created_at.label("submitted_at"),
@@ -558,6 +560,12 @@ async def teacher_assignment(
         for cand in candidates:
             for sid in await quiz_grants.grantable_students(db, cand):
                 grantable.add((cand.id, sid))
+
+    # quiz_and_teacher_scores: per-criterion inputs and the quiz half of each row.
+    scored = teacher_scores.is_scored_mode(assignment.config)
+    grading_cfg = (assignment.config or {}).get("grading")
+    criteria = teacher_scores.criteria(grading_cfg) if scored else []
+    quiz_cells = await _scored_quiz_cells(db, rows, grading_cfg) if scored else {}
 
     # AI verdicts over the assignment's thresholds get a badge in the Flags column.
     ai_cfg = (assignment.config or {}).get("ai_review") or {}
@@ -641,8 +649,58 @@ async def teacher_assignment(
             "stuck_ids": stuck_ids,
             "grantable": grantable,
             "bulk_result": bulk_result,
+            "scored": scored,
+            "criteria": criteria,
+            "quiz_cells": quiz_cells,
         },
     )
+
+
+async def _scored_quiz_cells(
+    db: DBSession, rows: list[dict[str, Any]], grading_cfg: dict[str, Any] | None
+) -> dict[int, dict[str, Any]]:
+    """Quiz half of each board row, keyed by student_id: the passed attempt in points, or
+    attempts used against the (granted) cap."""
+    sub_ids = {r["submission_id"] for r in rows if r["submission_id"]}
+    if not sub_ids:
+        return {}
+    subs = {
+        s.id: s
+        for s in (await db.execute(select(Submission).where(Submission.id.in_(sub_ids))))
+        .scalars()
+        .all()
+    }
+    attempts = (
+        (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id.in_(sub_ids))))
+        .scalars()
+        .all()
+    )
+    cells: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        sub = subs.get(r["submission_id"]) if r["submission_id"] else None
+        if sub is None:
+            continue
+        mine = [
+            a
+            for a in attempts
+            if a.submission_id == sub.id and a.student_id in (r["student_id"], None)
+        ]
+        passed = next((a for a in mine if a.is_passed and a.max_score), None)
+        if passed is not None:
+            pct = float(passed.score or 0) / float(passed.max_score or 1) * 100.0
+            cells[r["student_id"]] = {
+                "passed": True,
+                "points": teacher_scores.quiz_points_for(grading_cfg, pct),
+                "max": int((grading_cfg or {}).get("quiz_points", 0)),
+            }
+        else:
+            base = await quiz_grants.base_max_attempts(db, sub)
+            cells[r["student_id"]] = {
+                "passed": False,
+                "used": sum(1 for a in mine if a.status != QuizAttemptStatus.IN_PROGRESS),
+                "cap": quiz_grants.effective_max_attempts(base, sub, r["student_id"]),
+            }
+    return cells
 
 
 # Above this many submissions the pairwise report is refused rather than computed.

@@ -619,3 +619,120 @@ async def test_rerun_refused_for_quiz_only(client: AsyncClient, db, teacher, mak
     assert r.status_code == 409
     await _reload(db, sub)
     assert sub.status == SubmissionStatus.FAILED
+
+
+# ── Pages ────────────────────────────────────────────────────────────────────
+
+
+async def _completed_12(db, teacher, make_student):
+    """COMPLETED scored submission: 75% quiz (6/8) + report 4 + star 2 = 12."""
+    subject, asg, student, sa, sub = await _arrange_scored(
+        db,
+        teacher,
+        make_student,
+        status=SubmissionStatus.COMPLETED,
+        scores={"report": 4, "star": 2},
+    )
+    await _attempt(db, sub, student.id, is_passed=True, score=3, max_score=4)
+    await finalize_grade(db, sub)
+    await db.commit()
+    return subject, asg, student, sa, sub
+
+
+async def test_board_shows_criteria_inputs_and_total(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, _sa, _sub = await _completed_12(db, teacher, make_student)
+    authenticate(client, teacher)
+    page = await client.get(f"/teacher/subjects/{subject.id}/assignments/{asg.id}")
+    assert page.status_code == 200
+    html = page.text
+    assert 'name="score_report"' in html and 'name="score_star"' in html
+    assert f'form="scores-{student.id}"' in html
+    assert 'value="4"' in html and 'value="2"' in html
+    assert "Звіт" in html and "/5" in html and "/3" in html
+    assert "6/8" in html
+    assert _scores_url(subject, asg) in html
+    # The score forms must not be nested inside the bulk form (browsers drop nested forms).
+    bulk_end = html.index("</form>", html.index('id="bulk-form"'))
+    assert html.index(f'id="scores-{student.id}"') > bulk_end
+
+
+async def test_board_quiz_cell_for_not_passed_student(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, student, _sa, sub = await _arrange_scored(db, teacher, make_student)
+    await _attempt(db, sub, student.id, is_passed=False)
+    authenticate(client, teacher)
+    page = await client.get(f"/teacher/subjects/{subject.id}/assignments/{asg.id}")
+    assert "1/2" in page.text  # attempts used / cap
+
+
+async def test_board_has_no_score_inputs_in_other_modes(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, asg, _st, _sa = await _arrange_scored_no_sub(
+        db, teacher, make_student, mode="quiz_then_teacher"
+    )
+    authenticate(client, teacher)
+    page = await client.get(f"/teacher/subjects/{subject.id}/assignments/{asg.id}")
+    assert page.status_code == 200
+    assert 'name="score_' not in page.text
+
+
+async def test_student_page_offers_quiz_without_upload(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    await _as_student(client, db, make_user, student)
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert page.status_code == 200
+    assert _quiz_url(subject, sa) in page.text
+    assert "Почати тест" in page.text
+    assert 'id="upload-form"' not in page.text
+    assert "0/2" in page.text  # attempts used / cap from the latest config
+
+
+async def test_student_page_waiting_for_teacher(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    await _attempt(db, sub, student.id, is_passed=True)
+    await _as_student(client, db, make_user, student)
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert "Очікуємо бали викладача" in page.text
+
+
+async def test_student_page_shows_breakdown_when_completed(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa, _sub = await _completed_12(db, teacher, make_student)
+    await _as_student(client, db, make_user, student)
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert "Тест 6/8 · Звіт 4/5 · Зірочка 2/3" in page.text
+    assert "Code vs quiz split" not in page.text
+
+
+async def test_gradebook_cell_title_has_breakdown(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    subject, *_ = await _completed_12(db, teacher, make_student)
+    authenticate(client, teacher)
+    page = await client.get(f"/teacher/subjects/{subject.id}")
+    assert page.status_code == 200
+    assert 'title="Тест 6/8 · Звіт 4/5 · Зірочка 2/3"' in page.text
+
+
+async def test_student_page_exhausted_points_to_teacher(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.FAILED
+    )
+    await _attempt(db, sub, student.id)
+    await _attempt(db, sub, student.id)
+    await _as_student(client, db, make_user, student)
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert "Спроби вичерпано" in page.text

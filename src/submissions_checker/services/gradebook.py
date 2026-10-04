@@ -36,6 +36,7 @@ from submissions_checker.db.models import (
 )
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.db.models.group import Group
+from submissions_checker.services import teacher_scores
 
 _TERMINAL_STATUSES = {SubmissionStatus.COMPLETED, SubmissionStatus.FAILED}
 
@@ -355,6 +356,20 @@ class GridSourceRow:
     review_score: float | None
     squad_name: str | None = None
     waiting_partner: bool = False
+    detail: str | None = None
+
+
+def breakdown_line(breakdown: dict[str, Any] | None, quiz_label: str = "Тест") -> str | None:
+    """ "Тест 6/8 · Звіт 4/5 · …" for a quiz_and_teacher_scores grade; None for other modes."""
+    if not breakdown or breakdown.get("mode") != teacher_scores.MODE:
+        return None
+    quiz = breakdown.get("quiz") or {}
+    parts = [f"{quiz_label} {quiz.get('points', 0)}/{quiz.get('max', 0)}"]
+    parts += [
+        f"{c.get('title', c.get('key'))} {c.get('points', 0)}/{c.get('max', 0)}"
+        for c in breakdown.get("criteria") or []
+    ]
+    return " · ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -363,6 +378,7 @@ class GridCell:
     grade: int | None
     quiz_score: float | None
     review_score: float | None
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -409,6 +425,7 @@ def build_student_grid(rows: list[GridSourceRow]) -> StudentGrid:
             grade=r.grade,
             quiz_score=r.quiz_score,
             review_score=r.review_score,
+            detail=r.detail,
         )
         meta_by_student[r.student_id] = (r.student_name, r.group_name)
         if r.squad_name is not None:
@@ -512,6 +529,10 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
                 status == SubmissionStatus.QUIZ_SENT and row.student_id in share.passed_student_ids
             )
         quiz_score = breakdown.get("quiz_score")
+        review_score = breakdown.get("quality_score")
+        if breakdown.get("mode") == teacher_scores.MODE:
+            # The "review" half of a scored lab is the teacher's points, not an AI mark.
+            review_score = sum(int(c.get("points", 0)) for c in breakdown.get("criteria") or [])
         for m in (breakdown.get("squad") or {}).get("members") or []:
             if m.get("student_id") == row.student_id:
                 quiz_score = m.get("quiz_pct")
@@ -526,9 +547,10 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
                 grade=row.grade,
                 submission_status=status,
                 quiz_score=quiz_score,
-                review_score=breakdown.get("quality_score"),
+                review_score=review_score,
                 squad_name=squad_name,
                 waiting_partner=waiting,
+                detail=breakdown_line(breakdown),
             )
         )
     return rows

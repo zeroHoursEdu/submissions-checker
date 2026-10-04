@@ -118,7 +118,14 @@
         </th>
         <th class="text-left px-5 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_student }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_status }}</th>
-        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_grade }}</th>
+        {% if scored %}
+        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_quiz }}</th>
+        {% for c in criteria %}
+        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ c.title }} <span class="normal-case text-slate-400">/{{ c.max }}</span></th>
+        {% endfor %}
+        {% endif %}
+        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{% if scored %}{{ vocab.teacher.col_total }}{% else %}{{ vocab.teacher.col_grade }}{% endif %}</th>
+        {% if scored %}<th class="px-2 py-3"></th>{% endif %}
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden md:table-cell">{{ vocab.teacher.col_submitted }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden lg:table-cell">{{ vocab.teacher.col_similarity }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden lg:table-cell">{{ vocab.teacher.col_flags }}</th>
@@ -163,6 +170,26 @@
           </form>
           {% endif %}
         </td>
+        {% if scored %}
+        {% set qc = quiz_cells.get(row.student_id) %}
+        <td class="px-4 py-3.5 text-xs whitespace-nowrap" data-quiz-cell>
+          {% if qc and qc.passed %}
+            <span class="font-semibold text-green-700">{{ qc.points }}/{{ qc.max }}</span> <span class="text-green-600">✓</span>
+          {% elif qc %}
+            <span class="text-slate-500">{{ vocab.teacher.quiz_not_passed }}{% if qc.cap %} ({{ qc.used }}/{{ qc.cap }}){% endif %}</span>
+          {% else %}
+            <span class="text-slate-300">—</span>
+          {% endif %}
+        </td>
+        {% for c in criteria %}
+        {% set have = (row.teacher_scores or {}).get(c.key) %}
+        <td class="px-2 py-3.5">
+          <input form="scores-{{ row.student_id }}" type="number" name="score_{{ c.key }}" min="0" max="{{ c.max }}" step="1"
+                 value="{{ have if have is not none else '' }}" aria-label="{{ c.title }}"
+                 class="w-14 rounded-md border border-slate-300 px-2 py-1 text-sm">
+        </td>
+        {% endfor %}
+        {% endif %}
         <td class="px-4 py-3.5">
           {% if row.grade is not none %}
             <span class="font-semibold text-slate-900">{{ row.grade }}</span>
@@ -171,6 +198,12 @@
             <span class="text-slate-300">—</span>
           {% endif %}
         </td>
+        {% if scored %}
+        <td class="px-2 py-3.5">
+          <button form="scores-{{ row.student_id }}" type="submit"
+                  class="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium">{{ vocab.teacher.save_scores }}</button>
+        </td>
+        {% endif %}
         <td class="px-4 py-3.5 text-slate-400 text-xs hidden md:table-cell">
           {% if row.submitted_at %}
             {{ row.submitted_at.strftime("%b %d, %Y") }}
@@ -250,6 +283,15 @@
   </table>
 </div>
 </form>
+{% if scored %}
+{# One form per row, outside #bulk-form: a <form> nested in another is dropped by the HTML
+   parser. The row's inputs and button join it through their form= attribute. #}
+{% for row in rows %}
+<form id="scores-{{ row.student_id }}" method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/scores" class="hidden">
+  <input type="hidden" name="student_id" value="{{ row.student_id }}">
+</form>
+{% endfor %}
+{% endif %}
 {% else %}
 <div class="text-center py-20 bg-white rounded-xl border border-slate-200 shadow-sm">
   <div class="text-4xl mb-3">📭</div>

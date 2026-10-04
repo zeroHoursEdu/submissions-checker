@@ -107,6 +107,16 @@ def is_complete(crits: list[Criterion], scores: Mapping[str, int] | None) -> boo
     return all(c.optional or c.key in have for c in crits)
 
 
+def quiz_points_for(
+    grading_cfg: Mapping[str, Any] | None, quiz_pct: float, *, round_up: bool = False
+) -> int:
+    """The quiz half in points: ``quiz_pct`` of ``quiz_points``, half up (squads: ceil)."""
+    raw = round(quiz_pct / 100.0 * int((grading_cfg or {}).get("quiz_points", 0)), 6)
+    if round_up:
+        return math.ceil(raw)
+    return int(Decimal(str(raw)).quantize(Decimal(1), ROUND_HALF_UP))
+
+
 def compute(
     grading_cfg: Mapping[str, Any] | None,
     min_grade: int,
@@ -123,11 +133,7 @@ def compute(
     """
     cfg = grading_cfg or {}
     quiz_max = int(cfg.get("quiz_points", 0))
-    raw_quiz = round(quiz_pct / 100.0 * quiz_max, 6)
-    if round_up:
-        quiz_awarded = math.ceil(raw_quiz)
-    else:
-        quiz_awarded = int(Decimal(str(raw_quiz)).quantize(Decimal(1), ROUND_HALF_UP))
+    quiz_awarded = quiz_points_for(cfg, quiz_pct, round_up=round_up)
     crits = criteria(cfg)
     points = [int(scores.get(c.key, 0)) for c in crits]
     rows = [

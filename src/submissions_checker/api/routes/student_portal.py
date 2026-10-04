@@ -46,6 +46,7 @@ from submissions_checker.db.models.notification_preference import NotificationPr
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.services import squads, teacher_scores
 from submissions_checker.services.audit import audit
+from submissions_checker.services.gradebook import breakdown_line
 from submissions_checker.services.quiz_grants import effective_max_attempts
 from submissions_checker.services.similarity import compare_zip_files
 from submissions_checker.services.storage import get_storage
@@ -372,6 +373,24 @@ async def assignment_detail(
         # The config's cap plus any attempts a teacher granted this student on this upload.
         quiz_max_attempts = effective_max_attempts(quiz_max_attempts, latest_sub, student_id)
 
+    # quiz_and_teacher_scores: nothing is uploaded, so before the first attempt the cap
+    # comes from the subject's latest config rather than a pinned one.
+    scored = teacher_scores.is_scored_mode(sa.subjects_assignment.config)
+    if scored and latest_sub is None and sa.subjects_assignment.code:
+        latest_cfg = await db.scalar(
+            select(SubjectPluginConfig)
+            .where(SubjectPluginConfig.subject_id == sa.subjects_assignment.subject_id)
+            .order_by(SubjectPluginConfig.version.desc())
+            .limit(1)
+        )
+        if latest_cfg is not None:
+            quiz_max_attempts = (
+                latest_cfg.config.get("assignments", {})
+                .get(sa.subjects_assignment.code, {})
+                .get("quiz", {})
+                .get("max_quiz_attempts")
+            )
+
     check_reason: str | None = None
     if latest_sub and latest_sub.test_results:
         check_reason = latest_sub.test_results.get("check_reason")
@@ -388,7 +407,8 @@ async def assignment_detail(
             ai_comment = latest_sub.ai_review.get("comment")
     grade_breakdown: dict | None = None  # type: ignore[type-arg]
     if latest_sub and latest_sub.grade_breakdown:
-        if (assignment_cfg.get("grading") or {}).get("show_breakdown_to_student"):
+        # A scored lab always shows where its points came from.
+        if scored or (assignment_cfg.get("grading") or {}).get("show_breakdown_to_student"):
             grade_breakdown = latest_sub.grade_breakdown
 
     squad_panel = None
@@ -445,6 +465,11 @@ async def assignment_detail(
             # A page rendered mid-check is already out of date: the quiz link, the grade and
             # the result link all appear only after a worker moves the status.
             "poll_status": latest_sub is not None and latest_sub.status in TRANSIENT_STATUSES,
+            "scored": scored,
+            "breakdown_text": breakdown_line(
+                grade_breakdown,
+                str(get_vocab(request.cookies.get("lang")).get("quiz", {}).get("breakdown_quiz")),
+            ),
         },
     )
 

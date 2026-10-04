@@ -150,6 +150,9 @@
     How this grade was calculated
   </h2>
   {% set gb = assignment.grade_breakdown %}
+  {% if breakdown_text %}
+  <p class="text-sm text-slate-700" data-scored-breakdown>{{ breakdown_text }}</p>
+  {% else %}
   <ul class="text-sm text-slate-600 space-y-1.5">
     {% if gb.works_score is not none %}
     <li>Tests (code works): <strong class="text-slate-800">{{ "%.0f"|format(gb.works_score) }}/100</strong>
@@ -165,6 +168,7 @@
     {% endif %}
     <li class="text-slate-400 pt-1">Code vs quiz split: code {{ gb.code_weight }} / quiz {{ gb.quiz_weight }}</li>
   </ul>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -202,6 +206,25 @@
     </a>
     {% endfor %}
   </div>
+</div>
+{% endif %}
+
+{% if scored and assignment.submission_status in [None, "AWAITING_TEACHER_REVIEW"] %}
+<!-- quiz_and_teacher_scores: nothing to upload, the quiz opens any time -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-5" data-scored-panel>
+  <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.quiz.scored_title }}</h2>
+  {% if assignment.submission_status == "AWAITING_TEACHER_REVIEW" %}
+  <p class="text-sm text-slate-600">{{ vocab.quiz.scored_waiting }}</p>
+  {% else %}
+  <p class="text-sm text-slate-500 mb-4">{{ vocab.quiz.scored_hint }}</p>
+  <div class="flex items-center gap-3 flex-wrap">
+    <a href="/portal/subjects/{{ subject_id }}/assignments/{{ assignment.student_assignment_id }}/quiz"
+       class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">{{ vocab.quiz.start_quiz }}</a>
+    {% if assignment.quiz_max_attempts %}
+    <span class="text-sm text-slate-500">{{ vocab.quiz.attempts_used.format(used=assignment.quiz_attempts_used, cap=assignment.quiz_max_attempts) }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -268,7 +291,7 @@
       <svg class="w-4 h-4 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
         <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/>
       </svg>
-      <span>All {{ assignment.quiz_max_attempts }} quiz attempts used — this assignment is not passed.</span>
+      <span>{% if scored %}{{ vocab.quiz.scored_exhausted }}{% else %}All {{ assignment.quiz_max_attempts }} quiz attempts used — this assignment is not passed.{% endif %}</span>
     </div>
     {% if assignment.quiz_attempt_id %}
     <a href="/portal/quiz/{{ assignment.quiz_attempt_id }}/result"
@@ -289,6 +312,7 @@
 </div>
 {% endif %}
 
+{% if not scored %}
 <!-- Upload Form -->
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
   <h2 class="font-semibold text-slate-900 mb-1 flex items-center gap-2">
@@ -352,6 +376,7 @@
     submitLabel.textContent = 'Uploading…';
   });
 </script>
+{% endif %}
 
 {% if poll_status %}
 <script>

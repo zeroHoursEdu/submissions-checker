@@ -117,6 +117,14 @@ quiz:
   submit_quiz: Надіслати тест
   notif_extra_attempt_title: Додаткова спроба тесту
   notif_extra_attempt_body: "Викладач надав вам ще одну спробу тесту з «{title}»."
+  scored_title: Тест-захист
+  scored_hint: Завантажувати нічого не потрібно — роботу оцінює викладач, а тест можна пройти будь-коли.
+  start_quiz: Почати тест
+  attempts_used: "Спроби: {used}/{cap}"
+  scored_waiting: Тест складено. Очікуємо бали викладача за роботу.
+  scored_exhausted: Спроби вичерпано — зверніться до викладача.
+  scored_breakdown_title: З чого складається оцінка
+  breakdown_quiz: Тест
   pts: бал(ів)
   result_breadcrumb: Результат тесту
   result_passed: Зараховано!
@@ -390,6 +398,10 @@ teacher:
   resent_result: Надіслано нові доступи
   retry_ai_review: Повторити AI-рецензію
   grant_quiz_attempt: Додаткова спроба тесту
+  col_quiz: Тест
+  col_total: Разом
+  save_scores: Зберегти
+  quiz_not_passed: не складено
   send_to_teacher: На ручну перевірку
   data_title: Дані
   data_hint: Вивантажити всі оцінки предмета у CSV.
