@@ -122,8 +122,10 @@ def name_tokens(name: str) -> list[str]:
     name = _GROUP_RE.sub("", name or "").lower()
 
     # Remove apostrophes and similar characters
-    # Characters: ʼ (modifier letter apostrophe), ’ (right single quotation mark), ` (backtick)
-    for ch in "ʼ’`":
+    # Includes: ASCII apostrophe (U+0027), modifier apostrophe (U+02BC),
+    # right single quotation (U+2019), and backtick (U+0060)
+    apostrophes = chr(0x0027) + chr(0x02BC) + chr(0x2019) + "`"
+    for ch in apostrophes:
         name = name.replace(ch, "")
 
     # Split on non-word boundaries and filter
