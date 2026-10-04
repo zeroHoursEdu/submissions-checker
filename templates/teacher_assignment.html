@@ -149,25 +149,19 @@
             {{ vocab.teacher.review_action }}
           </a>
           {% endif %}
+          {# Row actions are buttons of #bulk-form with their own formaction: a <form> nested
+             in another is dropped by the HTML parser, so its button would post the bulk form. #}
           {% set st = row.submission_status %}
           {% if row.submission_id and (st in ["VALIDATION_FAILED", "TEST_FAILED", "FAILED", "AI_REVIEW_FAILED"] or (stuck_ids is defined and row.submission_id in stuck_ids)) %}
-          <form method="POST" action="/teacher/submissions/{{ row.submission_id }}/rerun-checks" class="inline">
-            <button type="submit" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.rerun_checks }}</button>
-          </form>
+          <button type="submit" formaction="/teacher/submissions/{{ row.submission_id }}/rerun-checks" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.rerun_checks }}</button>
           {% endif %}
           {% if st == "AI_REVIEW_FAILED" %}
-          <form method="POST" action="/teacher/submissions/{{ row.submission_id }}/retry-ai-review" class="inline">
-            <button type="submit" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.retry_ai_review }}</button>
-          </form>
-          <form method="POST" action="/teacher/submissions/{{ row.submission_id }}/send-to-teacher" class="inline">
-            <button type="submit" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.send_to_teacher }}</button>
-          </form>
+          <button type="submit" formaction="/teacher/submissions/{{ row.submission_id }}/retry-ai-review" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.retry_ai_review }}</button>
+          <button type="submit" formaction="/teacher/submissions/{{ row.submission_id }}/send-to-teacher" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.send_to_teacher }}</button>
           {% endif %}
           {% if grantable is defined and (row.submission_id, row.student_id) in grantable %}
-          <form method="POST" action="/teacher/submissions/{{ row.submission_id }}/grant-quiz-attempt" class="inline">
-            <input type="hidden" name="student_id" value="{{ row.student_id }}">
-            <button type="submit" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.grant_quiz_attempt }}</button>
-          </form>
+          <button type="submit" formaction="/teacher/submissions/{{ row.submission_id }}/grant-quiz-attempt"
+                  name="student_id" value="{{ row.student_id }}" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.grant_quiz_attempt }}</button>
           {% endif %}
         </td>
         {% if scored %}

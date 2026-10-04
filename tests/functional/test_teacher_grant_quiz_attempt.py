@@ -404,3 +404,35 @@ async def test_board_shows_button_only_for_grantable_rows(
     assert f'action="/teacher/submissions/{sub.id}/grant-quiz-attempt"' in page.text
     assert f'name="student_id" value="{exhausted.id}"' in page.text
     assert f'action="/teacher/submissions/{sub2.id}/grant-quiz-attempt"' not in page.text
+
+
+async def test_board_row_actions_are_not_nested_forms(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    """Browsers drop a <form> nested in #bulk-form, so its button would submit the bulk form
+    (no `action` -> 422). Row actions must be bulk-form buttons with their own formaction."""
+    subject, asg, student, _sa, sub = await _exhausted(db, teacher, make_student)
+    authenticate(client, teacher)
+    html = (await client.get(f"/teacher/subjects/{subject.id}/assignments/{asg.id}")).text
+    start = html.index('id="bulk-form"')
+    bulk = html[start : html.index("</form>", start)]
+    assert "<form" not in bulk
+    assert f'formaction="/teacher/submissions/{sub.id}/grant-quiz-attempt"' in bulk
+    assert f'name="student_id" value="{student.id}"' in bulk
+    assert f'formaction="/teacher/submissions/{sub.id}/rerun-checks"' in bulk
+
+
+async def test_grant_route_ignores_the_bulk_form_fields(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    # The button submits #bulk-form, so checkboxes and the reason travel along.
+    _subject, _asg, student, _sa, sub = await _exhausted(db, teacher, make_student)
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/grant-quiz-attempt",
+        data={"student_id": str(student.id), "reason": "", "submission_ids": [str(sub.id)]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.QUIZ_SENT
