@@ -119,8 +119,10 @@ column per criterion and a total column; each row is a small form:
     criterion of a COMPLETED submission is refused (422) — a grade never disappears.
   - anything else (no submission, QUIZ_SENT, FAILED) → points just stored.
 - The existing review page / bulk "approve" for a submission in this mode does **not**
-  finalize without points: approve is refused (409, flash "внесіть бали на дошці") until
-  points are complete. Reject keeps working.
+  finalize without points: approve is refused (409) until points are complete. Reject is
+  refused too (409): with nothing uploaded a rejected submission could never be reopened —
+  low work points mark weak work instead. A legacy upload stuck in VALIDATION_FAILED /
+  TEST_FAILED reopens as a fresh QUIZ_ONLY submission when the student opens the quiz.
 - Студенти grid (`gradebook.py`): the cell keeps showing the grade; its title tooltip
   carries the breakdown line. `quiz_score` keeps being filled for the existing columns.
 
@@ -175,6 +177,10 @@ No data is rewritten. Rollout order:
    matters: the old app would reject the unknown mode.
 4. Read-only check on prod: modes/max_grade per lab, the 21 waiting submissions visible on
    the boards with empty point fields.
+
+Rollback: an image older than this release cannot load a `QUIZ_ONLY` row (its enum lacks
+the value), so rolling back is safe only while `count(*) where source_type='QUIZ_ONLY'` is 0
+— see docs/deployment.md › Rollback.
 
 The 21 AWAITING_TEACHER_REVIEW submissions complete as soon as the teacher types their
 points. QUIZ_SENT ones continue on their old submission. Students with nothing get «Почати тест».

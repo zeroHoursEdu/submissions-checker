@@ -5,6 +5,7 @@ Service-level tests first (real Postgres, no HTTP), then the student and teacher
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -736,3 +737,104 @@ async def test_student_page_exhausted_points_to_teacher(
     await _as_student(client, db, make_user, student)
     page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
     assert "Спроби вичерпано" in page.text
+
+
+# ── Review fixes: dead ends and the save/submit race ─────────────────────────
+
+
+async def test_reject_refused_in_scored_mode(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    # A rejected scored submission could never be reopened or graded: no upload, no quiz.
+    _s, _a, student, _sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    await _attempt(db, sub, student.id, is_passed=True)
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/review",
+        data={"action": "reject", "reason": "no"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 409
+    await _reload(db, sub)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
+@pytest.mark.parametrize(
+    "dead_end",
+    [SubmissionStatus.VALIDATION_FAILED, SubmissionStatus.TEST_FAILED],
+)
+async def test_legacy_dead_end_upload_reopens_quiz(
+    client: AsyncClient, db, teacher, make_user, make_student, dead_end
+) -> None:
+    subject, _asg, student, sa, old = await _arrange_scored(
+        db, teacher, make_student, status=dead_end, source_type=SubmissionSourceType.ZIP_UPLOAD
+    )
+    await _as_student(client, db, make_user, student)
+    r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    assert r.status_code == 303, r.text
+    subs = await _subs_of(db, sa)
+    fresh = [s for s in subs if s.id != old.id]
+    assert len(fresh) == 1
+    assert fresh[0].source_type == SubmissionSourceType.QUIZ_ONLY
+    assert fresh[0].status == SubmissionStatus.QUIZ_SENT
+
+
+async def test_exhausted_quiz_does_not_reopen(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    # The quiz is a gate: an exhausted FAILED submission waits for the teacher's grant.
+    subject, _asg, student, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.FAILED
+    )
+    await _attempt(db, sub, student.id)
+    await _attempt(db, sub, student.id)
+    await _as_student(client, db, make_user, student)
+    r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    assert r.status_code == 403
+    assert len(await _subs_of(db, sa)) == 1
+
+
+async def test_save_waits_for_a_concurrent_quiz_pass(
+    client: AsyncClient, db, teacher, make_student, functional_sessionmaker
+) -> None:
+    """The student's pass holds the submission row while it routes to the teacher; a save
+    landing meanwhile must see that outcome, not the stale QUIZ_SENT, or a fully-scored
+    submission is left parked in AWAITING_TEACHER_REVIEW."""
+    subject, asg, student, sa, sub = await _arrange_scored(db, teacher, make_student)
+    await _attempt(db, sub, student.id, is_passed=True)
+    authenticate(client, teacher)
+    async with functional_sessionmaker() as other:
+        locked = (
+            await other.execute(select(Submission).where(Submission.id == sub.id).with_for_update())
+        ).scalar_one()
+        locked.status = SubmissionStatus.AWAITING_TEACHER_REVIEW  # as quiz_passed_teacher does
+        await other.flush()
+        save = asyncio.create_task(
+            client.post(
+                _scores_url(subject, asg), data=_form(student, report="5"), follow_redirects=False
+            )
+        )
+        await asyncio.sleep(0.5)  # the save reaches its status read while the row is held
+        await other.commit()
+    r = await save
+    assert r.status_code == 303, r.text
+    await _reload(db, sub, sa)
+    assert sub.status == SubmissionStatus.COMPLETED
+    assert sa.grade == 13
+
+
+async def test_student_page_offers_quiz_after_legacy_dead_end(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa, _old = await _arrange_scored(
+        db,
+        teacher,
+        make_student,
+        status=SubmissionStatus.VALIDATION_FAILED,
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+    )
+    await _as_student(client, db, make_user, student)
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert "Почати тест" in page.text

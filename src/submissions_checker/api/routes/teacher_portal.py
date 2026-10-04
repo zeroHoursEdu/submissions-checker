@@ -1497,8 +1497,15 @@ async def teacher_download_submission(
     )
 
 
-class ScoresIncompleteError(Exception):
+class ReviewNotAllowedError(Exception):
+    """This review action is not available for the submission (message is the detail)."""
+
+
+class ScoresIncompleteError(ReviewNotAllowedError):
     """A quiz_and_teacher_scores submission was approved before its work points exist."""
+
+    def __init__(self) -> None:
+        super().__init__("Enter the work points on the assignment board first")
 
 
 async def _quiz_passed(db: DBSession, submission: Submission) -> bool:
@@ -1547,6 +1554,10 @@ async def _apply_review_decision(
         event = "teacher_send_quiz" if has_quiz else "teacher_approve"
         transition(submission, event)
     elif action == "reject":
+        if teacher_scores.is_scored_mode(subjects_assignment.config):
+            # Nothing was uploaded, so a rejected scored submission could never be reopened
+            # or graded. Low work points are the way to mark weak work in this mode.
+            raise ReviewNotAllowedError("Rejecting is not available here; enter the points")
         event = "teacher_reject"
         submission.test_results = {"check_reason": clean_reason or "Rejected by teacher"}
         transition(submission, event)
@@ -1608,10 +1619,8 @@ async def teacher_review_submission_action(
 
     try:
         await _apply_review_decision(db, submission, action, reason, current_user)
-    except ScoresIncompleteError as exc:
-        raise HTTPException(
-            status_code=409, detail="Enter the work points on the assignment board first"
-        ) from exc
+    except ReviewNotAllowedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.commit()
 
     return RedirectResponse(
@@ -1675,7 +1684,7 @@ async def teacher_bulk_board_action(
         else:
             try:
                 await _apply_review_decision(db, sub, action, reason, current_user)
-            except ScoresIncompleteError:
+            except ReviewNotAllowedError:
                 skipped += 1
                 continue
         applied += 1
@@ -1950,6 +1959,10 @@ async def teacher_save_scores(
         db.add(own)
         await db.flush()
     submission = await squads.latest_submission(db, own)
+    if submission is not None:
+        # The student's quiz pass routes the submission under this same row lock; take it
+        # so a pass landing right now is seen, not a stale QUIZ_SENT.
+        await db.refresh(submission, attribute_names=["status"], with_for_update=True)
     complete = teacher_scores.is_complete(crits, new_scores)
     if submission is not None and submission.status == SubmissionStatus.COMPLETED and not complete:
         raise HTTPException(status_code=422, detail="A graded work cannot lose a required score")

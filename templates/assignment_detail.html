@@ -209,7 +209,7 @@
 </div>
 {% endif %}
 
-{% if scored and assignment.submission_status in [None, "AWAITING_TEACHER_REVIEW"] %}
+{% if scored and assignment.submission_status in [None, "AWAITING_TEACHER_REVIEW", "VALIDATION_FAILED", "TEST_FAILED"] %}
 <!-- quiz_and_teacher_scores: nothing to upload, the quiz opens any time -->
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-5" data-scored-panel>
   <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.quiz.scored_title }}</h2>

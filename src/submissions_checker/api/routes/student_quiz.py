@@ -755,7 +755,9 @@ async def start_or_resume_quiz(
         raise HTTPException(status_code=404)
 
     latest_sub = await squads.latest_submission(db, sa)
-    if latest_sub is None and teacher_scores.is_scored_mode(sa.subjects_assignment.config):
+    if (
+        latest_sub is None or latest_sub.status in quiz_open.REOPENABLE
+    ) and teacher_scores.is_scored_mode(sa.subjects_assignment.config):
         # quiz_and_teacher_scores: nothing is uploaded, the quiz opens on its own.
         try:
             latest_sub = await quiz_open.open_quiz_submission(db, sa, student_id)

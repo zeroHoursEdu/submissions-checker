@@ -500,6 +500,19 @@ disk. If the rollback happens after this release has already taken traffic:
   re-apply each affected subject's config ZIP through the teacher portal; the old code
   writes it to `plugins/` on apply, same as it always did before this release.
 
+**Rolling back past the `quiz_and_teacher_scores` release (migration 0034) is safe only
+while no `QUIZ_ONLY` submission exists.** The older image's enum has no `QUIZ_ONLY`, so
+every query that loads such a row raises `LookupError` — student pages, the review page,
+the board, the outbox. Check first:
+
+```bash
+scripts/ops/connect-to-prod-db.sh -c "select count(*) from submissions where source_type = 'QUIZ_ONLY'"
+```
+
+If it is not 0, roll *forward* instead, or first re-apply the subject config with the old
+review mode and decide what those submissions become — never just pin the old image.
+`teacher_scores` (a nullable column) is ignored by the old image and needs nothing.
+
 ---
 
 ## Backups and restore

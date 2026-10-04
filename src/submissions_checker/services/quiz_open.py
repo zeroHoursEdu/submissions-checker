@@ -22,6 +22,11 @@ from submissions_checker.db.models.enums import SubmissionSourceType, Submission
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.services import squads, teacher_scores
 
+# A legacy upload that never reached the quiz (failed archive or checks) must not trap the
+# student: in this mode the quiz needs no file, so such a dead end opens a fresh submission.
+# An exhausted quiz (FAILED) is NOT reopened — that is the gate; the teacher grants attempts.
+REOPENABLE = frozenset({SubmissionStatus.VALIDATION_FAILED, SubmissionStatus.TEST_FAILED})
+
 
 class QuizOpenError(Exception):
     """The quiz cannot be opened from here (the message is the HTTP detail)."""
@@ -39,7 +44,7 @@ async def open_quiz_submission(
         select(StudentAssignment.id).where(StudentAssignment.id == sa.id).with_for_update()
     )
     existing = await squads.latest_submission(db, sa)
-    if existing is not None:
+    if existing is not None and existing.status not in REOPENABLE:
         return existing
     asg = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
     if asg is None or not teacher_scores.is_scored_mode(asg.config):
