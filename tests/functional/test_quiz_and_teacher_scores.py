@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from httpx import AsyncClient
+from sqlalchemy import select
 
 from submissions_checker.db.models import (
     QuizAttempt,
@@ -22,9 +24,12 @@ from submissions_checker.db.models.enums import (
     QuizAttemptStatus,
     SubmissionSourceType,
     SubmissionStatus,
+    UserRole,
 )
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from submissions_checker.services import quiz_regrade
 from submissions_checker.services.grading import finalize_grade
+from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio
 
@@ -225,3 +230,180 @@ async def test_finalize_scored_noop_without_passed_quiz(db, teacher, make_studen
     )
     await _attempt(db, sub, sa.student_id, is_passed=False)
     assert await finalize_grade(db, sub) is None
+
+
+# ── Student opens the quiz without an upload ─────────────────────────────────
+
+
+async def _as_student(client, db, make_user, student):
+    user = await make_user(role=UserRole.STUDENT, username=f"s{student.id}", student=student)
+    authenticate(client, user)
+    return user
+
+
+async def _subs_of(db, sa) -> list[Submission]:
+    sa_id = sa.id  # read before expire_all, or the access lazy-loads outside the loop
+    db.expire_all()
+    rows = await db.execute(select(Submission).where(Submission.students_assignment_id == sa_id))
+    return list(rows.scalars().all())
+
+
+def _quiz_url(subject, sa) -> str:
+    return f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz"
+
+
+async def _open_and_answer(client, db, subject, sa, answer: str) -> QuizAttempt:
+    r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    assert r.status_code == 303, r.text
+    attempt_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    attempt = await db.get(QuizAttempt, attempt_id)
+    form = {f"answer_{q['id']}": answer for q in attempt.questions_snapshot}
+    r = await client.post(f"/portal/quiz/{attempt_id}/submit", data=form, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    return attempt
+
+
+async def test_student_opens_quiz_without_upload(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    await _as_student(client, db, make_user, student)
+    r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    assert r.status_code == 303, r.text
+    assert r.headers["location"].startswith("/portal/quiz/")
+    subs = await _subs_of(db, sa)
+    assert len(subs) == 1
+    assert subs[0].source_type == SubmissionSourceType.QUIZ_ONLY
+    assert subs[0].status == SubmissionStatus.QUIZ_SENT
+    assert subs[0].plugin_config_id is not None
+
+
+async def test_second_open_reuses_the_submission(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    await _as_student(client, db, make_user, student)
+    first = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    second = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    assert first.headers["location"] == second.headers["location"]  # resumed, not redrawn
+    assert len(await _subs_of(db, sa)) == 1
+
+
+async def test_open_refused_for_other_modes(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(
+        db, teacher, make_student, mode="quiz_then_teacher"
+    )
+    await _as_student(client, db, make_user, student)
+    r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    assert r.status_code == 403
+    assert await _subs_of(db, sa) == []
+
+
+async def test_pass_without_points_goes_to_teacher(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    await _as_student(client, db, make_user, student)
+    await _open_and_answer(client, db, subject, sa, "1")
+    (sub,) = await _subs_of(db, sa)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    await db.refresh(sa)
+    assert sa.grade is None
+
+
+async def test_pass_with_points_completes(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(
+        db, teacher, make_student, scores={"report": 5}
+    )
+    await _as_student(client, db, make_user, student)
+    await _open_and_answer(client, db, subject, sa, "1")
+    (sub,) = await _subs_of(db, sa)
+    assert sub.status == SubmissionStatus.COMPLETED
+    await db.refresh(sa)
+    assert sa.grade == 13  # 8 (100% quiz) + report 5
+
+
+async def test_fail_with_attempts_left_stays_open(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    await _as_student(client, db, make_user, student)
+    await _open_and_answer(client, db, subject, sa, "0")
+    (sub,) = await _subs_of(db, sa)
+    assert sub.status == SubmissionStatus.QUIZ_SENT
+
+
+async def test_legacy_quiz_then_teacher_attempt_routes_by_current_mode(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa, sub = await _arrange_scored(
+        db,
+        teacher,
+        make_student,
+        scores={"report": 5},
+        source_type=SubmissionSourceType.ZIP_UPLOAD,
+    )
+    await _as_student(client, db, make_user, student)
+    r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    attempt_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    attempt = await db.get(QuizAttempt, attempt_id)
+    # As if the attempt had been started under the old quiz_then_teacher config.
+    attempt.config_snapshot = {**attempt.config_snapshot, "review_mode": "quiz_then_teacher"}
+    await db.commit()
+    form = {f"answer_{q['id']}": "1" for q in attempt.questions_snapshot}
+    r = await client.post(f"/portal/quiz/{attempt_id}/submit", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.COMPLETED
+    await db.refresh(sa)
+    assert sa.grade == 13
+
+
+async def test_upload_refused_in_scored_mode(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    await _as_student(client, db, make_user, student)
+    files = {"file": ("w.zip", b"PK\x05\x06" + b"\x00" * 18, "application/zip")}
+    r = await client.post(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/submit",
+        files=files,
+        follow_redirects=False,
+    )
+    assert r.status_code == 409
+    assert await _subs_of(db, sa) == []
+
+
+async def test_dispute_regrade_completes_when_points_are_in(db, teacher, make_student) -> None:
+    *_, sa, sub = await _arrange_scored(
+        db, teacher, make_student, status=SubmissionStatus.FAILED, scores={"report": 3}
+    )
+    attempt = await _attempt(db, sub, sa.student_id, is_passed=False)
+    attempt.is_passed = True
+    attempt.score = 1
+    await db.flush()
+    await db.refresh(attempt, attribute_names=["submission"])
+    await quiz_regrade._advance_submission(db, attempt)
+    await db.commit()
+    await db.refresh(sub)
+    await db.refresh(sa)
+    assert sub.status == SubmissionStatus.COMPLETED
+    assert sa.grade == 11  # 8 + 3
+
+
+async def test_dispute_regrade_waits_for_teacher_without_points(db, teacher, make_student) -> None:
+    *_, sa, sub = await _arrange_scored(db, teacher, make_student, status=SubmissionStatus.FAILED)
+    attempt = await _attempt(db, sub, sa.student_id, is_passed=False)
+    attempt.is_passed = True
+    attempt.score = 1
+    await db.flush()
+    await db.refresh(attempt, attribute_names=["submission"])
+    await quiz_regrade._advance_submission(db, attempt)
+    await db.commit()
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+

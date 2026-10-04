@@ -34,6 +34,7 @@ from submissions_checker.db.models.quiz_template import QuizAttempt
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.user import User
+from submissions_checker.services import quiz_open
 from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.quiz_scoring import apply_question_overrides, score_attempt
@@ -144,8 +145,11 @@ async def _advance_submission(db: AsyncSession, attempt: QuizAttempt) -> None:
     if submission is None:
         return
 
-    review_mode = attempt.config_snapshot.get("review_mode")
-    to_teacher = review_mode == "quiz_then_teacher"
+    if await quiz_open.is_scored_submission(db, submission):
+        # The quiz is one half; without the teacher's points it waits on the teacher.
+        to_teacher = not await quiz_open.scores_complete_for(db, submission)
+    else:
+        to_teacher = attempt.config_snapshot.get("review_mode") == "quiz_then_teacher"
     status = submission.status
 
     if status == SubmissionStatus.QUIZ_SENT:

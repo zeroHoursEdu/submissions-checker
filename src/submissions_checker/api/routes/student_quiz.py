@@ -50,7 +50,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import squads
+from submissions_checker.services import quiz_open, squads, teacher_scores
 from submissions_checker.services.air_raid.base import AirRaidProviderError
 from submissions_checker.services.air_raid.geo import resolve_region
 from submissions_checker.services.audit import audit
@@ -646,10 +646,20 @@ async def _grade_and_finalize(
             if submission.status == SubmissionStatus.QUIZ_SENT and await squads.quiz_complete(
                 db, submission
             ):
+                # quiz_and_teacher_scores (decided by the assignment's *current* mode, so an
+                # attempt started under an older config lands the same way): the quiz is one
+                # half; complete only if the teacher's points are already in.
+                if await quiz_open.is_scored_submission(db, submission):
+                    if await quiz_open.scores_complete_for(db, submission):
+                        transition(submission, "quiz_passed")
+                        await finalize_grade(db, submission)
+                    else:
+                        transition(submission, "quiz_passed_teacher")
+                        await enqueue_teacher_review_notification(db, submission.id)
                 # `quiz_then_teacher` hands the attached work to the teacher instead of
                 # completing here; the grade is still computed from the quiz, but only once
                 # they approve.
-                if attempt.config_snapshot.get("review_mode") == "quiz_then_teacher":
+                elif attempt.config_snapshot.get("review_mode") == "quiz_then_teacher":
                     transition(submission, "quiz_passed_teacher")
                     await enqueue_teacher_review_notification(db, submission.id)
                 else:
@@ -745,6 +755,18 @@ async def start_or_resume_quiz(
         raise HTTPException(status_code=404)
 
     latest_sub = await squads.latest_submission(db, sa)
+    if latest_sub is None and teacher_scores.is_scored_mode(sa.subjects_assignment.config):
+        # quiz_and_teacher_scores: nothing is uploaded, the quiz opens on its own.
+        try:
+            latest_sub = await quiz_open.open_quiz_submission(db, sa, student_id)
+        except quiz_open.QuizOpenError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        logger.info(
+            "quiz_submission_opened",
+            submission_id=latest_sub.id,
+            student_id=student_id,
+            assignment_id=sa.subjects_assignment_id,
+        )
     if latest_sub is None or latest_sub.status != SubmissionStatus.QUIZ_SENT:
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
 

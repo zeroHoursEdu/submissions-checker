@@ -44,7 +44,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import squads
+from submissions_checker.services import squads, teacher_scores
 from submissions_checker.services.audit import audit
 from submissions_checker.services.quiz_grants import effective_max_attempts
 from submissions_checker.services.similarity import compare_zip_files
@@ -511,6 +511,10 @@ async def submit_assignment(
     subjects_assignment = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
     if subjects_assignment is None:
         raise HTTPException(status_code=404)
+    if teacher_scores.is_scored_mode(subjects_assignment.config):
+        raise HTTPException(
+            status_code=409, detail="This assignment takes no upload; open the quiz instead."
+        )
 
     # Late submission enforcement
     if subjects_assignment.deadline is not None:
