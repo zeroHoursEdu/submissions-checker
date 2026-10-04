@@ -20,6 +20,18 @@ EXPORTS = {
 }
 
 
+class GoogleApiError(RuntimeError):
+    """A Classroom/Drive API call failed (HTTP >= 400, transport error, bad body).
+
+    `status` is the HTTP status, or 0 for a transport failure. Token/OAuth
+    failures are GoogleAuthError instead.
+    """
+
+    def __init__(self, message: str, status: int) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 @dataclass(frozen=True)
 class DriveFileRef:
     id: str
@@ -59,12 +71,26 @@ class ClassroomClient:
             )
         return self._access_token
 
-    async def _get(self, url: str, params: dict[str, Any] | None = None) -> httpx.Response:
-        resp = await self._send(url, params, await self._token())
+    async def _get(
+        self, url: str, params: dict[str, Any] | None = None, *, expect_json: bool = True
+    ) -> httpx.Response:
+        try:
+            resp = await self._send(url, params, await self._token())
+            if resp.status_code == 401:
+                resp = await self._send(url, params, await self._token(force=True))
+        except httpx.HTTPError as exc:
+            raise GoogleApiError(f"Google API transport error for {url}: {exc}", 0) from exc
         if resp.status_code == 401:
-            resp = await self._send(url, params, await self._token(force=True))
+            raise GoogleAuthError(f"Google API rejected a freshly refreshed token for {url}")
         if resp.status_code >= 400:
-            raise GoogleAuthError(f"Google API {resp.status_code} for {url}")
+            raise GoogleApiError(f"Google API {resp.status_code} for {url}", resp.status_code)
+        if expect_json:
+            try:
+                resp.json()
+            except ValueError as exc:
+                raise GoogleApiError(
+                    f"Google API returned a non-JSON body for {url}", resp.status_code
+                ) from exc
         return resp
 
     async def _send(self, url: str, params: dict[str, Any] | None, token: str) -> httpx.Response:
@@ -165,12 +191,16 @@ class ClassroomClient:
             return skip("too_large")
         if native:
             resp = await self._get(
-                f"{DRIVE_URL}/files/{drive_id}/export", {"mimeType": EXPORTS[mime]}
+                f"{DRIVE_URL}/files/{drive_id}/export",
+                {"mimeType": EXPORTS[mime]},
+                expect_json=False,
             )
             name += ".pdf"
         else:
             resp = await self._get(
-                f"{DRIVE_URL}/files/{drive_id}", {"alt": "media", "supportsAllDrives": "true"}
+                f"{DRIVE_URL}/files/{drive_id}",
+                {"alt": "media", "supportsAllDrives": "true"},
+                expect_json=False,
             )
         if len(resp.content) > MAX_FILE_BYTES:
             return skip("too_large")

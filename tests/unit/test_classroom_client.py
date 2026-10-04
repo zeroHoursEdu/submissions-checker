@@ -1,12 +1,15 @@
 import httpx
+import pytest
 from cryptography.fernet import Fernet
 
 from submissions_checker.core.config import Settings
 from submissions_checker.services.google.client import (
     MAX_FILE_BYTES,
     ClassroomClient,
+    GoogleApiError,
 )
 from submissions_checker.services.google.matching import RosterEntry
+from submissions_checker.services.google.oauth import GoogleAuthError
 
 DOC = "application/vnd.google-apps.document"
 
@@ -194,3 +197,47 @@ async def test_retries_once_on_401():
     async with http:
         assert await c.list_courses() == []
     assert r.token_calls == 2
+
+
+async def test_persistent_401_after_refresh_is_auth_error():
+    r = Router(lambda req: httpx.Response(401, json={}))
+    c, http = r.client()
+    async with http:
+        with pytest.raises(GoogleAuthError):
+            await c.list_courses()
+    assert r.token_calls == 2
+
+
+async def test_404_on_file_meta_is_api_error_not_auth():
+    c, http = Router(lambda req: httpx.Response(404, json={})).client()
+    async with http:
+        with pytest.raises(GoogleApiError) as ei:
+            await c.file_meta("gone")
+    assert ei.value.status == 404 and not isinstance(ei.value, GoogleAuthError)
+
+
+async def test_500_on_list_is_api_error():
+    c, http = Router(lambda req: httpx.Response(500, text="x")).client()
+    async with http:
+        with pytest.raises(GoogleApiError) as ei:
+            await c.list_courses()
+    assert ei.value.status == 500
+
+
+async def test_transport_error_is_api_error_status_0():
+    def routes(req):
+        raise httpx.ConnectError("down")
+
+    c, http = Router(routes).client()
+    async with http:
+        with pytest.raises(GoogleApiError) as ei:
+            await c.list_courses()
+    assert ei.value.status == 0
+
+
+async def test_non_json_200_is_api_error():
+    c, http = Router(lambda req: httpx.Response(200, text="<html>")).client()
+    async with http:
+        with pytest.raises(GoogleApiError) as ei:
+            await c.list_courses()
+    assert ei.value.status == 200
