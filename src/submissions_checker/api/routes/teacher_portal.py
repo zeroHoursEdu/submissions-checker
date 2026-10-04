@@ -148,6 +148,7 @@ async def teacher_dashboard(
             "subjects": subjects,
             "apply_result": apply_result,
             "apply_error": apply_error,
+            "classroom_error": request.query_params.get("classroom_error"),
             "open_dispute_count": await count_open_disputes(db, current_user),
         },
     )

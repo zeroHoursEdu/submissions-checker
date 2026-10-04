@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import html
 import json
 import secrets
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import (
@@ -189,8 +192,36 @@ def _finish(response: RedirectResponse) -> RedirectResponse:
     return response
 
 
-@router.get("/google/callback")
+@router.get("/google/callback", response_class=HTMLResponse)
 async def google_callback(
+    code: str | None = None, state: str | None = None, error: str | None = None
+) -> HTMLResponse:
+    """Landing page for Google's cross-site redirect.
+
+    The session cookie is SameSite=Strict, so it is not sent on this navigation. This
+    route is therefore unauthenticated and only bounces, same-origin, to `/complete`.
+    """
+    params = {"error": error} if error else {"code": code or "", "state": state or ""}
+    target = html.escape("/teacher/google/complete?" + urlencode(params), quote=True)
+    page = (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        f'<meta http-equiv="refresh" content="0;url={target}">'
+        f'<title>Google</title></head><body><a href="{target}">Continue</a></body></html>'
+    )
+    return HTMLResponse(
+        page, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    )
+
+
+def _state_failure(data: dict[str, Any] | None) -> RedirectResponse:
+    subject_id = data.get("subject_id") if data else None
+    if isinstance(subject_id, int):
+        return _finish(_back(subject_id, classroom_error="state"))
+    return _finish(RedirectResponse("/teacher?classroom_error=state", status_code=303))
+
+
+@router.get("/google/complete")
+async def google_complete(
     request: Request,
     db: DBSession,
     current_user: TeacherUser,
@@ -201,10 +232,13 @@ async def google_callback(
     error: str | None = None,
 ) -> RedirectResponse:
     data = _read_state(request, settings)
-    if data is None or not state or not secrets.compare_digest(str(data.get("state")), state):
-        return _finish(RedirectResponse("/teacher?classroom_error=state", status_code=303))
-    if data.get("uid") != current_user.user_id:
-        return _finish(RedirectResponse("/teacher?classroom_error=state", status_code=303))
+    if (
+        data is None
+        or not state
+        or not secrets.compare_digest(str(data.get("state")), state)
+        or data.get("uid") != current_user.user_id
+    ):
+        return _state_failure(data)
     subject_id = int(data["subject_id"])
     await require_subject_access(db, subject_id, current_user)
     if error or not code:
@@ -221,11 +255,16 @@ async def google_callback(
         conn = GoogleConnection(
             user_id=current_user.user_id, google_email=email, refresh_token_enc=encrypted
         )
-        db.add(conn)
-    conn.google_email = email
-    conn.refresh_token_enc = encrypted
-    conn.status = GoogleConnectionStatus.ACTIVE.value
-    conn.last_error = None
+        try:
+            async with db.begin_nested():
+                db.add(conn)
+        except IntegrityError:
+            conn = await _connection_for(db, current_user.user_id)
+    if conn is not None:
+        conn.google_email = email
+        conn.refresh_token_enc = encrypted
+        conn.status = GoogleConnectionStatus.ACTIVE.value
+        conn.last_error = None
     await audit(
         db,
         "google_connected",

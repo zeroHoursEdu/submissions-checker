@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -136,6 +137,7 @@ async def test_card_survives_google_failure(teacher_client: AsyncClient, db, tea
     resp = await teacher_client.get(f"/teacher/subjects/{subject.id}")
     assert resp.status_code == 200
     assert "classroom-card" in resp.text
+    assert "Не вдалося отримати дані з Google" in resp.text
 
 
 async def test_connect_redirects_to_google_with_state_cookie(
@@ -145,7 +147,17 @@ async def test_connect_redirects_to_google_with_state_cookie(
     resp = await teacher_client.get(f"/teacher/google/connect?subject_id={subject.id}")
     assert resp.status_code == 303
     assert resp.headers["location"].startswith("https://accounts.google.com/")
-    assert "g_oauth=" in resp.headers["set-cookie"]
+    cookie = resp.headers["set-cookie"]
+    assert "g_oauth=" in cookie
+    assert "HttpOnly" in cookie
+    assert "samesite=lax" in cookie.lower()
+    assert "Path=/teacher/google" in cookie
+    query = parse_qs(urlparse(resp.headers["location"]).query)
+    assert query["state"][0] not in cookie
+    payload = json.loads(
+        decrypt_token(_settings(), cookie.split("g_oauth=")[1].split(";")[0].strip('"'))
+    )
+    assert payload["verifier"] not in cookie
 
 
 async def _start(teacher_client, subject) -> tuple[str, str]:
@@ -157,16 +169,53 @@ async def _start(teacher_client, subject) -> tuple[str, str]:
 async def test_callback_rejects_state_mismatch(teacher_client: AsyncClient, db, teacher):
     subject, _ = await _subject(db, teacher)
     await _start(teacher_client, subject)
-    resp = await teacher_client.get("/teacher/google/callback?code=x&state=wrong")
+    resp = await teacher_client.get("/teacher/google/complete?code=x&state=wrong")
     assert resp.status_code == 303
+    assert resp.headers["location"] == f"/teacher/subjects/{subject.id}?classroom_error=state"
+    assert (await db.execute(select(GoogleConnection))).scalars().all() == []
+
+
+async def test_complete_without_cookie_goes_to_dashboard(teacher_client: AsyncClient):
+    resp = await teacher_client.get("/teacher/google/complete?code=x&state=y")
+    assert resp.headers["location"] == "/teacher?classroom_error=state"
+    page = await teacher_client.get("/teacher?classroom_error=state")
+    assert "Не вдалося підтвердити запит" in page.text
+
+
+async def test_expired_state_cookie_is_rejected(teacher_client: AsyncClient, db, teacher):
+    import time
+
+    subject, _ = await _subject(db, teacher)
+    payload = json.dumps(
+        {"state": "s", "verifier": "v", "subject_id": subject.id, "uid": teacher.id}
+    )
+    old = Fernet(KEY.encode()).encrypt_at_time(payload.encode(), int(time.time()) - 3600)
+    teacher_client.cookies.set("g_oauth", old.decode())
+    resp = await teacher_client.get("/teacher/google/complete?code=x&state=s")
     assert "classroom_error=state" in resp.headers["location"]
     assert (await db.execute(select(GoogleConnection))).scalars().all() == []
+
+
+async def test_callback_is_unauthenticated_bounce(client: AsyncClient, db):
+    resp = await client.get('/teacher/google/callback?code=a%26b&state="><script>x</script>')
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-store"
+    assert resp.headers["referrer-policy"] == "no-referrer"
+    assert "<script>" not in resp.text
+    assert "url=/teacher/google/complete?code=a%26b&amp;state=" in resp.text
+    assert "%3Cscript%3E" in resp.text
+    assert (await db.execute(select(GoogleConnection))).scalars().all() == []
+
+
+async def test_callback_forwards_google_error(client: AsyncClient):
+    resp = await client.get("/teacher/google/callback?error=access_denied&state=s")
+    assert "complete?error=access_denied" in resp.text
 
 
 async def test_callback_stores_encrypted_token(teacher_client: AsyncClient, db, teacher):
     subject, _ = await _subject(db, teacher)
     state, _ = await _start(teacher_client, subject)
-    resp = await teacher_client.get(f"/teacher/google/callback?code=abc&state={state}")
+    resp = await teacher_client.get(f"/teacher/google/complete?code=abc&state={state}")
     assert resp.status_code == 303
     assert resp.headers["location"].startswith(f"/teacher/subjects/{subject.id}")
     conn = (await db.execute(select(GoogleConnection))).scalar_one()
@@ -180,7 +229,7 @@ async def test_callback_stores_encrypted_token(teacher_client: AsyncClient, db, 
 async def test_callback_access_denied_redirects_back(teacher_client: AsyncClient, db, teacher):
     subject, _ = await _subject(db, teacher)
     state, _ = await _start(teacher_client, subject)
-    resp = await teacher_client.get(f"/teacher/google/callback?error=access_denied&state={state}")
+    resp = await teacher_client.get(f"/teacher/google/complete?error=access_denied&state={state}")
     assert resp.status_code == 303
     assert "classroom_error=denied" in resp.headers["location"]
 
@@ -194,7 +243,7 @@ async def test_callback_cookie_of_other_user_is_rejected(
     state, _ = await _start(teacher_client, subject)
     other = await make_user(role=UserRole.TEACHER, username="other")
     authenticate(teacher_client, other)
-    resp = await teacher_client.get(f"/teacher/google/callback?code=abc&state={state}")
+    resp = await teacher_client.get(f"/teacher/google/complete?code=abc&state={state}")
     assert "classroom_error=state" in resp.headers["location"]
     assert (await db.execute(select(GoogleConnection))).scalars().all() == []
 

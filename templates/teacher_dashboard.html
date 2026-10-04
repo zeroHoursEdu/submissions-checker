@@ -26,6 +26,11 @@
   {{ apply_error }}
 </div>
 {% endif %}
+{% if classroom_error and vocab.classroom.get("error_" ~ classroom_error) %}
+<div class="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">
+  {{ vocab.classroom.get("error_" ~ classroom_error) }}
+</div>
+{% endif %}
 <div class="flex items-start justify-between mb-8">
   <div>
     <h1 class="text-2xl font-bold text-slate-900">{{ vocab.teacher.dashboard_title }}</h1>
