@@ -1,0 +1,78 @@
+{# Google Classroom card (subject Операції tab). Rendered only when `classroom` is set. #}
+{% set c = vocab.classroom %}
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6" id="classroom-card">
+  <h2 class="font-semibold text-slate-900 mb-1">{{ c.card_title }}</h2>
+  <p class="text-sm text-slate-500 mb-4">{{ c.card_hint }}</p>
+
+  {% if classroom_flash and c.get("flash_" ~ classroom_flash) %}
+  <div class="mb-3 px-3 py-2 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">{{ c.get("flash_" ~ classroom_flash) }}</div>
+  {% endif %}
+  {% if classroom_error and c.get("error_" ~ classroom_error) %}
+  <div class="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{{ c.get("error_" ~ classroom_error) }}</div>
+  {% endif %}
+  {% if classroom.error %}
+  <div class="mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">{{ c.get("error_" ~ classroom.error) }}</div>
+  {% endif %}
+
+  {% if not classroom.enabled %}
+  <p class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{{ c.not_configured_hint }}</p>
+  {% elif not classroom.connection or classroom.needs_reconnect %}
+  {% if classroom.needs_reconnect %}
+  <p class="text-sm text-amber-700 mb-3">{{ c.reconnect_needed }}</p>
+  {% endif %}
+  <a href="/teacher/google/connect?subject_id={{ subject.id }}"
+     class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+    {{ c.connect }}
+  </a>
+  {% else %}
+  <div class="flex flex-wrap items-center gap-3 mb-4 text-sm text-slate-600">
+    <span>{{ c.connected_as.format(email=classroom.connection.google_email) }}</span>
+    <form method="POST" action="/teacher/google/disconnect">
+      <input type="hidden" name="subject_id" value="{{ subject.id }}" />
+      <button type="submit" class="text-xs text-slate-500 underline hover:text-red-600">{{ c.disconnect }}</button>
+    </form>
+  </div>
+
+  {% if not classroom.course_id %}
+  {% if classroom.courses %}
+  <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/course" class="flex flex-wrap gap-3 items-center">
+    <select name="course_id" required class="text-sm border border-slate-300 rounded-lg px-3 py-2">
+      <option value="">{{ c.pick_course }}</option>
+      {% for course in classroom.courses %}
+      <option value="{{ course.id }}">{{ course.name }}{% if course.section %} ({{ course.section }}){% endif %}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">{{ c.save }}</button>
+  </form>
+  {% endif %}
+  {% else %}
+  <p class="text-sm font-medium text-slate-800">{{ c.course_linked.format(name=classroom.course_name) }}</p>
+  {% if classroom.synced_at %}
+  <p class="text-xs text-slate-500">{{ c.synced_at.format(when=classroom.synced_at.strftime("%d.%m.%Y %H:%M")) }}</p>
+  {% endif %}
+  {% if classroom.sync_error %}
+  <p class="text-xs text-red-600">{{ c.sync_error.format(error=classroom.sync_error) }}</p>
+  {% endif %}
+  <div class="mt-4 space-y-3">
+    {% for a in classroom.assignments %}
+    <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/coursework" class="flex flex-wrap gap-3 items-center">
+      <input type="hidden" name="assignment_id" value="{{ a.id }}" />
+      <label class="text-sm text-slate-700 min-w-[10rem]">{{ c.coursework_for.format(title=a.title) }}</label>
+      <select name="coursework_id" class="text-sm border border-slate-300 rounded-lg px-3 py-2">
+        <option value="">{{ c.unlinked }}</option>
+        {% set ns = namespace(found=false) %}
+        {% for w in classroom.coursework_options %}
+        {% if w.id == a.coursework_id %}{% set ns.found = true %}{% endif %}
+        <option value="{{ w.id }}" {% if w.id == a.coursework_id %}selected{% endif %}>{{ w.title }}</option>
+        {% endfor %}
+        {% if a.coursework_id and not ns.found %}
+        <option value="{{ a.coursework_id }}" selected>{{ a.coursework_title or a.coursework_id }}</option>
+        {% endif %}
+      </select>
+      <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">{{ c.save }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>

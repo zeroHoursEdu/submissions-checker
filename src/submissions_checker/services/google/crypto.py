@@ -20,8 +20,9 @@ def encrypt_token(settings: Settings, plaintext: str) -> str:
     return _fernet(settings).encrypt(plaintext.encode()).decode()
 
 
-def decrypt_token(settings: Settings, ciphertext: str) -> str:
+def decrypt_token(settings: Settings, ciphertext: str, ttl: int | None = None) -> str:
+    """Decrypt; with ``ttl`` (seconds) a token older than that is rejected."""
     try:
-        return _fernet(settings).decrypt(ciphertext.encode()).decode()
+        return _fernet(settings).decrypt(ciphertext.encode(), ttl=ttl).decode()
     except InvalidToken as exc:
         raise GoogleAuthError("stored Google token cannot be decrypted") from exc

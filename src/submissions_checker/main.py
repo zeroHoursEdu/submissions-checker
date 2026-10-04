@@ -18,6 +18,7 @@ from submissions_checker.api.routes import (
     student_portal,
     student_quiz,
     student_squads,
+    teacher_classroom,
     teacher_disputes,
     teacher_portal,
 )
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(student_quiz.router)
     app.include_router(student_squads.router)
     app.include_router(teacher_portal.router)
+    app.include_router(teacher_classroom.router)
     app.include_router(teacher_disputes.router)
     app.include_router(admin.router)
     app.include_router(notifications.router)

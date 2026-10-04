@@ -200,6 +200,8 @@
   </div>
   {% endif %}
 
+  {% if classroom %}{% include "_classroom_card.html" %}{% endif %}
+
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
     <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.teacher.enroll_title }}</h2>
     <p class="text-sm text-slate-500 mb-4">{{ vocab.teacher.enroll_hint }}</p>

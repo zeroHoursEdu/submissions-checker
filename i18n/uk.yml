@@ -580,3 +580,47 @@ squad:
   teacher_state_pending: очікує
   teacher_flash_assigned: Сквад сформовано.
   teacher_flash_error: "Не вдалося сформувати сквад: {reason}"
+
+classroom:
+  card_title: Google Classroom
+  card_hint: "Роботи, оцінювані ШІ, надходять із Google Classroom. Підключіть свій акаунт і прив'яжіть курс та завдання."
+  connect: Підключити Google
+  disconnect: Відключити Google
+  connected_as: "Підключено: {email}"
+  reconnect_needed: Підключіть Google знову
+  not_configured_hint: "Інтеграцію з Google не налаштовано. Адміністратору потрібно задати GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET і GOOGLE_TOKEN_ENCRYPTION_KEY."
+  pick_course: Оберіть курс
+  save: Зберегти
+  course_linked: "Курс: {name}"
+  synced_at: "Остання синхронізація: {when}"
+  sync_now: Синхронізувати зараз
+  sync_error: "Помилка синхронізації: {error}"
+  coursework_for: "Завдання Classroom для «{title}»"
+  unlinked: не прив'язано
+  unmatched_title: Студенти без відповідника
+  link: Прив'язати
+  ignore: Ігнорувати
+  confirm: Підтвердити
+  change: Змінити
+  confirm_all: Підтвердити всі точні збіги
+  name_matched_badge: збіг за іменем
+  draft_badge: чернетка ШІ
+  pending_badge: очікує оцінювання
+  failed_badge: помилка оцінювання
+  retry: Повторити
+  new_version_badge: нова версія
+  files: Файли
+  evidence: Докази
+  justification: Обґрунтування
+  late: здано із запізненням
+  received_from_classroom: Отримано з Google Classroom
+  confirm_student_first: Спочатку підтвердіть, хто цей студент
+  flash_connected: Google підключено.
+  flash_disconnected: Google відключено.
+  flash_course_linked: Курс прив'язано.
+  flash_coursework_linked: Завдання оновлено.
+  error_state: "Не вдалося підтвердити запит на підключення. Спробуйте ще раз."
+  error_denied: Доступ до Google не надано.
+  error_exchange: Google не прийняв код підключення. Спробуйте ще раз.
+  error_not_configured: Інтеграцію з Google не налаштовано.
+  error_google: Не вдалося отримати дані з Google. Спробуйте пізніше.

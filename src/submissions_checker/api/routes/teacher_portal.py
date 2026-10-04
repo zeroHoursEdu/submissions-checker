@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 
 import bcrypt
-from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile
+import httpx
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import Select, and_, cast, false, func, nullsfirst, select, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -21,6 +22,7 @@ from sqlalchemy.orm import selectinload
 
 from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import AppSettings, DBSession, TeacherUser
+from submissions_checker.api.routes.teacher_classroom import classroom_card_context, classroom_http
 from submissions_checker.api.routes.teacher_disputes import count_open_disputes
 from submissions_checker.core.config import get_settings
 from submissions_checker.core.i18n import get_vocab
@@ -302,7 +304,12 @@ async def enter_as_test_student(
 
 @router.get("/subjects/{subject_id}", response_class=HTMLResponse)
 async def teacher_subject(
-    request: Request, subject_id: int, db: DBSession, current_user: TeacherUser
+    request: Request,
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    settings: AppSettings,
+    http: httpx.AsyncClient = Depends(classroom_http),
 ) -> HTMLResponse:
     subject = await require_subject_access(db, subject_id, current_user)
 
@@ -395,10 +402,16 @@ async def teacher_subject(
     squad_flash = request.query_params.get("squad")
     squad_error = request.query_params.get("squad_error")
 
+    classroom = await classroom_card_context(db, subject, current_user, settings, http)
+    classroom_flash = request.query_params.get("classroom")
+    classroom_error = request.query_params.get("classroom_error")
+
     default_tab = (
         "operations"
         if (
-            enroll_result
+            classroom_flash
+            or classroom_error
+            or enroll_result
             or test_student_flash
             or feedback_sent
             or feedback_error
@@ -431,6 +444,9 @@ async def teacher_subject(
             "squad_flash": squad_flash,
             "squad_error": squad_error,
             "squad_display_name": squads.display_name,
+            "classroom": classroom,
+            "classroom_flash": classroom_flash,
+            "classroom_error": classroom_error,
         },
     )
 
