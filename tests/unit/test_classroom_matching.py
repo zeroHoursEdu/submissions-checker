@@ -74,5 +74,32 @@ def test_email_local_part_signal():
 
 def test_apostrophes_and_yi():
     """Apostrophes should be stripped; 'ї' should transliterate correctly."""
-    result = name_tokens("Мар'яна Їжак")
+    # Test with U+2019 (right single quotation mark)
+    result = name_tokens("Мар’яна Їжак")
     assert result == ["mariana", "yizhak"]
+
+
+def test_apostrophes_u02bc_and_yi():
+    """Apostrophes should be stripped; 'ї' should transliterate correctly."""
+    # Test with U+02BC (modifier letter apostrophe)
+    result = name_tokens("Марʼяна Їжак")
+    assert result == ["mariana", "yizhak"]
+
+
+def test_entry_email_none_no_match_candidate_empty_email():
+    """Entry with email None should not exact-match candidate with empty email."""
+    # Different name so it doesn't accidentally match by similarity
+    c = Candidate(1, "Jane Smith", "", "GRP")
+    r = match(RosterEntry("u", "John Doe", None), [c])
+    # Will not match because names are too different and no email to match
+    assert r.method == ClassroomLinkMethod.NONE
+    assert r.student_id is None
+
+
+def test_empty_candidates_list():
+    """Empty candidates list should return NONE method."""
+    r = match(RosterEntry("u", "John Doe", "john@example.com"), [])
+    assert r.method == ClassroomLinkMethod.NONE
+    assert r.student_id is None
+    assert r.score is None
+    assert r.candidates == []

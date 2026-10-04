@@ -122,7 +122,8 @@ def name_tokens(name: str) -> list[str]:
     name = _GROUP_RE.sub("", name or "").lower()
 
     # Remove apostrophes and similar characters
-    for ch in "ʼ''`":
+    # Characters: ʼ (modifier letter apostrophe), ’ (right single quotation mark), ` (backtick)
+    for ch in "ʼ’`":
         name = name.replace(ch, "")
 
     # Split on non-word boundaries and filter
@@ -207,15 +208,15 @@ def match(entry: RosterEntry, candidates: Sequence[Candidate]) -> MatchResult:
     # Sort by score descending
     scored.sort(key=lambda x: -x[0])
 
+    # Step 3: Check if no candidates
+    if not scored:
+        return MatchResult(ClassroomLinkMethod.NONE, None, None, [])
+
     # Prepare candidates list (top 3 with rounded scores)
     top = [
         {"student_id": c.student_id, "full_name": c.full_name, "score": round(s, 2)}
         for s, c in scored[:3]
     ]
-
-    # Step 3: Check if no candidates
-    if not scored:
-        return MatchResult(ClassroomLinkMethod.NONE, None, None, [])
 
     # Step 4: Check threshold and margin
     best = scored[0][0]
