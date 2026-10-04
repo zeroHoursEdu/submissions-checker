@@ -67,7 +67,7 @@ of four states:
 | exhausted, not passed | "Спроби вичерпано — зверніться до викладача" |
 | COMPLETED | grade 12/16 + breakdown "Тест 6/8 · Звіт 4/5 · Зірочка 2/3" (always shown in this mode) |
 
-**«Почати тест»** posts to a new `POST /portal/subjects/{subject_id}/assignments/{sa_id}/quiz/open`:
+**«Почати тест»** links to the existing start route `GET /portal/subjects/{subject_id}/assignments/{sa_id}/quiz`, which now, when there is no submission:
 
 1. Rejects (409) unless the assignment's current mode is `quiz_and_teacher_scores`.
 2. Locks the student's `students_assignments` row `FOR UPDATE` (double click ⇒ one submission).
