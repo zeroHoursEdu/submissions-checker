@@ -31,6 +31,7 @@ from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.services import teacher_scores
+from submissions_checker.services.llm_grading import config as llm_config
 from submissions_checker.services.subject_config import validate_subject_code
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
 
@@ -122,6 +123,21 @@ class ConfigApplyService:
                 raise ValueError("ZIP archive must contain config.yml at its root")
 
             new_cfg: dict[str, Any] = yaml.safe_load(config_path.read_text("utf-8"))
+
+            def read_text(rel: str, _root: Path = tmp_dir) -> str | None:
+                path = (_root / rel).resolve()
+                if not path.is_relative_to(_root.resolve()) or not path.is_file():
+                    return None
+                try:
+                    return path.read_text("utf-8")
+                except UnicodeDecodeError:
+                    return None
+
+            # Before dedup/plan so the inlined task text is part of the stored config.
+            for a_code, a_cfg in (new_cfg.get("assignments") or {}).items():
+                if a_cfg and "llm_grading" in a_cfg:
+                    llm_config.validate(a_code, a_cfg, read_text)
+                    llm_config.inline_task(a_cfg, read_text)
 
         subject_code: str = new_cfg.get("subjectCode", "")
         if not subject_code:
@@ -693,6 +709,7 @@ class ConfigApplyService:
             "variants",
             "ai_review",
             "grading",
+            "llm_grading",
         ):
             if key in a_cfg:
                 config[key] = a_cfg[key]
