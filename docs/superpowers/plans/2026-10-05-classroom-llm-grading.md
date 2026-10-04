@@ -336,9 +336,8 @@ def test_not_enrolled_unmatched_with_suggestions():
 def test_email_local_part_signal():
     r = match(RosterEntry("u", "", "komin.ivan_ip44@edu.kpi.ua"), C[:2]); assert r.student_id == 2
 def test_apostrophes_and_yi():
-    assert name_tokens("Мар'яна Їжак") == ["marіana".replace("і","i"), "yizhak"]  # -> ["mariana", "yizhak"]
+    assert name_tokens("Мар'яна Їжак") == ["mariana", "yizhak"]   # pins KMU word-initial rule
 ```
-(Fix the last literal to `["mariana", "yizhak"]` when writing it. It is shown here so the KMU word-initial rule is pinned.)
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3:** Implement per the reference above.
 - [ ] **Step 4:** Run → PASS; ruff + mypy.
