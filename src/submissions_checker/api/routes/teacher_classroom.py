@@ -33,7 +33,9 @@ from submissions_checker.services.audit import audit
 from submissions_checker.services.google import oauth
 from submissions_checker.services.google.client import ClassroomClient, GoogleApiError
 from submissions_checker.services.google.crypto import decrypt_token, encrypt_token
+from submissions_checker.services.google.ingest import ingest_subject
 from submissions_checker.services.llm_grading.config import is_llm_graded, subject_uses_llm
+from submissions_checker.services.storage import get_storage
 
 logger = get_logger(__name__)
 
@@ -408,3 +410,54 @@ async def link_coursework(
         coursework_id=coursework_id or None,
     )
     return _back(subject_id, classroom="coursework_linked")
+
+
+# ── Sync ─────────────────────────────────────────────────────────────────────
+
+
+@router.post("/subjects/{subject_id}/classroom/sync")
+async def sync_now(
+    subject_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    settings: AppSettings,
+    http: httpx.AsyncClient = ClassroomHttp,
+) -> RedirectResponse:
+    """Run the nightly ingest for this subject now, with the subject's linked connection."""
+    subject = await require_subject_access(db, subject_id, current_user)
+    if not settings.classroom_enabled:
+        return _back(subject_id, classroom_error="not_configured")
+    conn = (
+        await db.get(GoogleConnection, subject.classroom_connection_id)
+        if subject.classroom_connection_id
+        else None
+    )
+    if (
+        not subject.classroom_course_id
+        or conn is None
+        or conn.status != GoogleConnectionStatus.ACTIVE.value
+    ):
+        return _back(subject_id, classroom_error="not_linked")
+    storage = get_storage(settings)
+    if storage is None:
+        return _back(subject_id, classroom_error="storage")
+    try:
+        report = await ingest_subject(db, subject, _client(settings, conn, http), storage)
+    except oauth.GoogleAuthError as exc:
+        logger.warning("classroom_sync_auth_error", subject_id=subject_id, error=str(exc))
+        return _back(subject_id, classroom_error="reconnect" if exc.invalid_grant else "google")
+    except GoogleApiError as exc:
+        logger.warning("classroom_sync_api_error", subject_id=subject_id, error=str(exc))
+        return _back(subject_id, classroom_error="google")
+    await audit(
+        db,
+        "classroom_synced",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="subject",
+        target_id=subject_id,
+        new_versions=report.new_versions,
+        unchanged=report.unchanged,
+        errors=report.errors,
+    )
+    return _back(subject_id, classroom="synced", synced=str(report.new_versions))

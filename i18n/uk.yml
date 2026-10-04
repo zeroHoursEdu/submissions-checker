@@ -624,3 +624,10 @@ classroom:
   error_exchange: Google не прийняв код підключення. Спробуйте ще раз.
   error_not_configured: Інтеграцію з Google не налаштовано.
   error_google: Не вдалося отримати дані з Google. Спробуйте пізніше.
+  error_not_linked: Спочатку підключіть Google і прив'яжіть курс Classroom.
+  error_storage: Сховище файлів не налаштовано, синхронізація неможлива.
+  error_reconnect: Google відкликав доступ. Підключіть Google знову.
+  flash_synced: "Синхронізацію завершено. Нових робіт: {n}."
+  sync_error_reconnect: Google відкликав доступ, підключіть Google знову
+  sync_error_google: Google недоступний або курс не знайдено
+  sync_error_partial: частину робіт не вдалося завантажити, повтор під час наступної синхронізації
