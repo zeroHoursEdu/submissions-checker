@@ -23,13 +23,13 @@ from submissions_checker.db.models.enums import UserRole
 from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.db.models.subject import SubjectsStudents
 from submissions_checker.main import app
+from submissions_checker.services.google import ingest as ingest_mod
 from submissions_checker.services.google.client import (
     DownloadedFile,
     DriveFileRef,
     GoogleApiError,
     StudentSubmissionRef,
 )
-from submissions_checker.services.google import ingest as ingest_mod
 from submissions_checker.services.google.crypto import encrypt_token
 from submissions_checker.services.google.ingest import (
     IngestReport,
