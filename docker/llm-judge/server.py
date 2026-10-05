@@ -138,7 +138,8 @@ class Handler(BaseHTTPRequestHandler):
         if not hmac.compare_digest(given.encode(), f"Bearer {token}".encode()):
             return self._send(401, {"error": "unauthorized"})
         raw_len = self.headers.get("Content-Length", "")
-        if not raw_len.isdigit() or int(raw_len) == 0:
+        # isascii+isdecimal, not isdigit: "²".isdigit() is True and int() would raise.
+        if not (raw_len.isascii() and raw_len.isdecimal()) or int(raw_len) == 0:
             return self._send(400, {"error": "valid Content-Length required"})
         length = int(raw_len)
         if length > max_body():

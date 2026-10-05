@@ -1979,7 +1979,9 @@ async def teacher_save_scores(
                 detail=str(vocab.get("confirm_student_first", "")) or "confirm student first",
             )
         posted = str(form.get("llm_grading_id", "")).strip()
-        if shown["draft_grading_id"] != (int(posted) if posted.isdigit() else None):
+        # isascii+isdecimal, not isdigit: "²".isdigit() is True and int() would raise.
+        posted_id = int(posted) if posted.isascii() and posted.isdecimal() else None
+        if shown["draft_grading_id"] != posted_id:
             # A newer draft landed after the page was rendered: never approve it unseen.
             raise HTTPException(
                 status_code=409,

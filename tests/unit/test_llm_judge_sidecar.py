@@ -304,7 +304,7 @@ def test_server_413_over_cap_without_reading(srv, monkeypatch):
     assert _http(srv, b"x" * 1000)[0] == 413
 
 
-@pytest.mark.parametrize("bad", ["abc", "-5", "0"])
+@pytest.mark.parametrize("bad", ["abc", "-5", "0", "²", "¹0"])
 def test_server_400_on_bad_content_length(srv, bad):
     assert _http(srv, b"", headers={"Content-Length": bad}, length=False)[0] == 400
 

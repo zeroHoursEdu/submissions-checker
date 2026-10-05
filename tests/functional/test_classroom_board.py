@@ -601,6 +601,19 @@ async def test_save_refused_when_draft_appeared_after_blank_page(
     assert r.status_code == 409
 
 
+@pytest.mark.parametrize("bogus", ["²", "١٢", "abc"])
+async def test_save_with_non_ascii_digit_grading_id_is_409_not_500(
+    teacher_client: AsyncClient, db, teacher, make_student, bogus
+):
+    # "²".isdigit() is True but int("²") raises: must read as "no draft shown".
+    subject, asg, st = await _world(db, teacher, make_student)
+    await _work(db, asg, await _link(db, subject, st))
+
+    r = await _save(teacher_client, subject, asg, st, "4", bogus)
+
+    assert r.status_code == 409
+
+
 async def test_save_gate_covers_squad_mate_name_link(
     teacher_client: AsyncClient, db, teacher, make_student
 ):
