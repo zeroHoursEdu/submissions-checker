@@ -140,6 +140,8 @@
         </td>
         <td class="px-5 py-3.5 font-medium text-slate-900">{{ row.full_name }}
           {% if row.squad_name %} {% with squad_name=row.squad_name, squad_members=[] %}{% include "_squad_badge.html" %}{% endwith %}{% endif %}
+          {% set ls = llm_state.get(row.student_id) if llm_state is defined else none %}
+          {% if ls %}{% include "_llm_draft_row.html" %}{% endif %}
         </td>
         <td class="px-4 py-3.5">
           {{ status_badge(row.submission_status) }}
@@ -175,12 +177,15 @@
             <span class="text-slate-300">—</span>
           {% endif %}
         </td>
+        {% set prefill = (llm_state.get(row.student_id) or {}).get("prefill") or {} if llm_state is defined else {} %}
         {% for c in criteria %}
         {% set have = (row.teacher_scores or {}).get(c.key) %}
+        {% set ai = prefill.get(c.key) if have is none else none %}
         <td class="px-2 py-3.5">
           <input form="scores-{{ row.student_id }}" type="number" name="score_{{ c.key }}" min="0" max="{{ c.max }}" step="1"
-                 value="{{ have if have is not none else '' }}" aria-label="{{ c.title }}"
-                 class="w-14 rounded-md border border-slate-300 px-2 py-1 text-sm">
+                 value="{{ have if have is not none else (ai if ai is not none else '') }}" aria-label="{{ c.title }}"
+                 {% if ai is not none %}title="{{ vocab.classroom.draft_badge }}" data-ai-draft{% endif %}
+                 class="w-14 rounded-md border px-2 py-1 text-sm {% if ai is not none %}border-amber-400 ring-2 ring-amber-300 bg-amber-50{% else %}border-slate-300{% endif %}">
         </td>
         {% endfor %}
         {% endif %}

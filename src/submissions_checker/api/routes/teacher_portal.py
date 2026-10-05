@@ -52,7 +52,9 @@ from submissions_checker.db.models import (
     User,
     UserLogin,
 )
+from submissions_checker.db.models.classroom import LLMGrading
 from submissions_checker.db.models.enums import (
+    ClassroomLinkMethod,
     OutboxEventType,
     OutboxMessageState,
     QuizAttemptStatus,
@@ -66,11 +68,14 @@ from submissions_checker.services import quiz_grants, squads, teacher_scores
 from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
+from submissions_checker.services.google.links import link_state_for_students
 from submissions_checker.services.gradebook import (
     build_student_grid,
     fetch_grid_rows,
 )
 from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services.llm_grading import config as llm_config
+from submissions_checker.services.llm_grading.board import llm_board_state
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.quiz_events import MAX_EVENTS_STORED_PER_ATTEMPT, offset_label
 from submissions_checker.services.similarity import pairwise_similarity, token_set_for_zip
@@ -583,6 +588,12 @@ async def teacher_assignment(
     grading_cfg = (assignment.config or {}).get("grading")
     criteria = teacher_scores.criteria(grading_cfg) if scored else []
     quiz_cells = await _scored_quiz_cells(db, rows, grading_cfg) if scored else {}
+    # LLM-graded (Classroom) assignments: draft pre-fill, badges and the per-row details.
+    llm_state = (
+        await llm_board_state(db, assignment, [r["student_id"] for r in rows])
+        if scored and llm_config.is_llm_graded(assignment.config)
+        else {}
+    )
 
     # AI verdicts over the assignment's thresholds get a badge in the Flags column.
     ai_cfg = (assignment.config or {}).get("ai_review") or {}
@@ -669,6 +680,7 @@ async def teacher_assignment(
             "scored": scored,
             "criteria": criteria,
             "quiz_cells": quiz_cells,
+            "llm_state": llm_state,
         },
     )
 
@@ -1957,6 +1969,16 @@ async def teacher_save_scores(
     )
     if enrolled is None:
         raise HTTPException(status_code=404, detail="Student is not enrolled")
+    llm_graded = llm_config.is_llm_graded(assignment.config)
+    if llm_graded:
+        # A name match may be the wrong student: points must not land on them unchecked.
+        link = (await link_state_for_students(db, subject_id)).get(student_id)
+        if link is not None and link.method == ClassroomLinkMethod.NAME and not link.confirmed:
+            vocab = get_vocab(None).get("classroom", {})
+            raise HTTPException(
+                status_code=409,
+                detail=str(vocab.get("confirm_student_first", "")) or "confirm student first",
+            )
     crits = teacher_scores.criteria((assignment.config or {}).get("grading"))
     try:
         new_scores = teacher_scores.parse_form(crits, {k: str(v) for k, v in form.items()})
@@ -1991,6 +2013,26 @@ async def teacher_save_scores(
         row = await db.get(StudentAssignment, row_id)
         if row is not None:
             row.teacher_scores = dict(new_scores)
+    # Saving points over an LLM draft approves the draft that was shown (squad-aware).
+    approval: dict[str, Any] = {}
+    if llm_graded:
+        shown = (await llm_board_state(db, assignment, [student_id]))[student_id]
+        grading_id = shown["draft_grading_id"]
+        if grading_id is not None:
+            grading = await db.get(LLMGrading, grading_id)
+            if grading is not None:
+                grading.approved_by = current_user.user_id
+                grading.approved_at = datetime.now(UTC)
+                draft_points = {
+                    k: (v or {}).get("points")
+                    for k, v in ((shown["draft"] or {}).get("criteria") or {}).items()
+                }
+                approval = {
+                    "llm_grading_id": grading_id,
+                    "edited_from_draft": any(
+                        new_scores.get(k) != p for k, p in draft_points.items()
+                    ),
+                }
     await audit(
         db,
         action="teacher_scores_set",
@@ -2001,6 +2043,7 @@ async def teacher_save_scores(
         student_id=student_id,
         old=old,
         new=new_scores,
+        **approval,
     )
 
     if submission is not None and complete:

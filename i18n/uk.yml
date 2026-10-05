@@ -606,7 +606,7 @@ classroom:
   name_matched_hint: "Збігів за іменем, що чекають підтвердження: {n}"
   pick_student: Оберіть студента
   name_matched_badge: збіг за іменем
-  draft_badge: чернетка ШІ
+  draft_badge: AI-чернетка
   pending_badge: очікує оцінювання
   failed_badge: помилка оцінювання
   retry: Повторити

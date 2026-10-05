@@ -8,11 +8,11 @@ import secrets
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -26,8 +26,12 @@ from submissions_checker.api.dependencies import (
 )
 from submissions_checker.core.config import Settings
 from submissions_checker.core.logging import get_logger
-from submissions_checker.db.models.classroom import ClassroomStudentLink
-from submissions_checker.db.models.enums import ClassroomLinkMethod, GoogleConnectionStatus
+from submissions_checker.db.models.classroom import ClassroomStudentLink, ClassroomWork, LLMGrading
+from submissions_checker.db.models.enums import (
+    ClassroomLinkMethod,
+    GoogleConnectionStatus,
+    LLMGradingStatus,
+)
 from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
@@ -664,3 +668,77 @@ async def resolve_link(
         student_id=link.student_id,
     )
     return _back(subject_id, classroom="link_" + action)
+
+
+# ── Board actions: retry a failed grading, download a fetched file ──────────
+
+
+@router.post("/subjects/{subject_id}/classroom/gradings/{grading_id}/retry")
+async def retry_grading(
+    subject_id: int, grading_id: int, db: DBSession, current_user: TeacherUser
+) -> RedirectResponse:
+    """Queue a FAILED grading again; the nightly job grades it next night."""
+    await require_subject_access(db, subject_id, current_user)
+    row = (
+        await db.execute(
+            select(LLMGrading, SubjectsAssignment.id)
+            .join(ClassroomWork, ClassroomWork.id == LLMGrading.classroom_work_id)
+            .join(SubjectsAssignment, SubjectsAssignment.id == ClassroomWork.subjects_assignment_id)
+            .where(LLMGrading.id == grading_id, SubjectsAssignment.subject_id == subject_id)
+            .with_for_update(of=LLMGrading)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Grading not found")
+    grading, sa_id = row
+    if grading.status == LLMGradingStatus.FAILED.value:
+        grading.status = LLMGradingStatus.PENDING.value
+        grading.attempts = 0
+        await audit(
+            db,
+            "llm_grading_retry",
+            actor_id=current_user.user_id,
+            actor_username=current_user.username,
+            target_type="llm_grading",
+            target_id=grading_id,
+            subject_id=subject_id,
+        )
+    return RedirectResponse(f"/teacher/subjects/{subject_id}/assignments/{sa_id}", status_code=303)
+
+
+@router.get("/subjects/{subject_id}/classroom/works/{work_id}/files/{idx}")
+async def work_file(
+    subject_id: int,
+    work_id: int,
+    idx: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    settings: AppSettings,
+) -> Response:
+    """Serve one fetched Classroom file from object storage (never a direct storage URL)."""
+    await require_subject_access(db, subject_id, current_user)
+    work = (
+        await db.execute(
+            select(ClassroomWork)
+            .join(SubjectsAssignment, SubjectsAssignment.id == ClassroomWork.subjects_assignment_id)
+            .where(ClassroomWork.id == work_id, SubjectsAssignment.subject_id == subject_id)
+        )
+    ).scalar_one_or_none()
+    manifest = work.manifest if work is not None else []
+    entry = manifest[idx] if 0 <= idx < len(manifest) else None
+    if entry is None or entry.get("skipped") or not entry.get("storage_key"):
+        raise HTTPException(status_code=404, detail="File not found")
+    storage = get_storage(settings)
+    if storage is None:
+        raise HTTPException(status_code=404, detail="File storage is not configured")
+    try:
+        data = await storage.download_bytes(entry["storage_key"])
+    except Exception as exc:  # object missing or storage unreachable
+        logger.warning("classroom_file_unreadable", work_id=work_id, idx=idx, error=str(exc))
+        raise HTTPException(status_code=404, detail="File is no longer available") from exc
+    name = str(entry.get("name") or f"file-{idx}")
+    return Response(
+        content=data,
+        media_type=str(entry.get("mime") or "application/octet-stream"),
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+    )
