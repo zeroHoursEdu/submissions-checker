@@ -470,6 +470,17 @@ async def link_coursework(
     else:
         if not subject.classroom_course_id:
             raise HTTPException(status_code=422, detail="Link a Classroom course first")
+        taken = await db.scalar(
+            select(SubjectsAssignment.id).where(
+                SubjectsAssignment.subject_id == subject_id,
+                SubjectsAssignment.id != assignment_id,
+                SubjectsAssignment.classroom_coursework_id == coursework_id,
+            )
+        )
+        if taken is not None:
+            # One coursework feeding two assignments would ingest (and grade) every
+            # submission twice, against two different task descriptions.
+            return _back(subject_id, classroom_error="coursework_taken")
         _, client = await _linking_client(db, current_user, settings, http)
         try:
             works = await client.list_coursework(subject.classroom_course_id)

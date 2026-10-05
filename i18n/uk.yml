@@ -630,6 +630,7 @@ classroom:
   error_not_configured: Інтеграцію з Google не налаштовано.
   error_google: Не вдалося отримати дані з Google. Спробуйте пізніше.
   error_not_linked: Спочатку підключіть Google і прив'яжіть курс Classroom.
+  error_coursework_taken: Це завдання Classroom вже прив'язане до іншого завдання цього предмета.
   error_storage: Сховище файлів не налаштовано, синхронізація неможлива.
   error_reconnect: Google відкликав доступ. Підключіть Google знову.
   error_busy: Синхронізація вже виконується (нічна або інша). Спробуйте за кілька хвилин.
