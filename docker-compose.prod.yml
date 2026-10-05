@@ -17,8 +17,12 @@
 #   watchtower       48M
 #   backup          128M   (rclone; only when the backup profile is on)
 #   alloy           128M   (profile `observability`; nothing when the profile is off)
+#   llm-judge       600M   (claude -p sidecar; busy only during the 03:00 Kyiv window)
 #   ------------------------
-#   committed     ~1748M, leaving ~288M for a transient check sandbox
+#   committed     ~2348M. Over a 2GB host's RAM on paper: the sidecar is idle (~50M) outside
+#                 the nightly window, when no quiz or check load is expected. Revisit if
+#                 grading is ever moved into the daytime. Without the sidecar: ~1748M,
+#                 leaving ~288M for a transient check sandbox.
 #
 # SANDBOX_MAX_MEMORY (default 384m) is what a check may take out of that headroom.
 # Re-do this arithmetic whenever a service is added or a limit is raised.
@@ -118,6 +122,9 @@ services:
       ALERTS_IN_UA_TOKEN: ${ALERTS_IN_UA_TOKEN:-}
       AIR_RAID_PAUSE_ENABLED: ${AIR_RAID_PAUSE_ENABLED:-true}
       AIR_RAID_CACHE_SECONDS: ${AIR_RAID_CACHE_SECONDS:-30}
+      # Nightly LLM grading talks to the llm-judge sidecar below (same bearer token).
+      LLM_JUDGE_URL: http://llm-judge:8090
+      LLM_JUDGE_TOKEN: ${LLM_JUDGE_TOKEN:-}
     volumes:
       # Checks run as sibling containers on the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -150,6 +157,26 @@ services:
     labels:
       # The ONLY service Watchtower is allowed to replace.
       com.centurylinklabs.watchtower.enable: "true"
+
+  # Wraps `claude -p` for nightly LLM grading (docs/deployment.md). Built on the host from
+  # this checkout — it is not in the registry, so Watchtower must never touch it. Holds no
+  # app secrets and no DB/MinIO access: edge only (needs outbound to Anthropic). Without
+  # LLM_JUDGE_TOKEN it answers every /grade with 503. One-time login:
+  #   scripts/ops/prod-compose.sh run --rm -it llm-judge claude    (then /login)
+  llm-judge:
+    build: ./docker/llm-judge
+    image: subchk-llm-judge:local
+    restart: unless-stopped
+    environment:
+      LLM_JUDGE_TOKEN: ${LLM_JUDGE_TOKEN:-}
+    volumes:
+      # The login (OAuth credentials) lives here and must survive recreates.
+      - llm_judge_home:/home/judge/.claude
+    networks: [edge]
+    mem_limit: 600m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
 
   # One-shot schema bootstrap and manual migration runner:
   #   docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate
@@ -407,3 +434,4 @@ volumes:
   uploads:
   alloy_data:
   backup_lock:
+  llm_judge_home:

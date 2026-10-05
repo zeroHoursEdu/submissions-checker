@@ -100,6 +100,21 @@ services:
       retries: 3
       start_period: 40s
 
+  # LLM grading sidecar (wraps `claude -p`). Behind a profile so `make up` never builds it:
+  #   docker compose --profile llm up -d --build llm-judge
+  # Login once: docker compose --profile llm run --rm -it llm-judge claude  (then /login).
+  # The app reaches it at LLM_JUDGE_URL=http://llm-judge:8090 with the same LLM_JUDGE_TOKEN.
+  llm-judge:
+    build: ./docker/llm-judge
+    image: subchk-llm-judge:local
+    profiles: ["llm"]
+    environment:
+      LLM_JUDGE_TOKEN: ${LLM_JUDGE_TOKEN:-}
+    volumes:
+      - llm_judge_home:/home/judge/.claude
+    ports:
+      - "127.0.0.1:8090:8090"
+
   # ── Observability harness (make observability-up) ─────────────────────────────────────
   # Prometheus + Grafana + Alloy rendering the same dashboards production uses. Behind a
   # profile so `make up` never starts them. See docs/observability.md.
@@ -182,5 +197,6 @@ services:
       - "12345:12345"
 
 volumes:
+  llm_judge_home:
   postgres_data:
   minio_data:

@@ -63,6 +63,9 @@ test-functional: ## Functional API tests (real app over ASGI)
 test-ops: ## Offline checks of scripts/ops (no network)
 	bash tests/ops/test_ops_scripts.sh
 
+llm-judge-smoke: ## POST a sample PDF to a running llm-judge sidecar (needs LLM_JUDGE_TOKEN; see scripts/ops/llm-judge-smoke.sh --help)
+	bash scripts/ops/llm-judge-smoke.sh
+
 test-backup: ## Backup -> destroy -> restore roundtrip in an isolated compose project (~1 min)
 	bash tests/ops/backup_roundtrip.sh
 
