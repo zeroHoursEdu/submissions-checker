@@ -9,58 +9,85 @@ import shutil
 import subprocess
 import tempfile
 import threading
-from email.parser import BytesParser
-from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from judgelib import (
+    MAX_FILE_CHARS,
+    MAX_TOTAL_CHARS,
     build_prompt_with_files,
+    cap_text,
     claude_argv,
     extract,
     parse_cli_output,
     safe_name,
+    split_multipart,
 )
 
-MAX_BODY = 60 * 1024 * 1024
+DEFAULT_MAX_BODY = 210 * 1024 * 1024  # 10 files x 20 MiB from the app, plus headroom
+CHUNK = 1024 * 1024
+BODY_READ_TIMEOUT = 120.0
 WORK_ROOT = os.environ.get("LLM_JUDGE_WORK_ROOT", "/tmp/judge")
 _busy = threading.Lock()
 
 
-def parse_multipart(content_type: str, body: bytes):
-    """Return ({field: str}, [(filename, mime, bytes)]) from a multipart/form-data body."""
-    msg = BytesParser(policy=HTTP).parsebytes(
-        b"Content-Type: " + content_type.encode() + b"\r\n\r\n" + body
-    )
-    fields: dict[str, str] = {}
-    files: list[tuple[str, str, bytes]] = []
-    if not msg.is_multipart():
-        return fields, files
-    for part in msg.iter_parts():
-        name = part.get_param("name", header="content-disposition")
-        filename = part.get_filename()
-        payload = part.get_payload(decode=True) or b""
-        if filename is not None and name == "files":
-            files.append((filename, part.get_content_type(), payload))
-        elif name and filename is None:
-            fields[str(name)] = payload.decode("utf-8", errors="replace")
-    return fields, files
+class BadRequest(Exception):
+    pass
 
 
-def grade(fields: dict[str, str], files: list[tuple[str, str, bytes]]) -> dict:
+def max_body() -> int:
+    return int(os.environ.get("LLM_JUDGE_MAX_BODY") or DEFAULT_MAX_BODY)
+
+
+def config_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def logged_in() -> bool:
+    # Only the credentials file proves a login; other CLI state exists when logged out.
+    return (config_dir() / ".credentials.json").exists()
+
+
+def stream_to_file(src, length: int, dest: Path) -> None:
+    remaining = length
+    with dest.open("wb") as out:
+        while remaining:
+            chunk = src.read(min(CHUNK, remaining))
+            if not chunk:
+                raise BadRequest("body shorter than Content-Length")
+            out.write(chunk)
+            remaining -= len(chunk)
+
+
+def grade_request(stream, length: int, content_type: str) -> dict:
+    """Stream the body to disk, split it into files, run claude, always clean up."""
     Path(WORK_ROOT).mkdir(parents=True, exist_ok=True)
+    body_dir = Path(tempfile.mkdtemp(dir=WORK_ROOT))  # outside the dir claude may read
     workdir = Path(tempfile.mkdtemp(dir=WORK_ROOT))
     try:
+        body = body_dir / "body"
+        stream_to_file(stream, length, body)
+        try:
+            fields, files = split_multipart(
+                body, content_type, lambda idx, fn: workdir / safe_name(fn, idx)
+            )
+        except ValueError as exc:
+            raise BadRequest(str(exc)) from exc
+        body.unlink()
+        if not fields.get("prompt"):
+            raise BadRequest("missing prompt")
         entries: list[tuple[str, str | None, bool]] = []
-        for idx, (filename, mime, data) in enumerate(files, 1):
-            name = safe_name(filename, idx)
-            path = workdir / name
-            path.write_bytes(data)
+        budget = MAX_TOTAL_CHARS
+        for _filename, mime, path in files:
             text, offered = extract(path, mime)
-            entries.append((name, text, offered))
-        prompt = build_prompt_with_files(fields.get("prompt", ""), entries, workdir)
+            if text is not None:
+                text, _ = cap_text(text, min(MAX_FILE_CHARS, budget))
+                budget -= len(text)
+            entries.append((path.name, text, offered))
+        prompt = build_prompt_with_files(fields["prompt"], entries, workdir)
         model = fields.get("model") or os.environ.get("LLM_JUDGE_MODEL") or "opus"
-        argv = claude_argv(model, fields.get("system", ""), workdir, any(e[2] for e in entries))
+        n_offered = sum(1 for e in entries if e[2])
+        argv = claude_argv(model, fields.get("system", ""), workdir, n_offered > 0, n_offered)
         timeout = float(os.environ.get("LLM_JUDGE_CLI_TIMEOUT") or 540)
         proc = subprocess.run(
             argv, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=workdir
@@ -72,12 +99,17 @@ def grade(fields: dict[str, str], files: list[tuple[str, str, bytes]]) -> dict:
         out["model"] = out["model"] or model
         return out
     finally:
+        shutil.rmtree(body_dir, ignore_errors=True)
         shutil.rmtree(workdir, ignore_errors=True)
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = BODY_READ_TIMEOUT  # socket timeout: a stalled client cannot pin the lock
+
     def _send(self, code: int, body: dict) -> None:
         raw = json.dumps(body).encode()
+        if code >= 400:
+            self.close_connection = True  # an unread body must not be parsed as a request
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
@@ -87,11 +119,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path != "/health":
             return self._send(404, {"error": "not found"})
-        home = Path.home()
-        # ~/.claude.json is written by any CLI run (even logged out), so only the
-        # credentials file proves a login.
-        logged_in = (home / ".claude/.credentials.json").exists()
-        self._send(200, {"ok": True, "logged_in": logged_in})
+        self._send(200, {"ok": True, "logged_in": logged_in()})
 
     def do_POST(self) -> None:
         if self.path != "/grade":
@@ -102,17 +130,21 @@ class Handler(BaseHTTPRequestHandler):
         given = self.headers.get("Authorization", "")
         if not hmac.compare_digest(given.encode(), f"Bearer {token}".encode()):
             return self._send(401, {"error": "unauthorized"})
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > MAX_BODY:
-            return self._send(413 if length > MAX_BODY else 400, {"error": "bad body size"})
-        body = self.rfile.read(length)
+        raw_len = self.headers.get("Content-Length", "")
+        if not raw_len.isdigit() or int(raw_len) == 0:
+            return self._send(400, {"error": "valid Content-Length required"})
+        length = int(raw_len)
+        if length > max_body():
+            return self._send(413, {"error": "body too large"})
+        # Lock before reading: a busy sidecar must not buffer another 200 MiB.
         if not _busy.acquire(blocking=False):
             return self._send(429, {"error": "busy"})
         try:
-            fields, files = parse_multipart(self.headers.get("Content-Type", ""), body)
-            if not fields.get("prompt"):
-                return self._send(400, {"error": "missing prompt"})
-            self._send(200, grade(fields, files))
+            self._send(200, grade_request(self.rfile, length, self.headers.get("Content-Type", "")))
+        except BadRequest as exc:
+            self._send(400, {"error": str(exc)})
+        except TimeoutError:  # socket timeout while reading the body
+            self._send(408, {"error": "request body timed out"})
         except subprocess.TimeoutExpired:
             self._send(502, {"error": "claude timed out"})
         except Exception as exc:

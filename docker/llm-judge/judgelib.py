@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import mmap
 import re
 import subprocess
+from collections.abc import Callable
+from email.message import Message
+from email.parser import BytesParser
+from email.policy import HTTP
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +17,10 @@ TEXT_EXT = {
     ".py", ".cpp", ".h", ".hpp", ".c", ".java", ".js", ".ts", ".md", ".txt", ".json",
     ".yml", ".yaml", ".csv", ".sql", ".html", ".css",
 }  # fmt: skip
+MAX_FILE_CHARS = 150_000
+MAX_TOTAL_CHARS = 400_000
+TRUNCATED = "\n[truncated]"
+COPY_CHUNK = 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 MIN_PAGE_CHARS = 200
 DISALLOWED_TOOLS = "Bash,Edit,Write,WebFetch,WebSearch,NotebookEdit,Task,Agent"
@@ -28,9 +37,12 @@ def pdf_needs_visual(page_texts: list[str]) -> bool:
 
 
 def _pdf_text(path: Path) -> tuple[str | None, bool]:
-    proc = subprocess.run(
-        ["pdftotext", "-layout", str(path), "-"], capture_output=True, text=True, timeout=60
-    )
+    try:
+        proc = subprocess.run(
+            ["pdftotext", "-layout", str(path), "-"], capture_output=True, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired:
+        return None, True  # let Claude try the Read tool instead
     if proc.returncode != 0:
         return None, True
     pages = proc.stdout.split("\f")
@@ -62,10 +74,79 @@ def extract(path: Path, mime: str) -> tuple[str | None, bool]:
         except Exception:  # corrupt/zip-bomb-ish file: treat as unreadable
             return None, False
     if ext in TEXT_EXT:
-        return path.read_text(encoding="utf-8", errors="replace"), False
+        with path.open("rb") as fh:  # 4 bytes/char is the worst case for the char cap
+            return fh.read(MAX_FILE_CHARS * 4).decode("utf-8", errors="replace"), False
     if ext in IMAGE_EXT:
         return None, True
     return None, False
+
+
+def cap_text(text: str, limit: int) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    return text[: max(limit, 0)] + TRUNCATED, True
+
+
+def split_multipart(
+    path: Path,
+    content_type: str,
+    dest_for: Callable[[int, str], Path],
+    max_field: int = 2 * 1024 * 1024,
+) -> tuple[dict[str, str], list[tuple[str, str, Path]]]:
+    """Split a multipart/form-data body stored in ``path`` without loading it.
+
+    File parts (field ``files``) are copied in chunks to ``dest_for(idx, filename)``;
+    other parts are small text fields held in memory. Raises ValueError if malformed.
+    """
+    holder = Message()
+    holder["Content-Type"] = content_type
+    boundary = holder.get_boundary()
+    if not boundary:
+        raise ValueError("no multipart boundary")
+    delim = b"--" + boundary.encode()
+    if path.stat().st_size == 0:
+        raise ValueError("empty body")
+    fields: dict[str, str] = {}
+    files: list[tuple[str, str, Path]] = []
+    with path.open("rb") as fh, mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+
+        def find_delim(start: int, needle: bytes = delim) -> int:
+            pos = mm.find(needle, start)
+            while pos != -1 and mm[pos + len(needle) : pos + len(needle) + 2] not in (
+                b"\r\n",
+                b"--",
+            ):
+                pos = mm.find(needle, pos + 1)  # "--Bx" is content, not our boundary
+            return pos
+
+        pos = find_delim(0)
+        while pos != -1:
+            pos += len(delim)
+            if mm[pos : pos + 2] == b"--":
+                return fields, files
+            pos += 2  # CRLF after the delimiter line
+            hend = mm.find(b"\r\n\r\n", pos)
+            if hend == -1 or hend - pos > 16 * 1024:
+                raise ValueError("bad part headers")
+            part = BytesParser(policy=HTTP).parsebytes(mm[pos:hend] + b"\r\n\r\n")
+            start = hend + 4
+            nxt = find_delim(start, b"\r\n" + delim)
+            if nxt == -1:
+                raise ValueError("multipart body not terminated")
+            name = part.get_param("name", header="content-disposition")
+            filename = part.get_filename()
+            if filename is not None and name == "files":
+                dest = dest_for(len(files) + 1, filename)
+                with dest.open("wb") as out:
+                    for off in range(start, nxt, COPY_CHUNK):
+                        out.write(mm[off : min(off + COPY_CHUNK, nxt)])
+                files.append((filename, part.get_content_type(), dest))
+            elif name and filename is None:
+                if nxt - start > max_field:
+                    raise ValueError("form field too large")
+                fields[str(name)] = mm[start:nxt].decode("utf-8", errors="replace")
+            pos = nxt + 2  # skip the CRLF that precedes the delimiter
+    raise ValueError("multipart body not terminated")
 
 
 def build_prompt_with_files(
@@ -90,10 +171,17 @@ def build_prompt_with_files(
     return "".join(out)
 
 
-def claude_argv(model: str, system: str, workdir: Path, allow_read: bool) -> list[str]:
+def claude_argv(
+    model: str, system: str, workdir: Path, allow_read: bool, n_offered: int = 0
+) -> list[str]:
+    """Allow-list first: ``--tools`` leaves only Read (or nothing); the deny-list is a
+    second layer. No settings files, MCP servers or session files are picked up."""
+    turns = max(6, 2 + n_offered)
     argv = [
         "claude", "-p", "--output-format", "json", "--model", model,
-        "--append-system-prompt", system, "--max-turns", "6", "--add-dir", str(workdir),
+        "--append-system-prompt", system, "--max-turns", str(turns), "--add-dir", str(workdir),
+        "--tools", "Read" if allow_read else "",
+        "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence",
     ]  # fmt: skip
     if allow_read:
         argv += ["--allowedTools", "Read"]
