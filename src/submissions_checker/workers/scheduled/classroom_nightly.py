@@ -8,7 +8,7 @@ it taken and back off.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -19,7 +19,7 @@ from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.core.database import get_engine, get_session_factory
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.metrics import classroom_sync_total
-from submissions_checker.db.models.enums import GoogleConnectionStatus
+from submissions_checker.db.models.enums import GoogleConnectionStatus, SubjectStatus
 from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.db.models.subject import Subject
 from submissions_checker.services.google.client import ClassroomClient
@@ -27,7 +27,11 @@ from submissions_checker.services.google.crypto import decrypt_token
 from submissions_checker.services.google.ingest import classroom_lock, ingest_subject
 from submissions_checker.services.google.oauth import GoogleAuthError
 from submissions_checker.services.llm_grading.judge import get_judge
-from submissions_checker.services.llm_grading.runner import grading_loop, reap_stale
+from submissions_checker.services.llm_grading.runner import (
+    grading_loop,
+    night_start_for,
+    reap_stale,
+)
 from submissions_checker.services.storage import StorageService, get_storage
 
 logger = get_logger(__name__)
@@ -48,6 +52,7 @@ async def _ingest_all(
                 select(Subject.id, GoogleConnection.refresh_token_enc)
                 .join(GoogleConnection, GoogleConnection.id == Subject.classroom_connection_id)
                 .where(
+                    Subject.status == SubjectStatus.ACTIVE,
                     Subject.classroom_course_id.is_not(None),
                     GoogleConnection.status == GoogleConnectionStatus.ACTIVE.value,
                 )
@@ -94,13 +99,20 @@ async def run_classroom_nightly() -> None:
 async def _run() -> None:
     settings = get_settings()
     db_factory = get_session_factory()
+    # Window and budget are anchored to this run's start, not to the local wall clock:
+    # on DST nights the cron fires twice (fall back) or at 04:00 local (spring forward).
+    start = _now()
+    deadline = start + timedelta(
+        hours=settings.llm_grading_end_hour - settings.llm_grading_start_hour
+    )
+    night_start = night_start_for(start, ZoneInfo(settings.llm_grading_timezone))
     async with classroom_lock(get_engine()) as locked:
         if not locked:
             logger.info("classroom_nightly_locked")
             return
 
         async with db_factory() as db:
-            await reap_stale(db, _now())
+            await reap_stale(db, start)
 
         storage = get_storage(settings)
         if storage is None:
@@ -116,9 +128,9 @@ async def _run() -> None:
                 judge,
                 storage,
                 now_fn=_now,
-                end_hour=settings.llm_grading_end_hour,
+                deadline=deadline,
                 cap=settings.llm_grading_nightly_cap,
-                tz=ZoneInfo(settings.llm_grading_timezone),
+                night_start=night_start,
             )
         finally:
             await judge.aclose()

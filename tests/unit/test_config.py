@@ -125,3 +125,17 @@ def test_classroom_enabled_with_client_and_key() -> None:
         google_client_id="id", google_client_secret="sec", google_token_encryption_key="k"
     )
     assert s.classroom_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [(4, 4), (5, 4), (-1, 4), (3, 24), (24, 25)],
+)
+def test_llm_grading_window_must_be_ordered_hours(start: int, end: int) -> None:
+    with pytest.raises(ValueError, match="LLM_GRADING_START_HOUR"):
+        _settings(llm_grading_start_hour=start, llm_grading_end_hour=end)
+
+
+def test_llm_grading_window_default_is_valid() -> None:
+    s = _settings(llm_grading_start_hour=0, llm_grading_end_hour=23)
+    assert (s.llm_grading_start_hour, s.llm_grading_end_hour) == (0, 23)

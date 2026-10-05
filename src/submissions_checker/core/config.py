@@ -195,6 +195,17 @@ class Settings(BaseSettings):
             raise ValueError("GOOGLE_TOKEN_ENCRYPTION_KEY is required when GOOGLE_CLIENT_ID is set")
         return self
 
+    @model_validator(mode="after")
+    def _ordered_llm_grading_window(self) -> Self:
+        """The nightly window is start..end hours of one local night, never wrapping midnight."""
+        start, end = self.llm_grading_start_hour, self.llm_grading_end_hour
+        if not (0 <= start < end <= 23):
+            raise ValueError(
+                "LLM_GRADING_START_HOUR and LLM_GRADING_END_HOUR must be hours 0..23 "
+                f"with start < end (got {start}, {end})"
+            )
+        return self
+
     @property
     def classroom_enabled(self) -> bool:
         """Classroom ingest is available only when the OAuth client is configured."""

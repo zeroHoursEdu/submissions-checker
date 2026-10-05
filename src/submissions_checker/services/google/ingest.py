@@ -87,7 +87,11 @@ async def classroom_lock(engine: AsyncEngine) -> AsyncIterator[bool]:
             yield got
         finally:
             if got:
-                await unlock_classroom(conn)
+                try:
+                    await unlock_classroom(conn)
+                except Exception:  # noqa: BLE001 — closing the session drops the lock too
+                    logger.warning("classroom_unlock_failed", exc_info=True)
+                    await conn.invalidate()
 
 
 class ClassroomApi(Protocol):

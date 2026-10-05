@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from cryptography.fernet import Fernet
 from httpx import AsyncClient
-from sqlalchemy import text, update
+from sqlalchemy import text
 
 from submissions_checker.api.routes import teacher_classroom
 from submissions_checker.core.config import Settings, get_settings
@@ -19,8 +19,10 @@ from submissions_checker.db.models.classroom import (
     ClassroomWork,
     LLMGrading,
 )
+from submissions_checker.db.models.enums import SubjectStatus
 from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.main import app
+from submissions_checker.services.google import ingest as ingest_module
 from submissions_checker.services.google.crypto import encrypt_token
 from submissions_checker.services.google.ingest import ADVISORY_LOCK_KEY
 from submissions_checker.services.google.matching import RosterEntry
@@ -38,7 +40,11 @@ pytestmark = pytest.mark.asyncio
 
 KEY = Fernet.generate_key().decode()
 KYIV = ZoneInfo("Europe/Kyiv")
-NIGHT = datetime(2026, 10, 5, 3, 10, tzinfo=KYIV)
+NIGHT = datetime(2026, 10, 5, 3, 10, tzinfo=KYIV).astimezone(UTC)
+NIGHT_START = datetime(2026, 10, 5, 0, 0, tzinfo=KYIV).astimezone(UTC)
+DEADLINE = datetime(2026, 10, 5, 4, 0, tzinfo=KYIV).astimezone(UTC)
+# Rows arranged by tests were last touched before tonight unless a test says otherwise.
+EARLIER = NIGHT - timedelta(days=1)
 TASK = "Write a report about sorting algorithms."
 
 
@@ -61,12 +67,13 @@ def _config(code: str) -> dict[str, Any]:
     }
 
 
-def _settings() -> Settings:
+def _settings(**overrides: Any) -> Settings:
     return Settings(
         secret_key="test-secret-key-minimum-32-chars-long",
         google_client_id="cid",
         google_client_secret="csecret",
         google_token_encryption_key=KEY,
+        **overrides,
     )
 
 
@@ -139,6 +146,7 @@ async def _grading(
     status: str = "PENDING",
     attempts: int = 0,
     manifest: list[dict[str, Any]] | None = None,
+    updated_at: datetime = EARLIER,
 ) -> LLMGrading:
     _seq["n"] += 1
     n = _seq["n"]
@@ -179,7 +187,9 @@ async def _grading(
     )
     db.add(work)
     await db.commit()
-    grading = LLMGrading(classroom_work_id=work.id, status=status, attempts=attempts)
+    grading = LLMGrading(
+        classroom_work_id=work.id, status=status, attempts=attempts, updated_at=updated_at
+    )
     db.add(grading)
     await db.commit()
     return grading
@@ -193,7 +203,23 @@ async def _reload(db, grading_id: int) -> LLMGrading:
 
 
 def _loop_kwargs(now: datetime = NIGHT, cap: int = 40) -> dict[str, Any]:
-    return {"now_fn": lambda: now, "end_hour": 4, "cap": cap, "tz": KYIV}
+    return {"now_fn": lambda: now, "deadline": DEADLINE, "cap": cap, "night_start": NIGHT_START}
+
+
+async def _advisory_holders(engine) -> int:
+    """Granted advisory locks on our key (a bigint key is split into classid/objid)."""
+    async with engine.connect() as conn:
+        return int(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                        "AND classid = :hi AND objid = :lo AND objsubid = 1 AND granted"
+                    ),
+                    {"hi": ADVISORY_LOCK_KEY >> 32, "lo": ADVISORY_LOCK_KEY & 0xFFFFFFFF},
+                )
+            ).scalar_one()
+        )
 
 
 # ── build_request / grade_one ────────────────────────────────────────────────
@@ -310,30 +336,34 @@ async def test_loop_respects_cap(db, world, functional_sessionmaker):
     assert statuses == ["DONE", "DONE", "PENDING", "PENDING", "PENDING"]
 
 
-async def test_loop_stops_at_end_hour(db, world, functional_sessionmaker):
+async def test_loop_stops_at_deadline(db, world, functional_sessionmaker):
     g = await _grading(db, world)
     judge = FakeJudge()
-    four_am = datetime(2026, 10, 5, 4, 0, tzinfo=KYIV).astimezone(UTC)
     done = await runner.grading_loop(
-        functional_sessionmaker, judge, world["storage"], **_loop_kwargs(now=four_am)
+        functional_sessionmaker, judge, world["storage"], **_loop_kwargs(now=DEADLINE)
     )
     assert done == 0
     assert judge.calls == []
     assert (await _reload(db, g.id)).status == "PENDING"
 
 
-async def test_loop_stops_when_clock_passes_end_hour(db, world, functional_sessionmaker):
+async def test_loop_stops_when_clock_passes_deadline(db, world, functional_sessionmaker):
     ids = [(await _grading(db, world)).id for _ in range(3)]
-    clock = iter([NIGHT, NIGHT.replace(hour=4, minute=1)])
-    judge = FakeJudge()
+    clock = {"t": NIGHT}
+
+    class Slow(FakeJudge):
+        async def grade(self, req: GradingRequest) -> GradingResult:
+            clock["t"] = DEADLINE + timedelta(minutes=1)
+            return await super().grade(req)
+
     done = await runner.grading_loop(
         functional_sessionmaker,
-        judge,
+        Slow(),
         world["storage"],
-        now_fn=lambda: next(clock),
-        end_hour=4,
+        now_fn=lambda: clock["t"],
+        deadline=DEADLINE,
         cap=40,
-        tz=KYIV,
+        night_start=NIGHT_START,
     )
     assert done == 1
     assert [(await _reload(db, i)).status for i in ids] == ["DONE", "PENDING", "PENDING"]
@@ -374,6 +404,57 @@ async def test_loop_ignores_waiting_link_and_finished(db, world, functional_sess
     assert (await _reload(db, running)).status == "RUNNING"
 
 
+async def test_loop_stops_after_three_consecutive_judge_errors(db, world, functional_sessionmaker):
+    ids = [(await _grading(db, world)).id for _ in range(5)]
+    judge = FakeJudge(fail=True)
+    done = await runner.grading_loop(
+        functional_sessionmaker, judge, world["storage"], **_loop_kwargs()
+    )
+    assert done == 3
+    assert len(judge.calls) == 3
+    rows = []
+    for i in ids:
+        r = await _reload(db, i)
+        rows.append((r.status, r.attempts))
+    assert rows == [
+        ("FAILED", 1),
+        ("FAILED", 1),
+        ("FAILED", 1),
+        ("PENDING", 0),
+        ("PENDING", 0),
+    ]
+
+
+async def test_judge_error_streak_resets_on_success(db, world, functional_sessionmaker):
+    for _ in range(5):
+        await _grading(db, world)
+    outcomes = iter([True, True, False, True, True])
+
+    class Flaky(FakeJudge):
+        async def grade(self, req: GradingRequest) -> GradingResult:
+            self.fail = next(outcomes)
+            return await super().grade(req)
+
+    judge = Flaky()
+    await runner.grading_loop(functional_sessionmaker, judge, world["storage"], **_loop_kwargs())
+    assert len(judge.calls) == 5
+
+
+async def test_loop_budget_counts_tonights_finished_jobs(db, world, functional_sessionmaker):
+    # Two gradings already finished tonight (one DONE, one FAILED) use up the budget.
+    done_row = await _grading(db, world, status="DONE", updated_at=NIGHT)
+    done_row.graded_at = NIGHT - timedelta(minutes=30)
+    await _grading(db, world, status="FAILED", attempts=1, updated_at=NIGHT)
+    await db.commit()
+    pending = (await _grading(db, world)).id
+    judge = FakeJudge()
+    done = await runner.grading_loop(
+        functional_sessionmaker, judge, world["storage"], **_loop_kwargs(cap=2)
+    )
+    assert done == 0
+    assert (await _reload(db, pending)).status == "PENDING"
+
+
 async def test_loop_orders_by_assignment(db, world, functional_sessionmaker):
     await _grading(db, world, assignment=world["a2"])
     await _grading(db, world, assignment=world["a1"])
@@ -388,14 +469,11 @@ async def test_loop_orders_by_assignment(db, world, functional_sessionmaker):
 
 
 async def test_reap_stale_running(db, world):
-    stale = (await _grading(db, world, status="RUNNING")).id
-    fresh = (await _grading(db, world, status="RUNNING")).id
-    now = datetime.now(UTC)
-    await db.execute(
-        update(LLMGrading).where(LLMGrading.id == stale).values(updated_at=now - timedelta(hours=2))
-    )
-    await db.commit()
-    assert await runner.reap_stale(db, now) == 1
+    stale = (await _grading(db, world, status="RUNNING", updated_at=NIGHT - timedelta(hours=2))).id
+    fresh = (
+        await _grading(db, world, status="RUNNING", updated_at=NIGHT - timedelta(minutes=10))
+    ).id
+    assert await runner.reap_stale(db, NIGHT) == 1
     s = await _reload(db, stale)
     assert (s.status, s.error, s.attempts) == ("FAILED", "stale", 1)
     assert (await _reload(db, fresh)).status == "RUNNING"
@@ -434,14 +512,16 @@ class FakeClassroom:
 def nightly_env(monkeypatch, functional_engine, functional_sessionmaker, world):
     FakeClassroom.instances = {}
     judge = FakeJudge()
-    monkeypatch.setattr(classroom_nightly, "get_settings", _settings)
+    overrides: dict[str, Any] = {}
+    clock = {"now": NIGHT}
+    monkeypatch.setattr(classroom_nightly, "get_settings", lambda: _settings(**overrides))
     monkeypatch.setattr(classroom_nightly, "get_engine", lambda: functional_engine)
     monkeypatch.setattr(classroom_nightly, "get_session_factory", lambda: functional_sessionmaker)
     monkeypatch.setattr(classroom_nightly, "get_storage", lambda _s: world["storage"])
     monkeypatch.setattr(classroom_nightly, "get_judge", lambda _s: judge)
     monkeypatch.setattr(classroom_nightly, "ClassroomClient", FakeClassroom)
-    monkeypatch.setattr(classroom_nightly, "_now", lambda: NIGHT)
-    return {**world, "judge": judge}
+    monkeypatch.setattr(classroom_nightly, "_now", lambda: clock["now"])
+    return {**world, "judge": judge, "overrides": overrides, "clock": clock}
 
 
 async def _linked_subject(db, make_user, name: str, refresh_token: str) -> Subject:
@@ -474,17 +554,14 @@ async def test_nightly_ingests_then_grades_and_closes_judge(db, nightly_env, mak
 
 
 async def test_nightly_reaps_stale_before_grading(db, nightly_env):
-    g = await _grading(db, nightly_env, status="RUNNING")
-    await db.execute(
-        update(LLMGrading)
-        .where(LLMGrading.id == g.id)
-        .values(updated_at=datetime.now(UTC) - timedelta(hours=3))
-    )
-    await db.commit()
+    gid = (
+        await _grading(db, nightly_env, status="RUNNING", updated_at=NIGHT - timedelta(hours=3))
+    ).id
     await classroom_nightly.run_classroom_nightly()
-    # Reaped to FAILED(attempts 1), then retried by the loop in the same run.
-    g = await _reload(db, g.id)
-    assert (g.status, g.attempts) == ("DONE", 1)
+    # Reaped to FAILED(attempts 1) tonight, so it waits for the next night.
+    g = await _reload(db, gid)
+    assert (g.status, g.attempts, g.error) == ("FAILED", 1, "stale")
+    assert nightly_env["judge"].calls == []
 
 
 async def test_nightly_skips_when_lock_held(db, nightly_env, make_user, functional_engine):
@@ -504,12 +581,72 @@ async def test_nightly_skips_when_lock_held(db, nightly_env, make_user, function
 
 async def test_nightly_releases_lock(db, nightly_env, functional_engine):
     await classroom_nightly.run_classroom_nightly()
-    async with functional_engine.connect() as other:
-        got = (
-            await other.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": ADVISORY_LOCK_KEY})
-        ).scalar()
-        assert got is True
-        await other.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
+    assert await _advisory_holders(functional_engine) == 0
+
+
+async def test_lock_connection_invalidated_when_unlock_fails(functional_engine, monkeypatch):
+    async def broken(conn):
+        raise RuntimeError("connection lost")
+
+    monkeypatch.setattr(ingest_module, "unlock_classroom", broken)
+    async with ingest_module.classroom_lock(functional_engine) as locked:
+        assert locked
+        assert await _advisory_holders(functional_engine) == 1
+    # The pool must not keep a connection that still holds the lock.
+    assert await _advisory_holders(functional_engine) == 0
+
+
+async def test_dst_fall_back_double_firing_shares_one_budget(db, nightly_env):
+    # 2026-10-25: 03:00 local happens twice, the cron fires at 00:00Z and at 01:00Z.
+    nightly_env["overrides"]["llm_grading_nightly_cap"] = 3
+    for _ in range(5):
+        await _grading(db, nightly_env)
+    nightly_env["clock"]["now"] = datetime(2026, 10, 25, 0, 0, tzinfo=UTC)
+    await classroom_nightly.run_classroom_nightly()
+    nightly_env["clock"]["now"] = datetime(2026, 10, 25, 1, 0, tzinfo=UTC)
+    await classroom_nightly.run_classroom_nightly()
+    assert len(nightly_env["judge"].calls) == 3
+
+
+async def test_dst_fall_back_second_run_does_not_retry_tonights_failure(db, nightly_env):
+    nightly_env["overrides"]["llm_grading_nightly_cap"] = 4
+    first = (await _grading(db, nightly_env)).id
+    await _grading(db, nightly_env)
+    outcomes = iter([True, False, False])
+    judge = nightly_env["judge"]
+    original = FakeJudge.grade
+
+    async def grade(req: GradingRequest) -> GradingResult:
+        judge.fail = next(outcomes)
+        return await original(judge, req)
+
+    judge.grade = grade  # type: ignore[method-assign]
+    nightly_env["clock"]["now"] = datetime(2026, 10, 25, 0, 0, tzinfo=UTC)
+    await classroom_nightly.run_classroom_nightly()
+    late = (await _grading(db, nightly_env)).id
+    nightly_env["clock"]["now"] = datetime(2026, 10, 25, 1, 0, tzinfo=UTC)
+    await classroom_nightly.run_classroom_nightly()
+    assert len(judge.calls) == 3
+    g = await _reload(db, first)
+    assert (g.status, g.attempts) == ("FAILED", 1)
+    assert (await _reload(db, late)).status == "DONE"
+
+
+async def test_dst_spring_forward_run_still_grades(db, nightly_env):
+    # 2027-03-28: the cron fires at 01:00Z, which is already 04:00 local.
+    gid = (await _grading(db, nightly_env)).id
+    nightly_env["clock"]["now"] = datetime(2027, 3, 28, 1, 0, tzinfo=UTC)
+    await classroom_nightly.run_classroom_nightly()
+    assert len(nightly_env["judge"].calls) == 1
+    assert (await _reload(db, gid)).status == "DONE"
+
+
+async def test_nightly_skips_archived_subject(db, nightly_env, make_user):
+    subject = await _linked_subject(db, make_user, "A", "rtA")
+    subject.status = SubjectStatus.DELETED
+    await db.commit()
+    await classroom_nightly.run_classroom_nightly()
+    assert FakeClassroom.instances == {}
 
 
 async def test_nightly_continues_after_subject_auth_error(db, nightly_env, make_user):
@@ -569,7 +706,7 @@ async def test_sync_route_busy_while_nightly_holds_lock(
     subject.classroom_connection_id = conn.id
     await db.commit()
     fake = FakeClassroom(_settings(), "rt", None)
-    app.dependency_overrides[get_settings] = _settings
+    app.dependency_overrides[get_settings] = lambda: _settings()
     monkeypatch.setattr(teacher_classroom, "_client", lambda *a: fake)
     monkeypatch.setattr(teacher_classroom, "get_storage", lambda _s: world["storage"])
     try:
@@ -590,13 +727,6 @@ async def test_sync_route_busy_while_nightly_holds_lock(
         resp = await teacher_client.post(f"/teacher/subjects/{subject.id}/classroom/sync")
         assert "classroom=synced" in resp.headers["location"]
         assert fake.roster_calls == 1
-        async with functional_engine.connect() as probe:
-            got = (
-                await probe.execute(
-                    text("SELECT pg_try_advisory_lock(:k)"), {"k": ADVISORY_LOCK_KEY}
-                )
-            ).scalar()
-            assert got is True
-            await probe.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
+        assert await _advisory_holders(functional_engine) == 0
     finally:
         app.dependency_overrides.pop(get_settings, None)
