@@ -216,11 +216,14 @@ docker compose -f docker-compose.prod.yml --profile migrate run --rm migrate
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-Every other service is pulled; `backup` is the one exception, because it is two
-packages on top of Alpine and not worth a registry. If you pre-pull images by
-hand, note that plain `docker compose pull` will report it as `Skipped` rather
-than trying to fetch a `submissions-checker-backup` repository that does not
-exist.
+Every other service is pulled; `backup` and `llm-judge` are the two exceptions,
+built on the host (`pull_policy: build`): `backup` is two packages on top of
+Alpine and not worth a registry, and `llm-judge` (behind the `llm` profile, see
+[Classroom ingest and nightly LLM grading](#classroom-ingest-and-nightly-llm-grading))
+pins the Claude CLI it was verified against. If you pre-pull images by hand,
+note that plain `docker compose pull` will report them as `Skipped` rather than
+trying to fetch `submissions-checker-backup` / `subchk-llm-judge` repositories
+that do not exist.
 
 ### 6. Verify
 
@@ -912,10 +915,21 @@ sidecar is logged in to**, so size the cap to it.
 
 The sidecar image is built on the host from the repo checkout (it is not in the registry)
 and is excluded from Watchtower: after changing anything under `docker/llm-judge/`, pull the
-checkout and rebuild by hand. It has no app secrets and no database or MinIO access.
+checkout and rebuild by hand. It is behind the `llm` compose profile (`pull_policy: build`,
+like `backup`), so a plain `up -d` neither builds nor starts it: every command below passes
+`--profile llm` (or add `llm` to `COMPOSE_PROFILES` in `.env`). The app reaches it at
+`http://llm-judge:8090` over the `edge` network and does not depend on it, so the app starts
+fine without it.
+
+Security notes: the sidecar has no app secrets and no database or MinIO access (it is not
+on the `data` network). It **is** on `edge`, not an internal-only network, because the CLI
+needs outbound access to Anthropic; it publishes no host port, so only containers on `edge`
+(Caddy, the app replicas) can reach it, and every `/grade` needs the bearer token. The
+`claude` subprocess runs without any `LLM_JUDGE_*` variable and its Read tool is confined to
+the request's work directory.
 
 ```bash
-scripts/ops/prod-compose.sh up -d --build llm-judge
+scripts/ops/prod-compose.sh --profile llm up -d --build llm-judge
 scripts/ops/prod-compose.sh up -d app      # recreate the replicas so they read the new .env
 ```
 
@@ -928,7 +942,7 @@ The login lives in the `llm_judge_home` volume (`/home/judge/.claude`, via
 (`2.1.289`, auto-update disabled), so a login keeps working until you rebuild.
 
 ```bash
-scripts/ops/prod-compose.sh run --rm -it llm-judge claude   # run/exec get an ssh -t TTY automatically
+scripts/ops/prod-compose.sh --profile llm run --rm -it llm-judge claude   # run/exec get an ssh -t TTY automatically
 # in the CLI: /login  → open the URL in a browser, approve, paste the code → /exit
 ```
 
@@ -938,12 +952,12 @@ The sidecar publishes no host port on prod, so check it from inside its own cont
 has `curl` and its own `LLM_JUDGE_TOKEN`):
 
 ```bash
-scripts/ops/prod-compose.sh ps llm-judge                      # healthy
-scripts/ops/prod-compose.sh exec -T llm-judge curl -fsS http://127.0.0.1:8090/health
+scripts/ops/prod-compose.sh --profile llm ps llm-judge        # healthy
+scripts/ops/prod-compose.sh --profile llm exec -T llm-judge curl -fsS http://127.0.0.1:8090/health
 # expect {"ok": true, "logged_in": true}; logged_in false means step 4 is missing
 
 # One real model call (a tiny text file):
-scripts/ops/prod-compose.sh exec -T llm-judge sh -c '
+scripts/ops/prod-compose.sh --profile llm exec -T llm-judge sh -c '
   echo "Hello from the smoke test." > /tmp/judge/smoke.txt
   trap "rm -f /tmp/judge/smoke.txt" EXIT
   curl -sS -w "\nHTTP %{http_code}\n" -X POST http://127.0.0.1:8090/grade \
@@ -967,7 +981,7 @@ environment.
 - The job logs `classroom_ingest_*` and `llm_grading_*` lines and exports
   `classroom_sync_total{outcome}` and `llm_gradings_total{outcome}`.
 - To pause the feature, empty `GOOGLE_CLIENT_ID` (or the secret) and recreate `app`; to pause only the
-  grading, `scripts/ops/prod-compose.sh stop llm-judge` (jobs fail and retry on later nights).
+  grading, `scripts/ops/prod-compose.sh --profile llm stop llm-judge` (jobs fail and retry on later nights).
 - The migration (`0035`) is purely additive, so replicas on the previous release keep working
   during the rollout.
 

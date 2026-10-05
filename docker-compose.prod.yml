@@ -169,11 +169,19 @@ services:
   # Wraps `claude -p` for nightly LLM grading (docs/deployment.md). Built on the host from
   # this checkout — it is not in the registry, so Watchtower must never touch it. Holds no
   # app secrets and no DB/MinIO access: edge only (needs outbound to Anthropic). Without
-  # LLM_JUDGE_TOKEN it answers every /grade with 503. One-time login:
-  #   scripts/ops/prod-compose.sh run --rm -it llm-judge claude    (then /login)
+  # LLM_JUDGE_TOKEN it answers every /grade with 503. Behind the `llm` profile, so a plain
+  # `up -d` neither builds nor starts it; start and log in explicitly:
+  #   scripts/ops/prod-compose.sh --profile llm up -d --build llm-judge
+  #   scripts/ops/prod-compose.sh --profile llm run --rm -it llm-judge claude    (then /login)
+  # The app reaches it at http://llm-judge:8090 over `edge` and does not depend_on it:
+  # with the sidecar down, nightly jobs just fail and retry on a later night.
   llm-judge:
     build: ./docker/llm-judge
     image: subchk-llm-judge:local
+    # Built on the host like `backup`: without this, compose reads the `image:` name as
+    # something to fetch and fails with "pull access denied for subchk-llm-judge".
+    pull_policy: build
+    profiles: ["llm"]
     restart: unless-stopped
     environment:
       LLM_JUDGE_TOKEN: ${LLM_JUDGE_TOKEN:-}

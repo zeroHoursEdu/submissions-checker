@@ -15,7 +15,7 @@ Examples:
   scripts/ops/prod-compose.sh ps
   scripts/ops/prod-compose.sh --profile observability up -d alloy
   scripts/ops/prod-compose.sh --profile observability logs --tail 50 alloy
-  scripts/ops/prod-compose.sh run --rm -it llm-judge claude
+  scripts/ops/prod-compose.sh --profile llm run --rm -it llm-judge claude
 EOF
 }
 

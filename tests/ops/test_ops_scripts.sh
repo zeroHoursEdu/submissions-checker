@@ -92,13 +92,13 @@ grep -q "up -d app" "$SSH_LOG"
 # prod-compose.sh: an interactive `run`/`exec` (the one-time `claude` /login) needs a remote
 # TTY; non-interactive subcommands and `-T` must not get one.
 : > "$SSH_LOG"
-scripts/ops/prod-compose.sh run --rm -it llm-judge claude
+scripts/ops/prod-compose.sh --profile llm run --rm -it llm-judge claude
 grep -q "^-t " "$SSH_LOG" || { echo "prod-compose run: no ssh -t"; exit 1; }
 : > "$SSH_LOG"
 scripts/ops/prod-compose.sh exec llm-judge sh
 grep -q "^-t " "$SSH_LOG" || { echo "prod-compose exec: no ssh -t"; exit 1; }
 : > "$SSH_LOG"
-scripts/ops/prod-compose.sh exec -T llm-judge curl -fsS http://127.0.0.1:8090/health
+scripts/ops/prod-compose.sh --profile llm exec -T llm-judge curl -fsS http://127.0.0.1:8090/health
 grep -q "^-t " "$SSH_LOG" && { echo "prod-compose exec -T got a tty"; exit 1; }
 : > "$SSH_LOG"
 scripts/ops/prod-compose.sh ps
