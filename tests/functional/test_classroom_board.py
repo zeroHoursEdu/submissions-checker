@@ -225,6 +225,21 @@ async def test_board_shows_pending_and_failed_badges(
     )
 
 
+async def test_board_treats_superseded_as_no_pending_draft(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    await _work(db, asg, await _link(db, subject, st), status=LLMGradingStatus.SUPERSEDED)
+
+    page = await teacher_client.get(_board(subject, asg))
+
+    assert page.status_code == 200
+    assert "чекає на нічну перевірку" not in page.text
+    assert "AI-перевірка не вдалася" not in page.text
+    assert "/retry" not in page.text
+    assert "AI-чернетка" not in _input(page.text, st.id, "report")
+
+
 async def test_board_unchanged_for_non_llm_scored_assignment(
     teacher_client: AsyncClient, db, teacher, make_student
 ):

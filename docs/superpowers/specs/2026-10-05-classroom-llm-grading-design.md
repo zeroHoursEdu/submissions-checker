@@ -167,13 +167,23 @@ UI:
    attachment. Skip links that are IGNORED.
 3. For each kept submission: a cheap change check first. If the set of
    `(drive file id, modifiedTime)` equals the latest stored version's manifest, skip.
-   Otherwise download each file (cap: 20 MB per file, 10 files per work; anything over is
-   recorded as `skipped: too_large`), compute `content_hash` = sha256 over the sorted
-   per-file sha256 values, and store the files in MinIO under
-   `classroom/{subject_id}/{assignment_id}/{classroom_submission_id}/{hash[:12]}/{safe_name}`.
+   Otherwise download each file (cap: 20 MB per file, 10 files per work, 40 MB in total per
+   work; anything over is recorded as `skipped: too_large` and not downloaded), one at a
+   time: each file is hashed and stored in MinIO before the next download, under
+   `classroom/{subject_id}/{assignment_id}/{classroom_submission_id}/files/{sha256[:16]}_{safe_name}`
+   (rows ingested before this layout keep their `{hash[:12]}/{safe_name}` keys; readers
+   only use the manifest's `storage_key`). `content_hash` = sha256 over the sorted
+   per-file sha256 values.
 4. A new hash → insert a `classroom_works` row (a new version) plus an `llm_gradings` row
-   with `PENDING` (or `WAITING_LINK` if the link is NONE). The same hash → only update
-   `state`, `late` and `seen_at`.
+   with `PENDING` (or `WAITING_LINK` if the link is NONE), and mark the older versions'
+   `PENDING`/`WAITING_LINK`/`FAILED` gradings `SUPERSEDED` (never graded). The same hash →
+   only update `state`, `late` and `seen_at`; if that older version thereby becomes the
+   latest again, its `SUPERSEDED` grading is revived and the others are superseded.
+
+The nightly loop only grades the latest version (`seen_at desc, id desc`) of each Classroom
+submission, from a link that is not IGNORED, in an ACTIVE subject, for an assignment still
+linked to a coursework item and `is_llm_graded`, so the cap is spent only on work a teacher
+will see.
 5. `subjects.classroom_synced_at` and `classroom_sync_error` are updated. Each submission is
    processed in its own try/except, so one bad file never aborts the sync; errors are
    logged with `subject_id`, `classroom_submission_id` and the reason.
@@ -307,7 +317,7 @@ access check; streams from MinIO with a `Content-Disposition` filename).
   name, mime, size, modified, sha256, storage_key, skipped}]`), seen_at, timestamps; unique
   (classroom_submission_id, content_hash).
 - `llm_gradings`: id, classroom_work_id (FK CASCADE, unique), status
-  (`WAITING_LINK|PENDING|RUNNING|DONE|FAILED`), attempts, draft (JSONB), provider, model, error,
+  (`WAITING_LINK|PENDING|RUNNING|DONE|FAILED|SUPERSEDED`), attempts, draft (JSONB), provider, model, error,
   graded_at, approved_by (FK users SET NULL), approved_at, timestamps.
 
 Enums are StrEnums with UPPERCASE values stored as `String` columns, following the existing convention.

@@ -123,8 +123,20 @@ async def world(db, teacher):
     subject = Subject(name="S", owner_id=teacher.id)
     db.add(subject)
     await db.commit()
-    a1 = SubjectsAssignment(subject_id=subject.id, title="Lab1", code="lab1", config=_config("1"))
-    a2 = SubjectsAssignment(subject_id=subject.id, title="Lab2", code="lab2", config=_config("2"))
+    a1 = SubjectsAssignment(
+        subject_id=subject.id,
+        title="Lab1",
+        code="lab1",
+        config=_config("1"),
+        classroom_coursework_id="cw1",
+    )
+    a2 = SubjectsAssignment(
+        subject_id=subject.id,
+        title="Lab2",
+        code="lab2",
+        config=_config("2"),
+        classroom_coursework_id="cw2",
+    )
     db.add_all([a1, a2])
     await db.commit()
     link = ClassroomStudentLink(
@@ -147,6 +159,9 @@ async def _grading(
     attempts: int = 0,
     manifest: list[dict[str, Any]] | None = None,
     updated_at: datetime = EARLIER,
+    submission_id: str | None = None,
+    seen_at: datetime | None = None,
+    link: ClassroomStudentLink | None = None,
 ) -> LLMGrading:
     _seq["n"] += 1
     n = _seq["n"]
@@ -178,12 +193,12 @@ async def _grading(
         ]
     work = ClassroomWork(
         subjects_assignment_id=asg.id,
-        link_id=world["link"].id,
-        classroom_submission_id=f"s{n}",
+        link_id=(link or world["link"]).id,
+        classroom_submission_id=submission_id or f"s{n}",
         state="TURNED_IN",
         content_hash=f"{n:064d}",
         manifest=manifest,
-        seen_at=datetime.now(UTC),
+        seen_at=seen_at or datetime.now(UTC),
     )
     db.add(work)
     await db.commit()
@@ -453,6 +468,100 @@ async def test_loop_budget_counts_tonights_finished_jobs(db, world, functional_s
     )
     assert done == 0
     assert (await _reload(db, pending)).status == "PENDING"
+
+
+async def _run_cap_one(world, functional_sessionmaker) -> FakeJudge:
+    judge = FakeJudge()
+    await runner.grading_loop(
+        functional_sessionmaker, judge, world["storage"], **_loop_kwargs(cap=1)
+    )
+    return judge
+
+
+async def test_loop_grades_only_the_latest_version(db, world, functional_sessionmaker):
+    # An older version listed first must neither be graded nor use up the budget.
+    old = (await _grading(db, world, submission_id="sub-x", seen_at=EARLIER)).id
+    new = (await _grading(db, world, submission_id="sub-x", seen_at=NIGHT)).id
+    judge = await _run_cap_one(world, functional_sessionmaker)
+    assert len(judge.calls) == 1
+    assert (await _reload(db, old)).status == "PENDING"
+    assert (await _reload(db, new)).status == "DONE"
+
+
+async def test_loop_latest_version_ties_break_on_id(db, world, functional_sessionmaker):
+    first = (await _grading(db, world, submission_id="sub-y", seen_at=EARLIER)).id
+    second = (await _grading(db, world, submission_id="sub-y", seen_at=EARLIER)).id
+    await _run_cap_one(world, functional_sessionmaker)
+    assert (await _reload(db, first)).status == "PENDING"
+    assert (await _reload(db, second)).status == "DONE"
+
+
+async def test_loop_skips_ignored_link(db, world, functional_sessionmaker):
+    ignored = ClassroomStudentLink(
+        subject_id=world["subject"].id,
+        classroom_user_id="u-ign",
+        classroom_name="ІП-43 X Y",
+        method="IGNORED",
+    )
+    db.add(ignored)
+    await db.commit()
+    skipped = (await _grading(db, world, link=ignored)).id
+    graded = (await _grading(db, world)).id
+    await _run_cap_one(world, functional_sessionmaker)
+    assert (await _reload(db, skipped)).status == "PENDING"
+    assert (await _reload(db, graded)).status == "DONE"
+
+
+async def test_loop_skips_deleted_subject(db, world, functional_sessionmaker, teacher):
+    other = Subject(name="Gone", owner_id=teacher.id)
+    db.add(other)
+    await db.commit()
+    asg = SubjectsAssignment(
+        subject_id=other.id, title="L", code="l", config=_config("x"), classroom_coursework_id="c"
+    )
+    db.add(asg)
+    await db.commit()
+    skipped = (await _grading(db, world, assignment=asg)).id
+    other.status = SubjectStatus.DELETED
+    await db.commit()
+    graded = (await _grading(db, world)).id
+    judge = FakeJudge()
+    await runner.grading_loop(functional_sessionmaker, judge, world["storage"], **_loop_kwargs())
+    assert len(judge.calls) == 1
+    assert (await _reload(db, skipped)).status == "PENDING"
+    assert (await _reload(db, graded)).status == "DONE"
+
+
+async def test_loop_skips_unlinked_assignment(db, world, functional_sessionmaker):
+    skipped = (await _grading(db, world, assignment=world["a1"])).id
+    graded = (await _grading(db, world, assignment=world["a2"])).id
+    world["a1"].classroom_coursework_id = None
+    await db.commit()
+    await _run_cap_one(world, functional_sessionmaker)
+    assert (await _reload(db, skipped)).status == "PENDING"
+    assert (await _reload(db, graded)).status == "DONE"
+
+
+async def test_loop_skips_assignment_no_longer_llm_graded(db, world, functional_sessionmaker):
+    skipped = (await _grading(db, world, assignment=world["a1"])).id
+    graded = (await _grading(db, world, assignment=world["a2"])).id
+    cfg = _config("1")
+    cfg["llm_grading"]["enabled"] = False
+    world["a1"].config = cfg
+    await db.commit()
+    await _run_cap_one(world, functional_sessionmaker)
+    assert (await _reload(db, skipped)).status == "PENDING"
+    assert (await _reload(db, graded)).status == "DONE"
+
+
+async def test_loop_never_grades_superseded(db, world, functional_sessionmaker):
+    superseded = (await _grading(db, world, status="SUPERSEDED")).id
+    judge = FakeJudge()
+    done = await runner.grading_loop(
+        functional_sessionmaker, judge, world["storage"], **_loop_kwargs()
+    )
+    assert done == 0 and judge.calls == []
+    assert (await _reload(db, superseded)).status == "SUPERSEDED"
 
 
 async def test_loop_orders_by_assignment(db, world, functional_sessionmaker):

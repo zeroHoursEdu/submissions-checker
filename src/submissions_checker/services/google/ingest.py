@@ -161,6 +161,27 @@ async def release_waiting(db: AsyncSession, link: ClassroomStudentLink) -> None:
     )
 
 
+# Gradings a newer version makes pointless; RUNNING/DONE are left to finish/keep their draft.
+SUPERSEDABLE = (
+    LLMGradingStatus.PENDING.value,
+    LLMGradingStatus.WAITING_LINK.value,
+    LLMGradingStatus.FAILED.value,
+)
+
+
+async def _supersede_others(db: AsyncSession, submission_id: str, keep_work_id: int) -> None:
+    """Mark every other version's ungraded grading SUPERSEDED (caller commits)."""
+    others = select(ClassroomWork.id).where(
+        ClassroomWork.classroom_submission_id == submission_id,
+        ClassroomWork.id != keep_work_id,
+    )
+    await db.execute(
+        update(LLMGrading)
+        .where(LLMGrading.classroom_work_id.in_(others), LLMGrading.status.in_(SUPERSEDABLE))
+        .values(status=LLMGradingStatus.SUPERSEDED.value)
+    )
+
+
 async def upsert_links(db: AsyncSession, subject: Subject, roster: list[RosterEntry]) -> int:
     """Create links for unseen roster users and re-match unmatched ones.
 
@@ -331,6 +352,16 @@ async def _ingest_submission(
         # just uploaded (content-addressed, so a re-upload rewrote identical bytes).
         same.manifest = manifest
         same.state, same.late, same.seen_at = sub.state, sub.late, now
+        # Reverted to an older version: it is the latest again, so it must be graded.
+        await db.execute(
+            update(LLMGrading)
+            .where(
+                LLMGrading.classroom_work_id == same.id,
+                LLMGrading.status == LLMGradingStatus.SUPERSEDED.value,
+            )
+            .values(status=_fresh_status(link).value)
+        )
+        await _supersede_others(db, sub.id, same.id)
         await db.commit()
         report.unchanged += 1
         return
@@ -347,8 +378,9 @@ async def _ingest_submission(
     )
     db.add(work)
     await db.flush()
-    status = LLMGradingStatus.PENDING if link.student_id else LLMGradingStatus.WAITING_LINK
+    status = _fresh_status(link)
     db.add(LLMGrading(classroom_work_id=work.id, status=status.value))
+    await _supersede_others(db, sub.id, work.id)
     await db.commit()
     report.new_versions += 1
     logger.info(
@@ -358,6 +390,10 @@ async def _ingest_submission(
         work_id=work.id,
         grading_status=status.value,
     )
+
+
+def _fresh_status(link: ClassroomStudentLink) -> LLMGradingStatus:
+    return LLMGradingStatus.PENDING if link.student_id else LLMGradingStatus.WAITING_LINK
 
 
 def _is_invalid_grant(exc: BaseException) -> bool:

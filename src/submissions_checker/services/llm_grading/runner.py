@@ -12,16 +12,26 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm.attributes import flag_modified
 
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.metrics import llm_gradings_total
-from submissions_checker.db.models.classroom import ClassroomWork, LLMGrading
-from submissions_checker.db.models.enums import LLMGradingStatus
+from submissions_checker.db.models.classroom import (
+    ClassroomStudentLink,
+    ClassroomWork,
+    LLMGrading,
+)
+from submissions_checker.db.models.enums import (
+    ClassroomLinkMethod,
+    LLMGradingStatus,
+    SubjectStatus,
+)
+from submissions_checker.db.models.subject import Subject
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
-from submissions_checker.services.llm_grading.config import llm_criteria
+from submissions_checker.services.llm_grading.config import is_llm_graded, llm_criteria
 from submissions_checker.services.llm_grading.judge import (
     GradingRequest,
     JudgeCriterion,
@@ -248,6 +258,34 @@ async def _used_tonight(db: AsyncSession, night_start: datetime) -> int:
     return int(count or 0)
 
 
+def _in_scope(query: Any) -> Any:
+    """Restrict a query on LLMGrading to work a teacher will actually see (ruling R29):
+    the latest version (``seen_at desc, id desc``, as ingest and the board order it) of
+    its Classroom submission, from a link that is not IGNORED, in an ACTIVE subject, for
+    an assignment still linked to Classroom. ``is_llm_graded`` is checked by the caller
+    (it reads the config in Python). Selects ``SubjectsAssignment.config`` too."""
+    newer = aliased(ClassroomWork)
+    return (
+        query.add_columns(SubjectsAssignment.config)
+        .join(ClassroomWork, ClassroomWork.id == LLMGrading.classroom_work_id)
+        .join(ClassroomStudentLink, ClassroomStudentLink.id == ClassroomWork.link_id)
+        .join(SubjectsAssignment, SubjectsAssignment.id == ClassroomWork.subjects_assignment_id)
+        .join(Subject, Subject.id == SubjectsAssignment.subject_id)
+        .where(
+            ClassroomStudentLink.method != ClassroomLinkMethod.IGNORED.value,
+            Subject.status == SubjectStatus.ACTIVE,
+            SubjectsAssignment.classroom_coursework_id.is_not(None),
+            ~exists().where(
+                newer.classroom_submission_id == ClassroomWork.classroom_submission_id,
+                or_(
+                    newer.seen_at > ClassroomWork.seen_at,
+                    and_(newer.seen_at == ClassroomWork.seen_at, newer.id > ClassroomWork.id),
+                ),
+            ),
+        )
+    )
+
+
 def _candidate(night_start: datetime) -> Any:
     """Eligible, and not something that already failed tonight (no same-night retry)."""
     return and_(
@@ -279,19 +317,12 @@ async def grading_loop(
         if budget <= 0:
             logger.info("llm_grading_budget_spent", cap=cap)
             return 0
-        ids = list(
-            (
-                await db.execute(
-                    select(LLMGrading.id)
-                    .join(ClassroomWork, ClassroomWork.id == LLMGrading.classroom_work_id)
-                    .where(_candidate(night_start))
-                    .order_by(ClassroomWork.subjects_assignment_id, LLMGrading.id)
-                    .limit(budget)
-                )
-            )
-            .scalars()
-            .all()
+        rows = await db.execute(
+            _in_scope(select(LLMGrading.id))
+            .where(_candidate(night_start))
+            .order_by(ClassroomWork.subjects_assignment_id, LLMGrading.id)
         )
+        ids = [gid for gid, cfg in rows if is_llm_graded(cfg)][:budget]
 
     done = 0
     judge_errors = 0
@@ -304,13 +335,17 @@ async def grading_loop(
             break
         try:
             async with db_factory() as db:
-                grading = (
+                row = (
                     await db.execute(
-                        select(LLMGrading).where(LLMGrading.id == grading_id, _eligible())
+                        _in_scope(select(LLMGrading)).where(
+                            LLMGrading.id == grading_id, _eligible()
+                        )
                     )
-                ).scalar_one_or_none()
-                if grading is None:  # approved, retried or reaped since the list was taken
+                ).one_or_none()
+                # Approved, retried, reaped, superseded or unlinked since the list was taken.
+                if row is None or not is_llm_graded(row[1]):
                     continue
+                grading = row[0]
                 outcome = await grade_one(db, grading, judge, storage, now_fn=now_fn)
                 done += 1
                 judge_errors = judge_errors + 1 if outcome == "judge_error" else 0

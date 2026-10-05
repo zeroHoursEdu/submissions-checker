@@ -176,6 +176,9 @@ class LLMGradingStatus(enum.StrEnum):
     RUNNING = "RUNNING"
     DONE = "DONE"
     FAILED = "FAILED"
+    # A newer version of the same Classroom submission arrived before this one was graded:
+    # never graded, so the nightly cap is spent only on work a teacher will see.
+    SUPERSEDED = "SUPERSEDED"
 
     def __str__(self) -> str:
         return self.value

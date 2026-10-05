@@ -332,6 +332,56 @@ async def test_changed_content_creates_new_version(db, setup):
     assert len(s["storage"].objects) == 2
 
 
+@pytest.mark.parametrize("old_status", ["PENDING", "WAITING_LINK", "FAILED"])
+async def test_new_version_supersedes_ungraded_older_versions(db, setup, old_status):
+    s = setup
+    c = s["client"]
+    c.submit("s1", "u1", [c.add_file("d1", b"v1")])
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    first = (await _works(db))[0][1]
+    first.status = old_status
+    await db.commit()
+
+    c.files["d1"].update(content=b"v2", modified=T1)
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    assert [g.status for _, g in await _works(db)] == ["SUPERSEDED", "PENDING"]
+
+
+async def test_new_version_keeps_running_and_done_older_gradings(db, setup):
+    s = setup
+    c = s["client"]
+    c.submit("s1", "u1", [c.add_file("d1", b"v1")])
+    c.submit("s2", "u1", [c.add_file("d2", b"w1")])
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    by_sub = {w.classroom_submission_id: g for w, g in await _works(db)}
+    by_sub["s1"].status = "DONE"
+    by_sub["s2"].status = "RUNNING"
+    await db.commit()
+
+    c.files["d1"].update(content=b"v2", modified=T1)
+    c.files["d2"].update(content=b"w2", modified=T1)
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    rows = sorted((w.classroom_submission_id, w.id, g.status) for w, g in await _works(db))
+    assert [r[2] for r in rows] == ["DONE", "PENDING", "RUNNING", "PENDING"]
+
+
+async def test_reverting_to_an_older_version_revives_its_grading(db, setup):
+    s = setup
+    c = s["client"]
+    c.submit("s1", "u1", [c.add_file("d1", b"v1")])
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    c.files["d1"].update(content=b"v2", modified=T1)
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    # The student puts the first file back: v1 is the latest again and must be graded.
+    c.files["d1"].update(content=b"v1", modified="2026-10-03T10:00:00.000Z")
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    works = await _works(db)
+    assert len(works) == 2
+    latest = max(works, key=lambda wg: (wg[0].seen_at, wg[0].id))
+    assert latest[0].content_hash == works[0][0].content_hash
+    assert [g.status for _, g in works] == ["PENDING", "SUPERSEDED"]
+
+
 async def test_too_many_files_are_recorded_as_skipped(db, setup):
     s = setup
     c = s["client"]
