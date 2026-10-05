@@ -277,7 +277,13 @@ async def google_callback(
     The session cookie is SameSite=Strict, so it is not sent on this navigation. This
     route is therefore unauthenticated and only bounces, same-origin, to `/complete`.
     """
-    params = {"error": error} if error else {"code": code or "", "state": state or ""}
+    # The state travels with an error too: /complete must verify it to know the subject
+    # and report "denied" (not a bare state failure).
+    params = (
+        {"error": error, "state": state or ""}
+        if error
+        else {"code": code or "", "state": state or ""}
+    )
     target = html.escape("/teacher/google/complete?" + urlencode(params), quote=True)
     page = (
         '<!doctype html><html><head><meta charset="utf-8">'

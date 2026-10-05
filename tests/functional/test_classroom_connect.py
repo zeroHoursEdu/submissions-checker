@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import html
 import json
-from urllib.parse import parse_qs, urlparse
+import re
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 import pytest
@@ -232,6 +234,20 @@ async def test_callback_access_denied_redirects_back(teacher_client: AsyncClient
     resp = await teacher_client.get(f"/teacher/google/complete?error=access_denied&state={state}")
     assert resp.status_code == 303
     assert "classroom_error=denied" in resp.headers["location"]
+
+
+async def test_denied_consent_end_to_end_reports_denied(teacher_client: AsyncClient, db, teacher):
+    """Google -> /callback (error + state) -> follow the bounce link -> /complete."""
+    subject, _ = await _subject(db, teacher)
+    state, _ = await _start(teacher_client, subject)
+    bounce = await teacher_client.get(
+        "/teacher/google/callback?" + urlencode({"error": "access_denied", "state": state})
+    )
+    link = html.unescape(re.search(r'href="([^"]+)"', bounce.text).group(1))
+    resp = await teacher_client.get(link)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == (f"/teacher/subjects/{subject.id}?classroom_error=denied")
+    assert (await db.execute(select(GoogleConnection))).scalars().all() == []
 
 
 async def test_callback_cookie_of_other_user_is_rejected(
