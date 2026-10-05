@@ -57,6 +57,8 @@ class LLMJudge(Protocol):
 
     async def grade(self, req: GradingRequest) -> GradingResult: ...
 
+    async def aclose(self) -> None: ...
+
 
 def get_judge(settings: Settings) -> LLMJudge:
     """Return the judge selected by ``settings.llm_judge_provider``."""

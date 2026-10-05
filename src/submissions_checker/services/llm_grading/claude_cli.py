@@ -64,11 +64,20 @@ class ClaudeCliJudge:
             logger.warning("llm_grading_retry_invalid_answer", error=str(err))
             retry_prompt = (
                 prompt
-                + f"\n\nYour previous answer was invalid: {err}. "
+                + f"\n\nYour previous answer was invalid: {str(err)[:200]}. "
                 + "Reply with the JSON object only."
             )
             body = await self._post(req, retry_prompt)
-            return self._parse(body, req)
+            try:
+                return self._parse(body, req)
+            except JudgeError as err2:
+                logger.warning(
+                    "llm_grading_invalid_answer", error=str(err2), raw=body["result"][:500]
+                )
+                raise
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
 
     def _parse(self, body: dict[str, Any], req: GradingRequest) -> GradingResult:
         model = str(body.get("model") or self._model)

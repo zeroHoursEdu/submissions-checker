@@ -111,3 +111,28 @@ async def test_transport_error_becomes_judge_error():
 
 def test_get_judge_returns_claude_cli():
     assert get_judge(Settings()).name == "claude_cli"
+
+
+async def test_aclose_closes_http_client():
+    judge = _judge(lambda r: _ok())
+    await judge.aclose()
+    assert judge._http.is_closed
+
+
+async def test_retry_prompt_truncates_error_and_logs_raw_on_second_failure():
+    from structlog.testing import capture_logs
+
+    bodies = []
+    bad = json.dumps({"criteria": {"code": {"points": 2, "justification": "j", "evidence": "e"}}})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read())
+        return _ok("Z" * 900 if len(bodies) == 2 else bad.replace('"code"', '"' + "k" * 400 + '"'))
+
+    with capture_logs() as logs, pytest.raises(JudgeError):
+        await _judge(handler).grade(REQ)
+    retry = bodies[1].decode()
+    err = retry.split("Your previous answer was invalid: ", 1)[1].split(". Reply with", 1)[0]
+    assert len(err) <= 200
+    raw_logs = [e for e in logs if e.get("log_level") == "warning" and "raw" in e]
+    assert raw_logs and raw_logs[-1]["raw"] == "Z" * 500
