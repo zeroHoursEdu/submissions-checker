@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import pytest
@@ -28,6 +29,7 @@ from submissions_checker.services.google.client import (
     GoogleApiError,
     StudentSubmissionRef,
 )
+from submissions_checker.services.google import ingest as ingest_mod
 from submissions_checker.services.google.crypto import encrypt_token
 from submissions_checker.services.google.ingest import (
     IngestReport,
@@ -65,6 +67,7 @@ class FakeClient:
         self.fail_download: set[str] = set()
         self.roster_error: Exception | None = None
         self.downloads: list[str] = []
+        self.events: list[str] = []
 
     async def list_courses(self) -> list[dict[str, str]]:
         return []
@@ -88,12 +91,13 @@ class FakeClient:
             "id": drive_id,
             "name": f["name"],
             "mimeType": f["mime"],
-            "size": str(len(f["content"])),
+            "size": None if f.get("no_size") else str(len(f["content"])),
             "modifiedTime": f["modified"],
         }
 
     async def download(self, drive_id: str) -> DownloadedFile:
         self.downloads.append(drive_id)
+        self.events.append(f"download:{drive_id}")
         if drive_id in self.fail_download:
             raise GoogleApiError("boom", 500)
         f = self.files[drive_id]
@@ -117,12 +121,14 @@ class FakeClient:
 
 
 class FakeStorage:
-    def __init__(self) -> None:
+    def __init__(self, events: list[str] | None = None) -> None:
         self.objects: dict[str, bytes] = {}
+        self.events = events if events is not None else []
 
     async def upload_bytes(
         self, data: bytes, key: str, content_type: str = "application/octet-stream"
     ) -> str:
+        self.events.append(f"upload:{data.decode(errors='replace')[:20]}")
         self.objects[key] = data
         return f"s3://{key}"
 
@@ -338,6 +344,58 @@ async def test_too_many_files_are_recorded_as_skipped(db, setup):
     assert len(c.downloads) == 10 and len(s["storage"].objects) == 10
 
 
+async def test_work_byte_budget_skips_later_files_as_too_large(db, setup, monkeypatch):
+    monkeypatch.setattr(ingest_mod, "MAX_WORK_BYTES", 25)
+    s = setup
+    c = s["client"]
+    files = [
+        c.add_file("d1", b"a" * 10),
+        c.add_file("d2", b"b" * 10),
+        c.add_file("d3", b"c" * 10),  # 30 > 25: over budget, never fetched
+        c.add_file("d4", b"d" * 5),  # still fits after d3 is skipped
+    ]
+    c.submit("s1", "u1", files)
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    manifest = (await _works(db))[0][0].manifest
+    assert [e["skipped"] for e in manifest] == [None, None, "too_large", None]
+    assert manifest[2]["storage_key"] is None and manifest[2]["sha256"] is None
+    assert c.downloads == ["d1", "d2", "d4"]
+    assert len(s["storage"].objects) == 3
+
+
+async def test_budget_applies_to_exports_without_a_known_size(db, setup, monkeypatch):
+    # Google Docs report no size in their metadata: the downloaded length decides.
+    monkeypatch.setattr(ingest_mod, "MAX_WORK_BYTES", 15)
+    s = setup
+    c = s["client"]
+    files = [c.add_file("d1", b"a" * 10), c.add_file("d2", b"b" * 10)]
+    c.files["d2"]["no_size"] = True
+    c.submit("s1", "u1", files)
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    manifest = (await _works(db))[0][0].manifest
+    assert [e["skipped"] for e in manifest] == [None, "too_large"]
+    assert manifest[1]["storage_key"] is None
+    assert len(s["storage"].objects) == 1
+
+
+async def test_each_file_is_uploaded_before_the_next_download(db, setup):
+    s = setup
+    c = s["client"]
+    s["storage"].events = c.events  # one shared timeline
+    c.submit("s1", "u1", [c.add_file("d1", b"one"), c.add_file("d2", b"two")])
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    assert c.events == ["download:d1", "upload:one", "download:d2", "upload:two"]
+    work = (await _works(db))[0][0]
+    expected = hashlib.sha256(
+        "".join(sorted(hashlib.sha256(b).hexdigest() for b in (b"one", b"two"))).encode()
+    ).hexdigest()
+    assert work.content_hash == expected
+    for entry in work.manifest:
+        assert entry["storage_key"] == storage_key(
+            s["subject_id"], s["asg_id"], "s1", entry["sha256"], entry["name"]
+        )
+
+
 async def test_ignored_link_not_downloaded(db, setup):
     s = setup
     c = s["client"]
@@ -439,11 +497,12 @@ async def test_invalid_grant_during_download_also_marks_connection(db, setup):
 
 async def test_storage_key_sanitised():
     key = storage_key(1, 2, "s", "a" * 64, "../../x y.pdf")
-    assert key.startswith("classroom/1/2/s/" + "a" * 12 + "/")
+    # Keyed by the file's own sha256, so it can be uploaded before the work hash exists.
+    assert key.startswith("classroom/1/2/s/files/" + "a" * 16 + "_")
     assert "/" not in key.split("/")[-1]
-    assert storage_key(1, 2, "s", "a" * 64, "").endswith("/file")
+    assert storage_key(1, 2, "s", "a" * 64, "").endswith("_file")
     # A bare ".." segment would be rejected by MinIO (and reads as traversal).
-    assert storage_key(1, 2, "s", "a" * 64, "..").endswith("/file")
+    assert storage_key(1, 2, "s", "a" * 64, "..").endswith("_file")
 
 
 # ── Route ────────────────────────────────────────────────────────────────────

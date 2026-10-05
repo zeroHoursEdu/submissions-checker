@@ -48,6 +48,9 @@ logger = get_logger(__name__)
 
 KEPT_STATES = frozenset({"TURNED_IN", "RETURNED"})
 MAX_FILES_PER_WORK = 10
+# Total bytes kept per work (ruling R28): a replica has 320m, and the grader later loads
+# every file of the work at once. Files past the budget are recorded as skipped.
+MAX_WORK_BYTES = 40 * 1024 * 1024
 
 # Values of `subjects.classroom_sync_error` (rendered via vocab.classroom.sync_error_*).
 SYNC_ERROR_RECONNECT = "reconnect"
@@ -122,11 +125,14 @@ class IngestReport:
 
 
 def storage_key(
-    subject_id: int, assignment_id: int, submission_id: str, content_hash: str, name: str
+    subject_id: int, assignment_id: int, submission_id: str, sha256: str, name: str
 ) -> str:
+    """Object key of one file, by its own sha256: known as soon as the file is hashed, so
+    it is uploaded before the next download (rows from before this layout keep their
+    keys in the manifest, which is all readers use)."""
     # Leading dots stripped too: MinIO rejects a ".." segment and it reads as traversal.
     safe = re.sub(r"[^\w.\-]+", "_", name).lstrip(".")[:120] or "file"
-    return f"classroom/{subject_id}/{assignment_id}/{submission_id}/{content_hash[:12]}/{safe}"
+    return f"classroom/{subject_id}/{assignment_id}/{submission_id}/files/{sha256[:16]}_{safe}"
 
 
 async def _candidates(db: AsyncSession, subject_id: int) -> list[Candidate]:
@@ -266,8 +272,9 @@ async def _ingest_submission(
         report.unchanged += 1
         return
 
+    # One file's bytes at a time: each is hashed and uploaded before the next download.
     manifest: list[dict[str, Any]] = []
-    contents: list[bytes | None] = []
+    kept_bytes = 0
     for i, (ref, meta) in enumerate(zip(sub.files, metas, strict=True)):
         entry: dict[str, Any] = {
             "drive_id": ref.id,
@@ -279,21 +286,32 @@ async def _ingest_submission(
             "storage_key": None,
             "skipped": None,
         }
-        content: bytes | None = None
         if i >= MAX_FILES_PER_WORK:
             entry["skipped"] = "too_many"
+        elif kept_bytes + entry["size"] > MAX_WORK_BYTES:
+            entry["skipped"] = "too_large"  # known from metadata: never fetched
         else:
             downloaded = await client.download(ref.id)
             entry["name"] = downloaded.name
             entry["mime"] = EXPORTS.get(downloaded.mime, downloaded.mime)
-            if downloaded.content is None:
-                entry["skipped"] = downloaded.skipped or "unavailable"
+            content, skipped = downloaded.content, downloaded.skipped
+            # Drop every reference before the next download, or two files' bytes overlap.
+            del downloaded
+            if content is None:
+                entry["skipped"] = skipped or "unavailable"
+            elif kept_bytes + len(content) > MAX_WORK_BYTES:
+                entry["skipped"] = "too_large"  # exports carry no size until downloaded
             else:
-                content = downloaded.content
+                kept_bytes += len(content)
                 entry["size"] = len(content)
                 entry["sha256"] = hashlib.sha256(content).hexdigest()
+                key = storage_key(subject_id, assignment_id, sub.id, entry["sha256"], entry["name"])
+                await storage.upload_bytes(
+                    content, key, entry["mime"] or "application/octet-stream"
+                )
+                entry["storage_key"] = key
+            del content
         manifest.append(entry)
-        contents.append(content)
 
     content_hash = hashlib.sha256(
         "".join(sorted(e["sha256"] for e in manifest if e["sha256"])).encode()
@@ -308,29 +326,14 @@ async def _ingest_submission(
         )
     ).scalar_one_or_none()
     if same is not None:
-        # Identical bytes under a new manifest (re-turn-in, touched file): keep the stored
-        # objects, refresh the manifest so the next sync is a cheap skip again.
-        stored = {e.get("sha256"): e.get("storage_key") for e in same.manifest}
-        for entry in manifest:
-            entry["storage_key"] = stored.get(entry["sha256"]) if entry["sha256"] else None
+        # Identical bytes under a new manifest (re-turn-in, touched file): refresh the
+        # manifest so the next sync is a cheap skip again. Its keys point at the objects
+        # just uploaded (content-addressed, so a re-upload rewrote identical bytes).
         same.manifest = manifest
         same.state, same.late, same.seen_at = sub.state, sub.late, now
         await db.commit()
         report.unchanged += 1
         return
-
-    used: set[str] = set()
-    for idx, (entry, content) in enumerate(zip(manifest, contents, strict=True)):
-        if content is None:
-            continue
-        key = storage_key(subject_id, assignment_id, sub.id, content_hash, entry["name"])
-        if key in used:
-            key = storage_key(
-                subject_id, assignment_id, sub.id, content_hash, f"{idx}_{entry['name']}"
-            )
-        used.add(key)
-        await storage.upload_bytes(content, key, entry["mime"] or "application/octet-stream")
-        entry["storage_key"] = key
 
     work = ClassroomWork(
         subjects_assignment_id=assignment_id,
