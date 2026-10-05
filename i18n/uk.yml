@@ -616,6 +616,7 @@ classroom:
   justification: Обґрунтування
   late: здано із запізненням
   received_from_classroom: Отримано з Google Classroom
+  student_received: Роботу отримано з Google Classroom
   confirm_student_first: Спочатку підтвердіть, хто цей студент
   draft_changed: З'явилася нова AI-чернетка — оновіть сторінку
   draft_for_version: "AI-чернетка стосується версії від {when}"

@@ -57,6 +57,15 @@ detail.
 | Soft-delete a subject (marks `DELETED`, data preserved; Операції tab, checkbox-confirmed) | Owner / ADMIN | `POST /teacher/subjects/{id}/delete` |
 | Provision a TEST student for the subject (excluded from analytics) | Owner only | `POST /teacher/subjects/{id}/test-student` |
 | Enter the portal **as** the test student (pilots the student journey) | Owner only | `POST /teacher/subjects/{id}/test-student/enter` |
+| Connect / disconnect the teacher's Google account (Classroom + Drive read-only; OAuth with PKCE, refresh token encrypted; feature off unless `GOOGLE_CLIENT_ID` is set) | TEACHER/ADMIN (subject owner) | `GET /teacher/google/connect`, `GET /teacher/google/callback` (hands off to) `GET /teacher/google/complete`, `POST /teacher/google/disconnect` |
+| Link a Classroom course to the subject, and a coursework item to an assignment | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/course`, `POST /teacher/subjects/{id}/classroom/coursework` |
+| «Синхронізувати зараз»: ingest now (refused with `classroom_error=busy` while the nightly job holds the lock) | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/sync` |
+| Resolve Classroom roster entries to platform students: confirm, change, ignore, bulk-confirm name matches ≥ 95% | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/links/{link_id}`, `POST /teacher/subjects/{id}/classroom/links/confirm-all` |
+| Retry a failed AI grading (graded again on the next night) | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/gradings/{grading_id}/retry` |
+| Download a fetched student file | Owner / ADMIN | `GET /teacher/subjects/{id}/classroom/works/{work_id}/files/{idx}` |
+| AI draft rows on the assignment board; saving points approves the shown draft (409 if its student match is unconfirmed or a newer draft appeared) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/scores` (existing route, now gated for `llm_grading` assignments) |
+| «Роботу отримано з Google Classroom: <дата>» on the assignment page (date only, never the draft) | STUDENT | `GET /portal/subjects/{id}/assignments/{sa_id}` |
+| Nightly job: ingest every linked subject, then grade pending works (03:00 Europe/Kyiv, capped; `workers/scheduled/classroom_nightly.py`) | system | scheduler cron |
 
 > There is **no on-screen subject/assignment editor**. A subject's name, assignments,
 > deadlines, grade ranges, review mode, late policy, attempt caps, variants, sandbox limits,

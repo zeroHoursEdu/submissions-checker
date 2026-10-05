@@ -179,6 +179,55 @@ lab3:
 - Uploads are refused in this mode, and "re-run checks" is refused for a `QUIZ_ONLY`
   submission (there is no archive).
 
+##### `llm_grading` — nightly AI draft of the criteria points (optional)
+
+For a `quiz_and_teacher_scores` assignment whose work is submitted in **Google Classroom**
+(not on the platform), the platform can fetch the work and have an LLM draft the
+`teacher_criteria` points overnight. The teacher still approves every grade.
+
+```yaml
+lab3:
+  review_mode: quiz_and_teacher_scores
+  grading:
+    quiz_points: 40
+    teacher_criteria:
+      - key: report
+        title: Звіт
+        max: 30
+        requirements: |            # required while the criterion is LLM-graded
+          Звіт містить мету, хід роботи, скріншоти, висновки.
+      - key: oral
+        title: Усна частина
+        max: 30
+        llm: false                 # teacher-only: the LLM leaves it blank
+  llm_grading:
+    enabled: true
+    source: google_classroom       # the only source for now
+    task_file: tasks/lab3.md       # path inside the config ZIP; or inline `task:`
+    instructions: |                # optional extra rules for the grader
+      Варіант студента вказаний на титульній сторінці.
+```
+
+- **`requirements`** (criterion key): what a full mark needs, in plain words. The grader
+  awards only what it can quote evidence for, and gives 0 for the rest.
+- **`llm: false`** (criterion key): the LLM does not score this criterion; its input on the
+  board stays for the teacher. Default is `true`.
+- **`task_file` / `task`**: the assignment text the grader judges against. `task_file` is read
+  from the ZIP at apply time and stored inline, so nothing is read from the ZIP at runtime.
+- **Apply config rejects** the assignment when: `llm_grading` is on a mode other than
+  `quiz_and_teacher_scores`; `enabled` is not a bool or `source` is not `google_classroom`;
+  neither `task` nor `task_file` is given, or the `task_file` is missing from the ZIP or not
+  UTF-8 text; an LLM-graded criterion has empty `requirements`; or no criterion is LLM-graded.
+- **How it behaves**: a teacher links the Classroom course to the subject and the coursework
+  item to this assignment (Операції tab). Each night (03:00 Europe/Kyiv) new or changed
+  submissions are fetched (max 10 files of 20 MB per work; larger files are skipped) and
+  graded. Drafts appear on the assignment board pre-filled and marked «AI-чернетка», with
+  justification, evidence and the files, and **never** reach the student; saving the points
+  is the approval. A name-only student match must be confirmed first, and a draft that
+  appeared after the page was opened is refused until the page is reloaded.
+  See [`docs/deployment.md`](deployment.md#classroom-ingest-and-nightly-llm-grading) for
+  the ops setup.
+
 ---
 
 ## Sandbox Security Model

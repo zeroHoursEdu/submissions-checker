@@ -125,6 +125,14 @@ services:
       # Nightly LLM grading talks to the llm-judge sidecar below (same bearer token).
       LLM_JUDGE_URL: http://llm-judge:8090
       LLM_JUDGE_TOKEN: ${LLM_JUDGE_TOKEN:-}
+      LLM_JUDGE_MODEL: ${LLM_JUDGE_MODEL:-opus}
+      LLM_GRADING_START_HOUR: ${LLM_GRADING_START_HOUR:-3}
+      LLM_GRADING_END_HOUR: ${LLM_GRADING_END_HOUR:-4}
+      LLM_GRADING_NIGHTLY_CAP: ${LLM_GRADING_NIGHTLY_CAP:-40}
+      # Google Classroom ingest: off while GOOGLE_CLIENT_ID is empty.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_TOKEN_ENCRYPTION_KEY: ${GOOGLE_TOKEN_ENCRYPTION_KEY:-}
     volumes:
       # Checks run as sibling containers on the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock

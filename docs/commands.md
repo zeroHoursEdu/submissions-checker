@@ -60,6 +60,15 @@ which would rewrite `uv.lock`; never an activated venv).
 | `e2e-down` | Stops the e2e stack | Cleaning up after `e2e-up` | — | No |
 | `e2e-logs` | `docker compose -f docker-compose.e2e.yml logs -f app-e2e` | Debugging a running e2e stack | e2e stack running | No |
 
+## LLM judge sidecar (`docs/deployment.md#classroom-ingest-and-nightly-llm-grading`)
+
+| Target / command | What | When | Prerequisites | Destructive? |
+|---|---|---|---|---|
+| `make llm-judge-smoke` | `scripts/ops/llm-judge-smoke.sh`: `GET /health`, then POSTs `tests/fixtures/sample.pdf` to `/grade` of the sidecar at `$LLM_JUDGE_URL` (default `http://localhost:8090`; `--url`/`--file` override) | After starting or re-logging-in the sidecar; checking that the pinned CLI still works | `LLM_JUDGE_TOKEN` in the environment (same value as the sidecar); locally a sidecar from `docker compose --profile llm up -d --build llm-judge` | No (one real model call, which uses the subscription quota) |
+| `docker compose --profile llm run --rm -it llm-judge claude` | One-time login of the local sidecar: in the CLI run `/login` | First use of the dev sidecar | The `llm` profile | No |
+| `scripts/ops/prod-compose.sh up -d --build llm-judge` | Builds the prod sidecar from the repo checkout (Watchtower never touches it) and starts it | First rollout and after any change under `docker/llm-judge/` | `PROD_SSH`/`PROD_DIR`; updated checkout on the host | Recreates the sidecar only; the login volume survives |
+| `scripts/ops/prod-compose.sh run --rm -it llm-judge claude` | One-time login of the prod sidecar: `/login`, approve in the browser, paste the code, `/exit` | First rollout; again if `/health` reports `logged_in: false` | `PROD_SSH`/`PROD_DIR`; a Claude subscription account | No |
+
 ## Observability (`docs/observability.md`)
 
 | Target | What | When | Prerequisites | Destructive? |

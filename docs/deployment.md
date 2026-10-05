@@ -21,6 +21,7 @@ needs no inbound access beyond ports 80 and 443.
 - [Rollback](#rollback)
 - [Backups and restore](#backups-and-restore)
 - [Storage migration (this release)](#storage-migration-this-release)
+- [Classroom ingest and nightly LLM grading](#classroom-ingest-and-nightly-llm-grading)
 - [Memory budget](#memory-budget)
 - [Operations](#operations)
 - [Known exposure and accepted risk](#known-exposure-and-accepted-risk)
@@ -849,6 +850,128 @@ docker rm <that-container>     # or: docker container prune
 
 ---
 
+## Classroom ingest and nightly LLM grading
+
+Teachers link a Google Classroom course to a subject (Операції tab, card «Google Classroom»).
+Each night the app downloads students' submitted work, and a sidecar (`llm-judge`, wrapping
+`claude -p`) drafts per-criterion points. The draft is only shown on the assignment board;
+a teacher approving it (saving the points) is the only thing that creates a grade. Students
+see only «Роботу отримано з Google Classroom: <дата>», never a draft. Design:
+`docs/superpowers/specs/2026-10-05-classroom-llm-grading-design.md`.
+
+The feature is **off** while `GOOGLE_CLIENT_ID` is empty; nothing else changes.
+
+### 1. OAuth client (once)
+
+In the GCP project `subchk-classroom-spike` (organisation `edu.kpi.ua`, audience
+**Internal**) open APIs & Services → Credentials → Create credentials → OAuth client ID:
+
+- Application type: **Web application** (not Desktop).
+- Authorized redirect URI: `https://<prod host>/teacher/google/callback` (exactly; `<prod host>`
+  is `DOMAIN` from `.env`).
+- The Classroom and Drive APIs must be enabled in that project.
+
+Copy the client ID and secret.
+
+### 2. Environment
+
+Add to the prod `.env` (all passed to the app by `docker-compose.prod.yml`):
+
+```bash
+# Generate the two secrets (on any machine with the `cryptography` package, or `uv run`):
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # GOOGLE_TOKEN_ENCRYPTION_KEY
+openssl rand -hex 24                                                                        # LLM_JUDGE_TOKEN
+```
+
+```bash
+GOOGLE_CLIENT_ID=<from step 1>
+GOOGLE_CLIENT_SECRET=<from step 1>
+GOOGLE_TOKEN_ENCRYPTION_KEY=<Fernet key>   # encrypts refresh tokens at rest; changing it forces every teacher to reconnect
+LLM_JUDGE_TOKEN=<random>                   # shared by the app and the sidecar
+```
+
+With `GOOGLE_CLIENT_ID` set, the app refuses to start without
+`GOOGLE_TOKEN_ENCRYPTION_KEY`. Without `LLM_JUDGE_TOKEN` the sidecar answers every `/grade`
+with 503: it never runs unauthenticated.
+
+Optional tuning (defaults shown):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLM_GRADING_START_HOUR` | `3` | The nightly job starts at this hour, Europe/Kyiv |
+| `LLM_GRADING_END_HOUR` | `4` | Must be greater than start. The loop runs for `end - start` hours from the moment it started (DST-safe) and starts no new job after that |
+| `LLM_GRADING_NIGHTLY_CAP` | `40` | Maximum gradings per Kyiv night; jobs already finished that night (including failures) count against it, and a failed job is not retried the same night |
+| `LLM_JUDGE_MODEL` | `opus` | Model passed to the sidecar |
+
+A job is attempted at most 3 times; one stuck `RUNNING` for over an hour is marked `FAILED`.
+Three consecutive judge errors stop the night's loop (outage or exhausted quota), leaving
+the rest for the next night. **Grading consumes the quota of the Claude subscription the
+sidecar is logged in to**, so size the cap to it.
+
+### 3. Start the sidecar
+
+The sidecar image is built on the host from the repo checkout (it is not in the registry)
+and is excluded from Watchtower: after changing anything under `docker/llm-judge/`, pull the
+checkout and rebuild by hand. It has no app secrets and no database or MinIO access.
+
+```bash
+scripts/ops/prod-compose.sh up -d --build llm-judge
+scripts/ops/prod-compose.sh up -d app      # recreate the replicas so they read the new .env
+```
+
+Recreating `app` restarts both replicas; do it outside an exam.
+
+### 4. One-time login of the sidecar
+
+The login lives in the `llm_judge_home` volume (`/home/judge/.claude`, via
+`CLAUDE_CONFIG_DIR`) and survives recreates. The CLI version is pinned in the image
+(`2.1.289`, auto-update disabled), so a login keeps working until you rebuild.
+
+```bash
+scripts/ops/prod-compose.sh run --rm -it llm-judge claude
+# in the CLI: /login  → open the URL in a browser, approve, paste the code → /exit
+```
+
+### 5. Check
+
+The sidecar publishes no host port on prod, so check it from inside its own container (it
+has `curl` and its own `LLM_JUDGE_TOKEN`):
+
+```bash
+scripts/ops/prod-compose.sh ps llm-judge                      # healthy
+scripts/ops/prod-compose.sh exec -T llm-judge curl -fsS http://127.0.0.1:8090/health
+# expect {"ok": true, "logged_in": true}; logged_in false means step 4 is missing
+
+# One real model call (a tiny text file):
+scripts/ops/prod-compose.sh exec -T llm-judge sh -c '
+  echo "Hello from the smoke test." > /tmp/judge/smoke.txt
+  curl -sS -w "\nHTTP %{http_code}\n" -X POST http://127.0.0.1:8090/grade \
+    -H "Authorization: Bearer $LLM_JUDGE_TOKEN" \
+    -F "system=You grade tiny documents." \
+    -F "prompt=Reply with a JSON object {\"summary\": \"<one sentence>\"}." \
+    -F "model=opus" -F "files=@/tmp/judge/smoke.txt;type=text/plain"'
+# expect HTTP 200 and {"result": ..., "model": ..., "usage": ...}
+```
+
+`make llm-judge-smoke` (`scripts/ops/llm-judge-smoke.sh`) does the same with a sample PDF
+against a sidecar you can reach over HTTP, e.g. the local one from
+`docker compose --profile llm up -d --build llm-judge`; it needs `LLM_JUDGE_TOKEN` in your
+environment.
+
+### 6. Day to day
+
+- A teacher connects Google in the subject's Операції tab, picks the course, then links each
+  assignment to a Classroom coursework item. Unmatched roster entries are resolved there
+  too; name-only matches must be confirmed before their points can be saved.
+- The job logs `classroom_ingest_*` and `llm_grading_*` lines and exports
+  `classroom_sync_total{outcome}` and `llm_gradings_total{outcome}`.
+- To pause the feature, empty `GOOGLE_CLIENT_ID` and recreate `app`; to pause only the
+  grading, `scripts/ops/prod-compose.sh stop llm-judge` (jobs fail and retry on later nights).
+- The migration (`0035`) is purely additive, so replicas on the previous release keep working
+  during the rollout.
+
+---
+
 ## Memory budget
 
 2GB total. These are ceilings, not reservations — steady-state usage is well under them,
@@ -877,6 +1000,11 @@ load — do not size its limit from the idle number.
 `SANDBOX_MAX_MEMORY` (default `384m`) is what a single check may take out of that
 headroom. A subject requesting more in its `config.yml` is clamped to it, and the clamp
 is logged with the subject and both values.
+
+The `llm-judge` sidecar has a 600M ceiling and is **not** in the table above: it idles
+outside the 03:00 Kyiv window, when traffic is minimal. The ceilings summed with it exceed
+2GB, which is accepted. If it is OOM-killed at night the grading jobs fail and are retried
+the next night.
 
 **Redo this arithmetic whenever you add a service or raise a limit.**
 

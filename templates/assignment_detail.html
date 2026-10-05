@@ -88,6 +88,11 @@
           </svg>
           Grade: <strong class="text-slate-700">{{ assignment.min_grade }}–{{ assignment.max_grade }}</strong>
         </span>
+        {% if classroom_received_at %}
+        <span class="flex items-center gap-1.5" data-testid="classroom-received">
+          {{ vocab.classroom.student_received }}: {{ classroom_received_at.strftime("%d.%m.%Y") }}
+        </span>
+        {% endif %}
       </div>
     </div>
 

@@ -35,6 +35,7 @@ from submissions_checker.db.models import (
     SubmissionSourceType,
     SubmissionStatus,
 )
+from submissions_checker.db.models.classroom import ClassroomStudentLink, ClassroomWork
 from submissions_checker.db.models.enums import (
     NotificationCase,
     NotificationMethod,
@@ -430,6 +431,18 @@ async def assignment_detail(
                 total_questions=len(draw.get("question_ids") or []) or None,
             )
 
+    # Only the fact and date of receipt: drafts and verdicts are teacher-only.
+    classroom_received_at = await db.scalar(
+        select(ClassroomWork.seen_at)
+        .join(ClassroomStudentLink, ClassroomStudentLink.id == ClassroomWork.link_id)
+        .where(
+            ClassroomStudentLink.student_id == student_id,
+            ClassroomWork.subjects_assignment_id == sa.subjects_assignment_id,
+        )
+        .order_by(ClassroomWork.seen_at.desc(), ClassroomWork.id.desc())
+        .limit(1)
+    )
+
     detail = AssignmentDetail(
         student_assignment_id=sa.id,
         title=sa.subjects_assignment.title,
@@ -466,6 +479,7 @@ async def assignment_detail(
             # the result link all appear only after a worker moves the status.
             "poll_status": latest_sub is not None and latest_sub.status in TRANSIENT_STATUSES,
             "scored": scored,
+            "classroom_received_at": classroom_received_at,
             "breakdown_text": breakdown_line(
                 grade_breakdown,
                 str(get_vocab(request.cookies.get("lang")).get("quiz", {}).get("breakdown_quiz")),
