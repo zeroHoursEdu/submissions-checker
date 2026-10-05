@@ -605,18 +605,20 @@ classroom:
   confirm_all: Підтвердити всі ≥ 95%
   name_matched_hint: "Збігів за іменем, що чекають підтвердження: {n}"
   pick_student: Оберіть студента
-  name_matched_badge: збіг за іменем
+  name_matched_badge: "співставлено за ім'ям — {pct}%"
   draft_badge: AI-чернетка
-  pending_badge: очікує оцінювання
-  failed_badge: помилка оцінювання
+  pending_badge: чекає на нічну перевірку
+  failed_badge: AI-перевірка не вдалася
   retry: Повторити
-  new_version_badge: нова версія
+  new_version_badge: нова версія — потребує перегляду
   files: Файли
   evidence: Докази
   justification: Обґрунтування
   late: здано із запізненням
   received_from_classroom: Отримано з Google Classroom
   confirm_student_first: Спочатку підтвердіть, хто цей студент
+  draft_changed: З'явилася нова AI-чернетка — оновіть сторінку
+  draft_for_version: "AI-чернетка стосується версії від {when}"
   flash_connected: Google підключено.
   flash_disconnected: Google відключено.
   flash_course_linked: Курс прив'язано.

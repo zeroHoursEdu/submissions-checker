@@ -217,8 +217,8 @@ async def test_board_shows_pending_and_failed_badges(
 
     page = await teacher_client.get(_board(subject, asg))
 
-    assert "очікує оцінювання" in page.text
-    assert "помилка оцінювання" in page.text
+    assert "чекає на нічну перевірку" in page.text
+    assert "AI-перевірка не вдалася" in page.text
     assert (
         f'formaction="/teacher/subjects/{subject.id}/classroom/gradings/{failed.id}/retry"'
         in page.text
@@ -238,7 +238,7 @@ async def test_board_unchanged_for_non_llm_scored_assignment(
 
     assert page.status_code == 200
     assert 'value=""' in _input(page.text, st.id, "report")
-    for marker in ("AI-чернетка", "data-llm-details", "очікує оцінювання", "збіг за іменем"):
+    for marker in ("AI-чернетка", "data-llm-details", "чекає на нічну перевірку", "співставлено"):
         assert marker not in page.text
 
 
@@ -262,13 +262,31 @@ async def test_name_match_badge_offers_confirm(
     teacher_client: AsyncClient, db, teacher, make_student
 ):
     subject, asg, st = await _world(db, teacher, make_student)
+    other = await make_student(full_name="Білик Олена")
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=other.id))
+    await db.commit()
     link = await _link(db, subject, st, method=ClassroomLinkMethod.NAME, confirmed=False)
+    link.score = 0.91
+    await db.commit()
     await _work(db, asg, link)
 
     page = await teacher_client.get(_board(subject, asg))
 
-    assert "збіг за іменем" in page.text
-    assert f'formaction="/teacher/subjects/{subject.id}/classroom/links/{link.id}"' in page.text
+    assert "співставлено за ім" in page.text and "91%" in page.text
+    form = re.search(
+        rf'<form id="link-{link.id}" method="POST"\s+action="/teacher/subjects/{subject.id}'
+        rf'/classroom/links/{link.id}"[^>]*>(.*?)</form>',
+        page.text,
+        re.S,
+    )
+    assert form, "per-link form outside #bulk-form"
+    assert f'name="next" value="{_board(subject, asg)}"' in form.group(1)
+    select_ = re.search(
+        rf'<select form="link-{link.id}" name="student_id".*?</select>', page.text, re.S
+    )
+    assert select_ and f'value="{other.id}"' in select_.group(0)
+    assert f'form="link-{link.id}" name="action" value="confirm"' in page.text
+    assert f'form="link-{link.id}" name="action" value="link"' in page.text
 
 
 # ── Retry ────────────────────────────────────────────────────────────────────
@@ -295,6 +313,7 @@ async def test_retry_resets_failed(teacher_client: AsyncClient, db, teacher, mak
     await db.refresh(grading)
     assert grading.status == LLMGradingStatus.PENDING.value
     assert grading.attempts == 0
+    assert grading.error is None
     log = (
         await db.execute(select(AuditLog).where(AuditLog.action == "llm_grading_retry"))
     ).scalar_one()
@@ -329,18 +348,26 @@ def _scores_url(subject, asg) -> str:
     return f"/teacher/subjects/{subject.id}/assignments/{asg.id}/scores"
 
 
+async def _save(client, subject, asg, student, report: str, grading_id):
+    return await client.post(
+        _scores_url(subject, asg),
+        data={
+            "student_id": str(student.id),
+            "score_report": report,
+            "llm_grading_id": str(grading_id) if grading_id else "",
+        },
+        follow_redirects=False,
+    )
+
+
 async def test_save_scores_blocked_on_unconfirmed_name_link(
     teacher_client: AsyncClient, db, teacher, make_student
 ):
     subject, asg, st = await _world(db, teacher, make_student)
     link = await _link(db, subject, st, method=ClassroomLinkMethod.NAME, confirmed=False)
-    await _work(db, asg, link)
+    _, grading = await _work(db, asg, link)
 
-    r = await teacher_client.post(
-        _scores_url(subject, asg),
-        data={"student_id": str(st.id), "score_report": "4"},
-        follow_redirects=False,
-    )
+    r = await _save(teacher_client, subject, asg, st, "4", grading.id)
 
     assert r.status_code == 409
     assert "Спочатку підтвердіть" in r.text
@@ -357,11 +384,7 @@ async def test_save_scores_stamps_approval(teacher_client: AsyncClient, db, teac
     subject, asg, st = await _world(db, teacher, make_student)
     _, grading = await _work(db, asg, await _link(db, subject, st))
 
-    r = await teacher_client.post(
-        _scores_url(subject, asg),
-        data={"student_id": str(st.id), "score_report": "3"},
-        follow_redirects=False,
-    )
+    r = await _save(teacher_client, subject, asg, st, "3", grading.id)
 
     assert r.status_code == 303
     await db.refresh(grading)
@@ -383,11 +406,7 @@ async def test_save_scores_unedited_draft_is_not_edited(
     subject, asg, st = await _world(db, teacher, make_student)
     _, grading = await _work(db, asg, await _link(db, subject, st))
 
-    await teacher_client.post(
-        _scores_url(subject, asg),
-        data={"student_id": str(st.id), "score_report": "4"},
-        follow_redirects=False,
-    )
+    await _save(teacher_client, subject, asg, st, "4", grading.id)
 
     log = (
         await db.execute(select(AuditLog).where(AuditLog.action == "teacher_scores_set"))
@@ -402,15 +421,11 @@ async def test_new_version_after_approval_flags_needs_review(
     subject, asg, st = await _world(db, teacher, make_student)
     link = await _link(db, subject, st)
     now = datetime.now(UTC)
-    await _work(db, asg, link, seen_at=now - timedelta(days=1))
-    r = await teacher_client.post(
-        _scores_url(subject, asg),
-        data={"student_id": str(st.id), "score_report": "4"},
-        follow_redirects=False,
-    )
+    _, v1 = await _work(db, asg, link, seen_at=now - timedelta(days=1))
+    r = await _save(teacher_client, subject, asg, st, "4", v1.id)
     assert r.status_code == 303
     page = await teacher_client.get(_board(subject, asg))
-    assert "нова версія" not in page.text
+    assert "нова версія — потребує перегляду" not in page.text
 
     draft_v2 = {
         "criteria": {"report": {"points": 5, "justification": "j", "evidence": "e"}},
@@ -420,7 +435,7 @@ async def test_new_version_after_approval_flags_needs_review(
     await _work(db, asg, link, seen_at=now, draft=draft_v2, content_hash="b")
 
     page = await teacher_client.get(_board(subject, asg))
-    assert "нова версія" in page.text
+    assert "нова версія — потребує перегляду" in page.text
     # The approved points stay; the teacher decides whether to take the new draft.
     assert 'value="4"' in _input(page.text, st.id, "report")
     sa = await db.scalar(
@@ -454,7 +469,7 @@ async def test_file_route_streams_and_checks_access(
     manifest = [
         {
             "drive_id": "d1",
-            "name": "звіт 1.pdf",
+            "name": "звіт 1/2.pdf",
             "mime": "application/pdf",
             "size": 3,
             "modified": "",
@@ -482,7 +497,7 @@ async def test_file_route_streams_and_checks_access(
     assert ok.headers["content-type"].startswith("application/pdf")
     assert (
         ok.headers["content-disposition"]
-        == "attachment; filename*=UTF-8''%D0%B7%D0%B2%D1%96%D1%82%201.pdf"
+        == "attachment; filename*=UTF-8''%D0%B7%D0%B2%D1%96%D1%82%201%2F2.pdf"
     )
     assert storage.keys == ["k/report.pdf"]
 
@@ -494,3 +509,208 @@ async def test_file_route_streams_and_checks_access(
     denied = await teacher_client.get(f"{base}/0")
     assert denied.status_code in (403, 404)
     assert storage.keys == ["k/report.pdf"]
+
+
+async def test_file_route_rejects_work_of_another_own_subject(
+    teacher_client: AsyncClient, db, teacher, make_student, monkeypatch
+):
+    storage = _FakeStorage()
+    monkeypatch.setattr(teacher_classroom, "get_storage", lambda _s: storage)
+    subject, asg, st = await _world(db, teacher, make_student)
+    work, _ = await _work(db, asg, await _link(db, subject, st))
+    mine_too = Subject(name="Mine too", owner_id=teacher.id)
+    db.add(mine_too)
+    await db.commit()
+
+    r = await teacher_client.get(
+        f"/teacher/subjects/{mine_too.id}/classroom/works/{work.id}/files/0"
+    )
+
+    assert r.status_code == 404
+    assert storage.keys == []
+
+
+# ── Review fixes: stale draft, squad link gate, re-link from the board ──────
+
+
+async def test_board_carries_shown_draft_id(teacher_client: AsyncClient, db, teacher, make_student):
+    subject, asg, st = await _world(db, teacher, make_student)
+    _, grading = await _work(db, asg, await _link(db, subject, st))
+
+    page = await teacher_client.get(_board(subject, asg))
+
+    assert (
+        f'<input form="scores-{st.id}" type="hidden" name="llm_grading_id" value="{grading.id}">'
+        in page.text
+    )
+
+
+async def test_save_refused_when_a_newer_draft_appeared(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    link = await _link(db, subject, st)
+    now = datetime.now(UTC)
+    _, v1 = await _work(db, asg, link, seen_at=now - timedelta(days=1))
+    _, v2 = await _work(db, asg, link, seen_at=now, content_hash="b")
+
+    r = await _save(teacher_client, subject, asg, st, "4", v1.id)
+
+    assert r.status_code == 409
+    assert "нова AI-чернетка" in r.text
+    sa = await db.scalar(
+        select(StudentAssignment).where(
+            StudentAssignment.student_id == st.id,
+            StudentAssignment.subjects_assignment_id == asg.id,
+        )
+    )
+    assert sa is None or not sa.teacher_scores
+    await db.refresh(v1)
+    await db.refresh(v2)
+    assert v1.approved_at is None and v2.approved_at is None
+
+    ok = await _save(teacher_client, subject, asg, st, "4", v2.id)
+    assert ok.status_code == 303
+    await db.refresh(v2)
+    assert v2.approved_at is not None
+
+
+async def test_save_refused_when_draft_appeared_after_blank_page(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    await _work(db, asg, await _link(db, subject, st))
+
+    r = await _save(teacher_client, subject, asg, st, "4", None)
+
+    assert r.status_code == 409
+
+
+async def test_save_gate_covers_squad_mate_name_link(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student, squad_max_size=2)
+    mate = await make_student(full_name="Білик Олена")
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=mate.id))
+    await db.commit()
+    await squads.teacher_assign(db, subject.id, teacher.id, [st.id, mate.id])
+    await db.commit()
+    await _link(db, subject, st)  # A's own link is fine
+    mate_link = await _link(db, subject, mate, method=ClassroomLinkMethod.NAME, confirmed=False)
+    _, grading = await _work(db, asg, mate_link)
+
+    page = await teacher_client.get(_board(subject, asg))
+    assert page.text.count(f'<form id="link-{mate_link.id}"') == 1
+    assert page.text.count(f'form="link-{mate_link.id}" name="action" value="confirm"') == 2
+
+    r = await _save(teacher_client, subject, asg, st, "4", grading.id)
+    assert r.status_code == 409
+    assert "Спочатку підтвердіть" in r.text
+
+    confirm = await teacher_client.post(
+        f"/teacher/subjects/{subject.id}/classroom/links/{mate_link.id}",
+        data={"action": "confirm", "next": _board(subject, asg)},
+        follow_redirects=False,
+    )
+    assert confirm.status_code == 303
+    assert confirm.headers["location"] == _board(subject, asg)
+
+    ok = await _save(teacher_client, subject, asg, st, "4", grading.id)
+    assert ok.status_code == 303
+
+
+async def test_save_gate_covers_extra_name_link_behind_the_draft(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    await _link(db, subject, st)  # confirmed email link
+    extra = ClassroomStudentLink(
+        subject_id=subject.id,
+        classroom_user_id="extra",
+        classroom_name="ІП-43 Komin T",
+        student_id=st.id,
+        method=ClassroomLinkMethod.NAME.value,
+        confirmed=False,
+    )
+    db.add(extra)
+    await db.commit()
+    _, grading = await _work(db, asg, extra)
+
+    r = await _save(teacher_client, subject, asg, st, "4", grading.id)
+
+    assert r.status_code == 409
+
+
+async def test_relink_from_board_redirects_back(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    right = await make_student(full_name="Білик Олена")
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=right.id))
+    await db.commit()
+    link = await _link(db, subject, st, method=ClassroomLinkMethod.NAME, confirmed=False)
+
+    r = await teacher_client.post(
+        f"/teacher/subjects/{subject.id}/classroom/links/{link.id}",
+        data={"action": "link", "student_id": str(right.id), "next": _board(subject, asg)},
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 303
+    assert r.headers["location"] == _board(subject, asg)
+    await db.refresh(link)
+    assert link.student_id == right.id
+    assert link.confirmed is True
+
+
+@pytest.mark.parametrize(
+    "next_url",
+    ["https://evil.example/x", "//evil.example/x", "/teacher/subjects/999999/assignments/1"],
+)
+async def test_link_next_outside_subject_is_ignored(
+    teacher_client: AsyncClient, db, teacher, make_student, next_url
+):
+    subject, _, st = await _world(db, teacher, make_student)
+    link = await _link(db, subject, st, method=ClassroomLinkMethod.NAME, confirmed=False)
+
+    r = await teacher_client.post(
+        f"/teacher/subjects/{subject.id}/classroom/links/{link.id}",
+        data={"action": "confirm", "next": next_url},
+        follow_redirects=False,
+    )
+
+    assert r.status_code == 303
+    assert r.headers["location"].startswith(f"/teacher/subjects/{subject.id}?")
+
+
+async def test_details_name_the_version_the_draft_belongs_to(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    link = await _link(db, subject, st)
+    old = datetime(2026, 9, 1, 10, 30, tzinfo=UTC)
+    await _work(db, asg, link, seen_at=old)
+    await _work(
+        db,
+        asg,
+        link,
+        status=LLMGradingStatus.PENDING,
+        content_hash="b",
+        manifest=[
+            {
+                "drive_id": "d9",
+                "name": "нова.pdf",
+                "mime": "application/pdf",
+                "size": 1,
+                "modified": "",
+                "sha256": "y",
+                "storage_key": "k/new.pdf",
+                "skipped": None,
+            }
+        ],
+    )
+
+    page = await teacher_client.get(_board(subject, asg))
+
+    assert "AI-чернетка стосується версії від 01.09.2026" in page.text
+    assert "звіт.pdf" in page.text and "нова.pdf" in page.text

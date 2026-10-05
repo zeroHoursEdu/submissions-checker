@@ -54,7 +54,6 @@ from submissions_checker.db.models import (
 )
 from submissions_checker.db.models.classroom import LLMGrading
 from submissions_checker.db.models.enums import (
-    ClassroomLinkMethod,
     OutboxEventType,
     OutboxMessageState,
     QuizAttemptStatus,
@@ -68,7 +67,6 @@ from submissions_checker.services import quiz_grants, squads, teacher_scores
 from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
-from submissions_checker.services.google.links import link_state_for_students
 from submissions_checker.services.gradebook import (
     build_student_grid,
     fetch_grid_rows,
@@ -1969,15 +1967,23 @@ async def teacher_save_scores(
     )
     if enrolled is None:
         raise HTTPException(status_code=404, detail="Student is not enrolled")
-    llm_graded = llm_config.is_llm_graded(assignment.config)
-    if llm_graded:
-        # A name match may be the wrong student: points must not land on them unchecked.
-        link = (await link_state_for_students(db, subject_id)).get(student_id)
-        if link is not None and link.method == ClassroomLinkMethod.NAME and not link.confirmed:
-            vocab = get_vocab(None).get("classroom", {})
+    # LLM-graded: saving points approves the draft the row showed (squad-aware).
+    shown: dict[str, Any] | None = None
+    if llm_config.is_llm_graded(assignment.config):
+        shown = (await llm_board_state(db, assignment, [student_id]))[student_id]
+        vocab = get_vocab(None).get("classroom", {})
+        if shown["needs_link_confirm"]:
+            # A name match may be the wrong student: points must not land on them unchecked.
             raise HTTPException(
                 status_code=409,
                 detail=str(vocab.get("confirm_student_first", "")) or "confirm student first",
+            )
+        posted = str(form.get("llm_grading_id", "")).strip()
+        if shown["draft_grading_id"] != (int(posted) if posted.isdigit() else None):
+            # A newer draft landed after the page was rendered: never approve it unseen.
+            raise HTTPException(
+                status_code=409,
+                detail=str(vocab.get("draft_changed", "")) or "draft changed, reload",
             )
     crits = teacher_scores.criteria((assignment.config or {}).get("grading"))
     try:
@@ -2013,10 +2019,8 @@ async def teacher_save_scores(
         row = await db.get(StudentAssignment, row_id)
         if row is not None:
             row.teacher_scores = dict(new_scores)
-    # Saving points over an LLM draft approves the draft that was shown (squad-aware).
     approval: dict[str, Any] = {}
-    if llm_graded:
-        shown = (await llm_board_state(db, assignment, [student_id]))[student_id]
+    if shown is not None:
         grading_id = shown["draft_grading_id"]
         if grading_id is not None:
             grading = await db.get(LLMGrading, grading_id)

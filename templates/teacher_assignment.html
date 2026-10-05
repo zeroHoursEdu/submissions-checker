@@ -177,7 +177,8 @@
             <span class="text-slate-300">—</span>
           {% endif %}
         </td>
-        {% set prefill = (llm_state.get(row.student_id) or {}).get("prefill") or {} if llm_state is defined else {} %}
+        {% set row_llm = llm_state.get(row.student_id) if llm_state is defined else none %}
+        {% set prefill = (row_llm.prefill if row_llm else none) or {} %}
         {% for c in criteria %}
         {% set have = (row.teacher_scores or {}).get(c.key) %}
         {% set ai = prefill.get(c.key) if have is none else none %}
@@ -199,6 +200,7 @@
         </td>
         {% if scored %}
         <td class="px-2 py-3.5">
+          {% if row_llm %}<input form="scores-{{ row.student_id }}" type="hidden" name="llm_grading_id" value="{{ row_llm.draft_grading_id or '' }}">{% endif %}
           <button form="scores-{{ row.student_id }}" type="submit"
                   class="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium">{{ vocab.teacher.save_scores }}</button>
         </td>
@@ -289,6 +291,19 @@
 <form id="scores-{{ row.student_id }}" method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/scores" class="hidden">
   <input type="hidden" name="student_id" value="{{ row.student_id }}">
 </form>
+{% endfor %}
+{% endif %}
+{% if llm_state %}
+{# Per-link forms for the name-match controls (confirm / re-link); rows join them via form=. #}
+{% set seen = namespace(ids=[]) %}
+{% for ls in llm_state.values() %}
+{% if ls.confirm_link and ls.confirm_link.id not in seen.ids %}
+{% set seen.ids = seen.ids + [ls.confirm_link.id] %}
+<form id="link-{{ ls.confirm_link.id }}" method="POST"
+      action="/teacher/subjects/{{ subject_id }}/classroom/links/{{ ls.confirm_link.id }}" class="hidden">
+  <input type="hidden" name="next" value="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}">
+</form>
+{% endif %}
 {% endfor %}
 {% endif %}
 {% else %}

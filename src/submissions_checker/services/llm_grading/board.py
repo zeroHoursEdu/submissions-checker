@@ -73,12 +73,13 @@ async def llm_board_state(
     groups = await _squad_groups(db, subject_id, student_ids)
     everyone = set().union(*groups.values()) if groups else set()
 
-    works: list[tuple[ClassroomWork, int]] = []
+    # (work, its link), newest first.
+    works: list[tuple[ClassroomWork, ClassroomStudentLink]] = []
     if everyone:
         works = [
-            (w, sid)
-            for w, sid in await db.execute(
-                select(ClassroomWork, ClassroomStudentLink.student_id)
+            (w, lk)
+            for w, lk in await db.execute(
+                select(ClassroomWork, ClassroomStudentLink)
                 .join(ClassroomStudentLink, ClassroomStudentLink.id == ClassroomWork.link_id)
                 .where(
                     ClassroomWork.subjects_assignment_id == assignment.id,
@@ -116,37 +117,51 @@ async def llm_board_state(
     state: dict[int, dict[str, Any]] = {}
     for sid in student_ids:
         group = groups.get(sid, {sid})
-        mine = [w for w, owner in works if owner in group]  # already newest first
-        work = mine[0] if mine else None
+        mine = [(w, lk) for w, lk in works if lk.student_id in group]  # newest first
+        work = mine[0][0] if mine else None
         grading = gradings.get(work.id) if work else None
-        done = next(
+        done_pair = next(
             (
-                g
-                for w in mine
+                (w, lk)
+                for w, lk in mine
                 if (g := gradings.get(w.id)) is not None and g.status == LLMGradingStatus.DONE
             ),
             None,
         )
+        done = gradings[done_pair[0].id] if done_pair else None
         approvals = [
             (g.approved_at, g)
-            for w in mine
+            for w, _ in mine
             if (g := gradings.get(w.id)) is not None and g.approved_at is not None
         ]
         approved = max(approvals, key=lambda pair: pair[0])[1] if approvals else None
         draft_id = done.id if done else None
         approved_id = approved.id if approved else None
         link = links.get(sid)
+        # A name match may be the wrong student. Any unconfirmed one that feeds this row
+        # (own link, the link behind the shown draft, a squad-mate's link with a work here)
+        # must be confirmed before points are saved; the draft's own link is offered first.
+        candidates = [done_pair[1]] if done_pair else []
+        candidates += [lk for _, lk in mine]
+        if link is not None:
+            candidates.append(link)
+        confirm_link = next((lk for lk in candidates if _unconfirmed_name(lk)), None)
         state[sid] = {
             "link": link,
             "work": work,
             "grading": grading,
             "draft": done.draft if done else None,
+            "draft_work": done_pair[0] if done_pair else None,
             "draft_grading_id": draft_id,
+            "draft_link_id": done_pair[1].id if done_pair else None,
             "approved_grading_id": approved_id,
             "needs_review": bool(draft_id and approved_id is not None and draft_id != approved_id),
-            "needs_link_confirm": bool(
-                link and link.method == ClassroomLinkMethod.NAME and not link.confirmed
-            ),
+            "needs_link_confirm": confirm_link is not None,
+            "confirm_link": confirm_link,
             "prefill": {} if sid in scored_ids else _prefill(done.draft if done else None, keys),
         }
     return state
+
+
+def _unconfirmed_name(link: ClassroomStudentLink) -> bool:
+    return link.method == ClassroomLinkMethod.NAME and not link.confirmed

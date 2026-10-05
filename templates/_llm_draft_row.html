@@ -1,8 +1,23 @@
 {# LLM-graded (Google Classroom) row extras, included in the board's name cell.
-   Expects: ls (llm_board_state entry), row, criteria, subject_id. Buttons are part of
-   #bulk-form with their own formaction — a nested <form> would be dropped by the parser. #}
+   Expects: ls (llm_board_state entry), row, rows, criteria, subject_id. The retry button is
+   part of #bulk-form with its own formaction; the link controls join a per-link form
+   rendered after the table (form="link-<id>") — a nested <form> would be dropped. #}
 {% set cv = vocab.classroom %}
 {% set g = ls.grading %}
+{% macro file_list(w) %}
+<ul class="list-disc ml-4">
+  {% for f in w.manifest %}
+  <li>
+    {% if f.storage_key and not f.skipped %}
+    <a href="/teacher/subjects/{{ subject_id }}/classroom/works/{{ w.id }}/files/{{ loop.index0 }}"
+       class="text-indigo-600 hover:text-indigo-800 underline underline-offset-2">{{ f.name }}</a>
+    {% else %}
+    <span class="text-slate-400">{{ f.name }} ({{ f.skipped or "—" }})</span>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
 <div class="mt-1 flex flex-wrap items-center gap-1 font-normal">
   {% if g and g.status == "PENDING" %}
   <span class="inline-flex items-center text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">{{ cv.pending_badge }}</span>
@@ -14,18 +29,27 @@
   {% if ls.needs_review %}
   <span class="inline-flex items-center text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">{{ cv.new_version_badge }}</span>
   {% endif %}
-  {% if ls.needs_link_confirm %}
-  <span class="inline-flex items-center text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full"
-        title="{{ ls.link.classroom_name }}">{{ cv.name_matched_badge }}: {{ ls.link.classroom_name }}</span>
-  <button type="submit" formaction="/teacher/subjects/{{ subject_id }}/classroom/links/{{ ls.link.id }}"
-          name="action" value="confirm"
-          class="text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ cv.confirm }}</button>
-  <a href="/teacher/subjects/{{ subject_id }}?classroom=change#classroom-card"
-     class="text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ cv.change }}</a>
-  {% endif %}
 </div>
+{% if ls.needs_link_confirm %}
+{% set cl = ls.confirm_link %}
+<div class="mt-1 flex flex-wrap items-center gap-1 font-normal">
+  <span class="inline-flex items-center text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full"
+        title="{{ cl.classroom_name }}">{{ cv.name_matched_badge.format(pct=((cl.score or 0) * 100) | round | int) }}: {{ cl.classroom_name }}</span>
+  <button type="submit" form="link-{{ cl.id }}" name="action" value="confirm"
+          class="text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ cv.confirm }}</button>
+  <select form="link-{{ cl.id }}" name="student_id" aria-label="{{ cv.pick_student }}"
+          class="rounded border border-slate-300 px-1 py-0.5 text-xs max-w-[10rem]">
+    {% for r in rows %}
+    <option value="{{ r.student_id }}" {% if r.student_id == cl.student_id %}selected{% endif %}>{{ r.full_name }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" form="link-{{ cl.id }}" name="action" value="link"
+          class="text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ cv.change }}</button>
+</div>
+{% endif %}
 {% if ls.work %}
 {% set w = ls.work %}
+{% set dw = ls.draft_work %}
 {% set crit = (ls.draft or {}).get("criteria") or {} %}
 <details data-llm-details class="mt-1 text-xs font-normal text-slate-600 max-w-md">
   <summary class="cursor-pointer text-slate-500 hover:text-indigo-700">
@@ -33,6 +57,15 @@
   </summary>
   <div class="mt-1.5 space-y-1.5">
     <div class="text-slate-500">{{ w.state }}{% if w.late %} · <span class="text-red-600">{{ cv.late }}</span>{% endif %}</div>
+    {% if w.manifest %}
+    <div><span class="text-slate-400">{{ cv.files }}:</span>{{ file_list(w) }}</div>
+    {% endif %}
+    {% if dw and dw.id != w.id %}
+    <div class="pt-1 border-t border-slate-100 text-amber-700">
+      {{ cv.draft_for_version.format(when=dw.seen_at.strftime("%d.%m.%Y %H:%M")) }}
+      {% if dw.manifest %}{{ file_list(dw) }}{% endif %}
+    </div>
+    {% endif %}
     {% for c in criteria %}
     {% set v = crit.get(c.key) %}
     {% if v %}
@@ -45,23 +78,6 @@
     {% endfor %}
     {% if ls.draft and ls.draft.get("comment") %}
     <div class="whitespace-pre-line">{{ ls.draft.comment }}</div>
-    {% endif %}
-    {% if w.manifest %}
-    <div>
-      <span class="text-slate-400">{{ cv.files }}:</span>
-      <ul class="list-disc ml-4">
-        {% for f in w.manifest %}
-        <li>
-          {% if f.storage_key and not f.skipped %}
-          <a href="/teacher/subjects/{{ subject_id }}/classroom/works/{{ w.id }}/files/{{ loop.index0 }}"
-             class="text-indigo-600 hover:text-indigo-800 underline underline-offset-2">{{ f.name }}</a>
-          {% else %}
-          <span class="text-slate-400">{{ f.name }} ({{ f.skipped or "—" }})</span>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-    </div>
     {% endif %}
   </div>
 </details>

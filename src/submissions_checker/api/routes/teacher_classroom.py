@@ -608,8 +608,12 @@ async def resolve_link(
     current_user: TeacherUser,
     action: str = Form(...),
     student_id: int | None = Form(None),
+    next_url: str | None = Form(None, alias="next"),
 ) -> RedirectResponse:
-    """Resolve one roster entry: link it to a student, ignore it, or confirm a name match."""
+    """Resolve one roster entry: link it to a student, ignore it, or confirm a name match.
+
+    ``next`` (the assignment board) is honoured only inside this subject's pages.
+    """
     await require_subject_access(db, subject_id, current_user)
     link = (
         await db.execute(
@@ -667,6 +671,8 @@ async def resolve_link(
         target_id=link_id,
         student_id=link.student_id,
     )
+    if next_url and next_url.startswith(f"/teacher/subjects/{subject_id}/"):
+        return RedirectResponse(next_url, status_code=303)
     return _back(subject_id, classroom="link_" + action)
 
 
@@ -694,6 +700,7 @@ async def retry_grading(
     if grading.status == LLMGradingStatus.FAILED.value:
         grading.status = LLMGradingStatus.PENDING.value
         grading.attempts = 0
+        grading.error = None
         await audit(
             db,
             "llm_grading_retry",
@@ -740,5 +747,5 @@ async def work_file(
     return Response(
         content=data,
         media_type=str(entry.get("mime") or "application/octet-stream"),
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name, safe='')}"},
     )
