@@ -859,7 +859,7 @@ a teacher approving it (saving the points) is the only thing that creates a grad
 see only «Роботу отримано з Google Classroom: <дата>», never a draft. Design:
 `docs/superpowers/specs/2026-10-05-classroom-llm-grading-design.md`.
 
-The feature is **off** while `GOOGLE_CLIENT_ID` is empty; nothing else changes.
+The feature is **off** unless both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set; nothing else changes.
 
 ### 1. OAuth client (once)
 
@@ -928,7 +928,7 @@ The login lives in the `llm_judge_home` volume (`/home/judge/.claude`, via
 (`2.1.289`, auto-update disabled), so a login keeps working until you rebuild.
 
 ```bash
-scripts/ops/prod-compose.sh run --rm -it llm-judge claude
+scripts/ops/prod-compose.sh run --rm -it llm-judge claude   # run/exec get an ssh -t TTY automatically
 # in the CLI: /login  → open the URL in a browser, approve, paste the code → /exit
 ```
 
@@ -945,6 +945,7 @@ scripts/ops/prod-compose.sh exec -T llm-judge curl -fsS http://127.0.0.1:8090/he
 # One real model call (a tiny text file):
 scripts/ops/prod-compose.sh exec -T llm-judge sh -c '
   echo "Hello from the smoke test." > /tmp/judge/smoke.txt
+  trap "rm -f /tmp/judge/smoke.txt" EXIT
   curl -sS -w "\nHTTP %{http_code}\n" -X POST http://127.0.0.1:8090/grade \
     -H "Authorization: Bearer $LLM_JUDGE_TOKEN" \
     -F "system=You grade tiny documents." \
@@ -965,7 +966,7 @@ environment.
   too; name-only matches must be confirmed before their points can be saved.
 - The job logs `classroom_ingest_*` and `llm_grading_*` lines and exports
   `classroom_sync_total{outcome}` and `llm_gradings_total{outcome}`.
-- To pause the feature, empty `GOOGLE_CLIENT_ID` and recreate `app`; to pause only the
+- To pause the feature, empty `GOOGLE_CLIENT_ID` (or the secret) and recreate `app`; to pause only the
   grading, `scripts/ops/prod-compose.sh stop llm-judge` (jobs fail and retry on later nights).
 - The migration (`0035`) is purely additive, so replicas on the previous release keep working
   during the rollout.

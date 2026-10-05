@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -432,15 +433,19 @@ async def assignment_detail(
             )
 
     # Only the fact and date of receipt: drafts and verdicts are teacher-only.
-    classroom_received_at = await db.scalar(
-        select(ClassroomWork.seen_at)
+    classroom_created_at = await db.scalar(
+        select(ClassroomWork.created_at)
         .join(ClassroomStudentLink, ClassroomStudentLink.id == ClassroomWork.link_id)
         .where(
             ClassroomStudentLink.student_id == student_id,
+            ClassroomStudentLink.confirmed.is_(True),
             ClassroomWork.subjects_assignment_id == sa.subjects_assignment_id,
         )
         .order_by(ClassroomWork.seen_at.desc(), ClassroomWork.id.desc())
         .limit(1)
+    )
+    classroom_received_at = (
+        classroom_created_at.astimezone(ZoneInfo("Europe/Kyiv")) if classroom_created_at else None
     )
 
     detail = AssignmentDetail(

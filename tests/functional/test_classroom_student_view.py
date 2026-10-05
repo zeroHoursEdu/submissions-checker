@@ -40,21 +40,21 @@ async def _world(db, student_user):
     return subject, asg, sa
 
 
-async def _link(db, subject, student_id, uid="u1"):
+async def _link(db, subject, student_id, uid="u1", confirmed=True):
     link = ClassroomStudentLink(
         subject_id=subject.id,
         classroom_user_id=uid,
         classroom_name="ІП-43 Test Student",
         student_id=student_id,
         method=ClassroomLinkMethod.EMAIL.value,
-        confirmed=True,
+        confirmed=confirmed,
     )
     db.add(link)
     await db.commit()
     return link
 
 
-async def _work(db, asg, link, seen_at, key, *, draft=None):
+async def _work(db, asg, link, seen_at, key, *, draft=None, created_at=None):
     work = ClassroomWork(
         subjects_assignment_id=asg.id,
         link_id=link.id,
@@ -64,6 +64,7 @@ async def _work(db, asg, link, seen_at, key, *, draft=None):
         content_hash=key.ljust(64, "0"),
         manifest=[],
         seen_at=seen_at,
+        **({"created_at": created_at} if created_at else {}),
     )
     db.add(work)
     await db.commit()
@@ -84,8 +85,22 @@ def _url(subject, sa):
 async def test_student_sees_received_from_classroom(student_client: AsyncClient, db, student_user):
     subject, asg, sa = await _world(db, student_user)
     link = await _link(db, subject, student_user.student_id)
-    await _work(db, asg, link, datetime(2026, 10, 1, 9, 0, tzinfo=UTC), "old")
-    await _work(db, asg, link, datetime(2026, 10, 3, 12, 30, tzinfo=UTC), "new")
+    await _work(
+        db,
+        asg,
+        link,
+        datetime(2026, 10, 1, 9, 0, tzinfo=UTC),
+        "old",
+        created_at=datetime(2026, 10, 1, 9, 0, tzinfo=UTC),
+    )
+    await _work(
+        db,
+        asg,
+        link,
+        datetime(2026, 10, 3, 12, 30, tzinfo=UTC),
+        "new",
+        created_at=datetime(2026, 10, 3, 12, 30, tzinfo=UTC),
+    )
 
     page = await student_client.get(_url(subject, sa))
 
@@ -123,3 +138,42 @@ async def test_student_never_sees_draft(student_client: AsyncClient, db, student
     assert NOTICE in page.text
     assert SECRET not in page.text
     assert "AI-чернетка" not in page.text
+
+
+async def test_unconfirmed_name_link_gets_no_notice(student_client: AsyncClient, db, student_user):
+    subject, asg, sa = await _world(db, student_user)
+    link = await _link(db, subject, student_user.student_id, confirmed=False)
+    await _work(db, asg, link, datetime(2026, 10, 3, tzinfo=UTC), "n")
+
+    page = await student_client.get(_url(subject, sa))
+
+    assert page.status_code == 200
+    assert NOTICE not in page.text
+
+
+async def test_notice_date_is_latest_versions_created_at_in_kyiv(
+    student_client: AsyncClient, db, student_user
+):
+    subject, asg, sa = await _world(db, student_user)
+    link = await _link(db, subject, student_user.student_id)
+    # Latest version by seen_at; created 23:30 UTC on the 3rd = 02:30 on the 4th in Kyiv.
+    await _work(
+        db,
+        asg,
+        link,
+        datetime(2026, 10, 9, tzinfo=UTC),
+        "v2",
+        created_at=datetime(2026, 10, 3, 23, 30, tzinfo=UTC),
+    )
+    await _work(
+        db,
+        asg,
+        link,
+        datetime(2026, 10, 1, tzinfo=UTC),
+        "v1",
+        created_at=datetime(2026, 10, 8, 10, 0, tzinfo=UTC),
+    )
+
+    page = await student_client.get(_url(subject, sa))
+
+    assert f"{NOTICE}: 04.10.2026" in page.text
