@@ -94,7 +94,9 @@ def estimate_series(*, replicas: int, route_templates: int) -> int:
     technical_gauges = 1 + 3 + 3  # in_progress, db_pool_* + app_db_healthy, outbox gauges
     outbox_counter = 12  # ~6 live event types × 2 outcomes
     check_histogram = 8
-    outcome_counters = 4 + 2 + 2  # checks, ai_reviews, notifications
+    # checks, ai_reviews, notifications, llm_gradings, classroom_sync (the last two only
+    # move on the replica that wins the nightly lock; counted per replica to be safe)
+    outcome_counters = 4 + 2 + 2 + 4 + 5
     student_metrics = 1 + 3 + 3  # students_total, active windows, logins by role
     quiz_metrics = 1 + 3 + 1 + 1 + 1
     submission_dispute_airraid = 1 + 1 + 1 + 3 + 1 + 1
@@ -544,6 +546,40 @@ def technical() -> dict[str, Any]:
             _targets(
                 (
                     f"sum by (outcome) (increase(notifications_sent_total{{{JOB}}}[$__range]))",
+                    "{{outcome}}",
+                )
+            ),
+            bars=True,
+            stacked=True,
+        )
+    )
+    p.append(
+        _timeseries(
+            g,
+            "LLM gradings by outcome (range)",
+            "Nightly LLM grading jobs: done (draft stored), failed (judge error, retried next "
+            "night up to 3 times), no_files (nothing gradable) and stale (a crash left the job "
+            "RUNNING). A night of only 'failed' means the judge sidecar is down or out of quota.",
+            _targets(
+                (
+                    f"sum by (outcome) (increase(llm_gradings_total{{{JOB}}}[$__range]))",
+                    "{{outcome}}",
+                )
+            ),
+            bars=True,
+            stacked=True,
+        )
+    )
+    p.append(
+        _timeseries(
+            g,
+            "Classroom syncs by outcome (range)",
+            "Nightly Classroom ingest per subject: ok, partial (some files failed), reconnect "
+            "(teacher's Google token revoked), auth_error and error. 'reconnect' needs the "
+            "teacher to connect Google again; nothing is fetched for that subject until then.",
+            _targets(
+                (
+                    f"sum by (outcome) (increase(classroom_sync_total{{{JOB}}}[$__range]))",
                     "{{outcome}}",
                 )
             ),

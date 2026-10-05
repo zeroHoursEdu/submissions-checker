@@ -89,6 +89,15 @@ ai_reviews_total = Counter("ai_reviews", "AI reviews by outcome.", ["outcome"], 
 notifications_sent_total = Counter(
     "notifications_sent", "Email notifications by outcome.", ["outcome"], registry=REGISTRY
 )
+llm_gradings_total = Counter(
+    "llm_gradings", "LLM grading jobs by outcome.", ["outcome"], registry=REGISTRY
+)
+classroom_sync_total = Counter(
+    "classroom_sync",
+    "Nightly Classroom ingest per subject, by outcome.",
+    ["outcome"],
+    registry=REGISTRY,
+)
 
 # ── Goals ────────────────────────────────────────────────────────────────────
 

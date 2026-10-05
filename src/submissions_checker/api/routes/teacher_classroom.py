@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from submissions_checker.api.authz import require_subject_access
 from submissions_checker.api.dependencies import (
@@ -33,7 +34,7 @@ from submissions_checker.services.audit import audit
 from submissions_checker.services.google import oauth
 from submissions_checker.services.google.client import ClassroomClient, GoogleApiError
 from submissions_checker.services.google.crypto import decrypt_token, encrypt_token
-from submissions_checker.services.google.ingest import ingest_subject
+from submissions_checker.services.google.ingest import classroom_lock, ingest_subject
 from submissions_checker.services.llm_grading.config import is_llm_graded, subject_uses_llm
 from submissions_checker.services.storage import get_storage
 
@@ -441,8 +442,14 @@ async def sync_now(
     storage = get_storage(settings)
     if storage is None:
         return _back(subject_id, classroom_error="storage")
+    engine = db.bind
+    if not isinstance(engine, AsyncEngine):
+        raise RuntimeError("session is not bound to an engine")
     try:
-        report = await ingest_subject(db, subject, _client(settings, conn, http), storage)
+        async with classroom_lock(engine) as locked:
+            if not locked:  # the nightly job (or another sync) is ingesting right now
+                return _back(subject_id, classroom_error="busy")
+            report = await ingest_subject(db, subject, _client(settings, conn, http), storage)
     except oauth.GoogleAuthError as exc:
         logger.warning("classroom_sync_auth_error", subject_id=subject_id, error=str(exc))
         return _back(subject_id, classroom_error="reconnect" if exc.invalid_grant else "google")

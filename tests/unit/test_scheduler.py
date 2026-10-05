@@ -47,6 +47,7 @@ def test_init_scheduler_registers_jobs_with_intervals(monkeypatch) -> None:
         subject_stats_refresh_interval=300,
         deadline_reminders_enabled=True,
         deadline_reminder_interval=3600,
+        classroom_enabled=False,
     )
     monkeypatch.setattr("submissions_checker.core.config.get_settings", lambda: fake_settings)
 
@@ -94,6 +95,7 @@ def test_init_scheduler_is_idempotent(monkeypatch) -> None:
             subject_stats_refresh_interval=300,
             deadline_reminders_enabled=False,
             deadline_reminder_interval=3600,
+            classroom_enabled=False,
         ),
     )
 
@@ -169,7 +171,50 @@ def test_deadline_reminders_job_is_opt_in(monkeypatch) -> None:
         subject_stats_refresh_interval=300,
         deadline_reminders_enabled=False,
         deadline_reminder_interval=3600,
+        classroom_enabled=False,
     )
     monkeypatch.setattr("submissions_checker.core.config.get_settings", lambda: fake_settings)
     scheduler_module.init_scheduler()
     assert "deadline_reminders" not in {c.kwargs["id"] for c in sched.add_job.call_args_list}
+
+
+def _classroom_settings(*, enabled: bool) -> MagicMock:
+    return MagicMock(
+        teacher_digest_flush_interval=45,
+        metrics_refresh_interval=60,
+        subject_stats_refresh_interval=300,
+        deadline_reminders_enabled=False,
+        deadline_reminder_interval=3600,
+        classroom_enabled=enabled,
+        llm_grading_start_hour=3,
+        llm_grading_timezone="Europe/Kyiv",
+    )
+
+
+def test_cron_job_registered_only_when_enabled(monkeypatch) -> None:
+    sched = _fake_scheduler()
+    _install_fake_scheduler(monkeypatch, sched)
+    monkeypatch.setattr(
+        "submissions_checker.core.config.get_settings",
+        lambda: _classroom_settings(enabled=False),
+    )
+    scheduler_module.init_scheduler()
+    assert "classroom_nightly" not in {c.kwargs["id"] for c in sched.add_job.call_args_list}
+
+    scheduler_module._scheduler = None
+    sched = _fake_scheduler()
+    _install_fake_scheduler(monkeypatch, sched)
+    monkeypatch.setattr(
+        "submissions_checker.core.config.get_settings",
+        lambda: _classroom_settings(enabled=True),
+    )
+    scheduler_module.init_scheduler()
+    job = {c.kwargs["id"]: c for c in sched.add_job.call_args_list}["classroom_nightly"]
+    trigger = job.kwargs["trigger"]
+    fields = {f.name: str(f) for f in trigger.fields}
+    assert (fields["hour"], fields["minute"]) == ("3", "0")
+    assert str(trigger.timezone) == "Europe/Kyiv"
+    assert job.kwargs["max_instances"] == 1
+    assert job.kwargs["coalesce"] is True
+    assert job.kwargs["misfire_grace_time"] == 1800
+    assert hasattr(job.args[0], "__wrapped__")

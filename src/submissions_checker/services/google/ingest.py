@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text, update
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from submissions_checker.core.logging import get_logger
 from submissions_checker.db.models.classroom import (
@@ -51,6 +53,41 @@ MAX_FILES_PER_WORK = 10
 SYNC_ERROR_RECONNECT = "reconnect"
 SYNC_ERROR_GOOGLE = "google"
 SYNC_ERROR_PARTIAL = "partial"
+
+# Session-level advisory lock serialising Classroom ingest: the nightly job (either
+# replica) and the teacher's "sync now" button never ingest at the same time.
+ADVISORY_LOCK_KEY = 0x5C1A55
+
+
+async def try_classroom_lock(conn: AsyncConnection) -> bool:
+    """Take the Classroom lock on ``conn`` if free; it lives as long as the connection.
+
+    Commits right away so the holder does not sit "idle in transaction" for the run.
+    """
+    got = bool(
+        (
+            await conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": ADVISORY_LOCK_KEY})
+        ).scalar()
+    )
+    await conn.commit()
+    return got
+
+
+async def unlock_classroom(conn: AsyncConnection) -> None:
+    await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
+    await conn.commit()
+
+
+@asynccontextmanager
+async def classroom_lock(engine: AsyncEngine) -> AsyncIterator[bool]:
+    """Yield whether the lock was taken, on a dedicated connection released on exit."""
+    async with engine.connect() as conn:
+        got = await try_classroom_lock(conn)
+        try:
+            yield got
+        finally:
+            if got:
+                await unlock_classroom(conn)
 
 
 class ClassroomApi(Protocol):

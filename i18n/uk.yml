@@ -627,6 +627,7 @@ classroom:
   error_not_linked: Спочатку підключіть Google і прив'яжіть курс Classroom.
   error_storage: Сховище файлів не налаштовано, синхронізація неможлива.
   error_reconnect: Google відкликав доступ. Підключіть Google знову.
+  error_busy: Синхронізація вже виконується (нічна або інша). Спробуйте за кілька хвилин.
   flash_synced: "Синхронізацію завершено. Нових робіт: {n}."
   sync_error_reconnect: Google відкликав доступ, підключіть Google знову
   sync_error_google: Google недоступний або курс не знайдено

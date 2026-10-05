@@ -1184,6 +1184,118 @@
     },
     {
       "type": "timeseries",
+      "title": "LLM gradings by outcome (range)",
+      "description": "Nightly LLM grading jobs: done (draft stored), failed (judge error, retried next night up to 3 times), no_files (nothing gradable) and stale (a crash left the job RUNNING). A night of only 'failed' means the judge sidecar is down or out of quota.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "grafanacloud-prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "grafanacloud-prom"
+          },
+          "expr": "sum by (outcome) (increase(llm_gradings_total{job=\"submissions-checker\"}[$__range]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 25,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 22
+    },
+    {
+      "type": "timeseries",
+      "title": "Classroom syncs by outcome (range)",
+      "description": "Nightly Classroom ingest per subject: ok, partial (some files failed), reconnect (teacher's Google token revoked), auth_error and error. 'reconnect' needs the teacher to connect Google again; nothing is fetched for that subject until then.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "grafanacloud-prom"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 35,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "grafanacloud-prom"
+          },
+          "expr": "sum by (outcome) (increase(classroom_sync_total{job=\"submissions-checker\"}[$__range]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 2,
+            "fillOpacity": 25,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 23
+    },
+    {
+      "type": "timeseries",
       "title": "Check duration p50 / p95",
       "description": "Sandboxed check wall time over time. Compare against the histogram buckets (5s to 120s): a p95 above the last bucket is invisible, so raise the buckets if that happens.",
       "datasource": {
@@ -1191,7 +1303,7 @@
         "uid": "grafanacloud-prom"
       },
       "gridPos": {
-        "x": 0,
+        "x": 16,
         "y": 35,
         "w": 8,
         "h": 7
@@ -1245,7 +1357,7 @@
           "sort": "desc"
         }
       },
-      "id": 22
+      "id": 24
     },
     {
       "type": "row",
@@ -1258,7 +1370,7 @@
         "h": 1
       },
       "panels": [],
-      "id": 23
+      "id": 25
     },
     {
       "type": "timeseries",
@@ -1330,7 +1442,7 @@
           "sort": "desc"
         }
       },
-      "id": 24
+      "id": 26
     },
     {
       "type": "timeseries",
@@ -1386,7 +1498,7 @@
           "sort": "desc"
         }
       },
-      "id": 25
+      "id": 27
     }
   ]
 }

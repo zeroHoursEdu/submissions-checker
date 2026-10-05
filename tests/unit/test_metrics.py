@@ -48,6 +48,8 @@ def test_catalogue_names_are_registered() -> None:
         "disputes_resolved_total",
         "disputes_open",
         "air_raid_pauses_total",
+        "llm_gradings_total",
+        "classroom_sync_total",
     }
     missing = expected - names
     assert not missing, missing

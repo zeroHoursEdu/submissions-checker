@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ def with_job_context(
 def _register_jobs() -> None:
     """Register all scheduled jobs with the scheduler."""
     from submissions_checker.core.config import get_settings
+    from submissions_checker.workers.scheduled.classroom_nightly import run_classroom_nightly
     from submissions_checker.workers.scheduled.deadline_reminders import run_deadline_reminders
     from submissions_checker.workers.scheduled.metrics_refresh import refresh_metrics
     from submissions_checker.workers.scheduled.outbox_processor import process_outbox_messages
@@ -141,6 +143,28 @@ def _register_jobs() -> None:
         )
     else:
         logger.info("deadline_reminders_disabled")
+
+    # Classroom ingest + LLM grading — nightly, only when Google is configured.
+    if settings.classroom_enabled:
+        scheduler.add_job(
+            with_job_context("classroom_nightly", run_classroom_nightly),
+            trigger=CronTrigger(
+                hour=settings.llm_grading_start_hour,
+                minute=0,
+                timezone=settings.llm_grading_timezone,
+            ),
+            id="classroom_nightly",
+            name="Classroom ingest + LLM grading",
+            replace_existing=True,
+            max_instances=1,
+            misfire_grace_time=1800,
+            coalesce=True,
+        )
+        logger.info(
+            "Registered classroom nightly job (%02d:00 %s)",
+            settings.llm_grading_start_hour,
+            settings.llm_grading_timezone,
+        )
 
 
 async def start_scheduler() -> None:
