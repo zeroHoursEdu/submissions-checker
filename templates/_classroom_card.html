@@ -78,4 +78,47 @@
   </div>
   {% endif %}
   {% endif %}
+
+  {% if classroom.name_matched_count %}
+  <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/links/confirm-all" class="mt-4 flex flex-wrap items-center gap-3">
+    <span class="text-sm text-slate-600">{{ c.name_matched_hint.format(n=classroom.name_matched_count) }}</span>
+    <button type="submit" class="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">{{ c.confirm_all }}</button>
+  </form>
+  {% endif %}
+
+  {% if classroom.unmatched %}
+  <div class="mt-5" id="classroom-unmatched">
+    <h3 class="text-sm font-semibold text-slate-800 mb-2">{{ c.unmatched_title }}</h3>
+    <ul class="divide-y divide-slate-100 border border-slate-200 rounded-lg">
+      {% for u in classroom.unmatched %}
+      <li class="p-3 space-y-2">
+        <div class="text-sm text-slate-800">{{ u.name }}{% if u.email %} <span class="text-slate-500">&lt;{{ u.email }}&gt;</span>{% endif %}</div>
+        <div class="flex flex-wrap gap-2 items-center">
+          {% for cand in u.candidates %}
+          <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/links/{{ u.id }}">
+            <input type="hidden" name="action" value="link" />
+            <input type="hidden" name="student_id" value="{{ cand.student_id }}" />
+            <button type="submit" class="px-2.5 py-1 rounded-lg border border-indigo-200 bg-indigo-50 text-xs text-indigo-800 hover:bg-indigo-100">{{ cand.full_name }}{% if cand.score is not none %} ({{ (cand.score * 100)|round|int }}%){% endif %}</button>
+          </form>
+          {% endfor %}
+          <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/links/{{ u.id }}" class="flex gap-2 items-center">
+            <input type="hidden" name="action" value="link" />
+            <select name="student_id" required class="text-xs border border-slate-300 rounded-lg px-2 py-1">
+              <option value="">{{ c.pick_student }}</option>
+              {% for st in classroom.enrolled_students %}
+              <option value="{{ st.id }}">{{ st.name }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700">{{ c.link }}</button>
+          </form>
+          <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/links/{{ u.id }}">
+            <input type="hidden" name="action" value="ignore" />
+            <button type="submit" class="px-2.5 py-1 rounded-lg border border-slate-300 text-xs text-slate-600 hover:bg-slate-50">{{ c.ignore }}</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </div>

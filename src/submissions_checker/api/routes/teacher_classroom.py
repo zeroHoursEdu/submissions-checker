@@ -26,15 +26,22 @@ from submissions_checker.api.dependencies import (
 )
 from submissions_checker.core.config import Settings
 from submissions_checker.core.logging import get_logger
-from submissions_checker.db.models.enums import GoogleConnectionStatus
+from submissions_checker.db.models.classroom import ClassroomStudentLink
+from submissions_checker.db.models.enums import ClassroomLinkMethod, GoogleConnectionStatus
 from submissions_checker.db.models.google_connection import GoogleConnection
-from submissions_checker.db.models.subject import Subject
+from submissions_checker.db.models.student import Student
+from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.services.audit import audit
 from submissions_checker.services.google import oauth
 from submissions_checker.services.google.client import ClassroomClient, GoogleApiError
 from submissions_checker.services.google.crypto import decrypt_token, encrypt_token
-from submissions_checker.services.google.ingest import classroom_lock, ingest_subject
+from submissions_checker.services.google.ingest import (
+    classroom_lock,
+    ingest_subject,
+    release_waiting,
+)
+from submissions_checker.services.google.matching import BULK_CONFIRM
 from submissions_checker.services.llm_grading.config import is_llm_graded, subject_uses_llm
 from submissions_checker.services.storage import get_storage
 
@@ -71,6 +78,67 @@ async def _connection_for(db: DBSession, user_id: int) -> GoogleConnection | Non
 
 def _client(settings: Settings, conn: GoogleConnection, http: httpx.AsyncClient) -> ClassroomClient:
     return ClassroomClient(settings, decrypt_token(settings, conn.refresh_token_enc), http)
+
+
+async def _bulk_confirmable(db: DBSession, subject_id: int) -> list[ClassroomStudentLink]:
+    """Unconfirmed name matches that are exact enough to confirm in one click."""
+    return list(
+        (
+            await db.execute(
+                select(ClassroomStudentLink)
+                .where(
+                    ClassroomStudentLink.subject_id == subject_id,
+                    ClassroomStudentLink.method == ClassroomLinkMethod.NAME.value,
+                    ClassroomStudentLink.confirmed.is_(False),
+                    ClassroomStudentLink.score >= BULK_CONFIRM,
+                )
+                .order_by(ClassroomStudentLink.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _fill_unmatched(db: DBSession, subject_id: int, ctx: dict[str, Any]) -> None:
+    """Unmatched roster entries (newest first) and the count of bulk-confirmable name matches."""
+    unmatched = list(
+        (
+            await db.execute(
+                select(ClassroomStudentLink)
+                .where(
+                    ClassroomStudentLink.subject_id == subject_id,
+                    ClassroomStudentLink.method == ClassroomLinkMethod.NONE.value,
+                )
+                .order_by(ClassroomStudentLink.id.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ctx["unmatched"] = [
+        {
+            "id": link.id,
+            "name": link.classroom_name,
+            "email": link.classroom_email,
+            "candidates": [
+                cand
+                for cand in (link.candidates if isinstance(link.candidates, list) else [])
+                if isinstance(cand, dict) and "student_id" in cand
+            ][:3],
+        }
+        for link in unmatched
+    ]
+    ctx["name_matched_count"] = len(await _bulk_confirmable(db, subject_id))
+    ctx["enrolled_students"] = []
+    if unmatched:
+        rows = await db.execute(
+            select(Student.id, Student.full_name)
+            .join(SubjectsStudents, SubjectsStudents.student_id == Student.id)
+            .where(SubjectsStudents.subject_id == subject_id)
+            .order_by(Student.full_name)
+        )
+        ctx["enrolled_students"] = [{"id": i, "name": n} for i, n in rows.all()]
 
 
 async def classroom_card_context(
@@ -124,6 +192,7 @@ async def classroom_card_context(
         "unmatched": [],
         "name_matched_count": 0,
     }
+    await _fill_unmatched(db, subject.id, ctx)
     if connection is None or ctx["needs_reconnect"] or http is None:
         return ctx
     try:
@@ -468,3 +537,130 @@ async def sync_now(
         errors=report.errors,
     )
     return _back(subject_id, classroom="synced", synced=str(report.new_versions))
+
+
+# ── Student matching ─────────────────────────────────────────────────────────
+
+
+async def _student_taken(
+    db: DBSession, subject_id: int, student_id: int, except_link_id: int
+) -> bool:
+    return (
+        await db.execute(
+            select(ClassroomStudentLink.id).where(
+                ClassroomStudentLink.subject_id == subject_id,
+                ClassroomStudentLink.student_id == student_id,
+                ClassroomStudentLink.confirmed.is_(True),
+                ClassroomStudentLink.id != except_link_id,
+            )
+        )
+    ).first() is not None
+
+
+@router.post("/subjects/{subject_id}/classroom/links/confirm-all")
+async def confirm_all_links(
+    subject_id: int, db: DBSession, current_user: TeacherUser
+) -> RedirectResponse:
+    """Confirm every name match at or above the bulk threshold."""
+    await require_subject_access(db, subject_id, current_user)
+    taken = set(
+        (
+            await db.execute(
+                select(ClassroomStudentLink.student_id).where(
+                    ClassroomStudentLink.subject_id == subject_id,
+                    ClassroomStudentLink.confirmed.is_(True),
+                    ClassroomStudentLink.student_id.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    confirmed = 0
+    for link in await _bulk_confirmable(db, subject_id):
+        if link.student_id in taken:
+            continue
+        link.method = ClassroomLinkMethod.MANUAL.value
+        link.confirmed = True
+        taken.add(link.student_id)
+        confirmed += 1
+    await audit(
+        db,
+        "classroom_link_confirm_all",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="subject",
+        target_id=subject_id,
+        count=confirmed,
+    )
+    return _back(subject_id, classroom="links_confirmed", synced=str(confirmed))
+
+
+@router.post("/subjects/{subject_id}/classroom/links/{link_id}")
+async def resolve_link(
+    subject_id: int,
+    link_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+    action: str = Form(...),
+    student_id: int | None = Form(None),
+) -> RedirectResponse:
+    """Resolve one roster entry: link it to a student, ignore it, or confirm a name match."""
+    await require_subject_access(db, subject_id, current_user)
+    link = (
+        await db.execute(
+            select(ClassroomStudentLink)
+            .where(
+                ClassroomStudentLink.id == link_id,
+                ClassroomStudentLink.subject_id == subject_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if link is None:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    if action == "link":
+        if student_id is None:
+            return _back(subject_id, classroom_error="pick_student")
+        enrolled = (
+            await db.execute(
+                select(SubjectsStudents.student_id).where(
+                    SubjectsStudents.subject_id == subject_id,
+                    SubjectsStudents.student_id == student_id,
+                )
+            )
+        ).first()
+        if enrolled is None:
+            raise HTTPException(status_code=422, detail="Student is not enrolled in this subject")
+        if await _student_taken(db, subject_id, student_id, link.id):
+            raise HTTPException(status_code=409, detail="Student is already linked")
+        link.method = ClassroomLinkMethod.MANUAL.value
+        link.confirmed = True
+        link.student_id = student_id
+        await release_waiting(db, link)
+    elif action == "ignore":
+        link.method = ClassroomLinkMethod.IGNORED.value
+        link.confirmed = True
+        link.student_id = None
+    elif action == "confirm":
+        if link.method != ClassroomLinkMethod.NAME.value or link.student_id is None:
+            return _back(subject_id, classroom_error="not_name_match")
+        if await _student_taken(db, subject_id, link.student_id, link.id):
+            raise HTTPException(status_code=409, detail="Student is already linked")
+        link.method = ClassroomLinkMethod.MANUAL.value
+        link.confirmed = True
+        await release_waiting(db, link)
+    else:
+        return _back(subject_id, classroom_error="bad_action")
+
+    await audit(
+        db,
+        f"classroom_link_{action}",
+        actor_id=current_user.user_id,
+        actor_username=current_user.username,
+        target_type="classroom_student_link",
+        target_id=link_id,
+        student_id=link.student_id,
+    )
+    return _back(subject_id, classroom="link_" + action)

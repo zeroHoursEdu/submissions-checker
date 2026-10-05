@@ -602,7 +602,9 @@ classroom:
   ignore: Ігнорувати
   confirm: Підтвердити
   change: Змінити
-  confirm_all: Підтвердити всі точні збіги
+  confirm_all: Підтвердити всі ≥ 95%
+  name_matched_hint: "Збігів за іменем, що чекають підтвердження: {n}"
+  pick_student: Оберіть студента
   name_matched_badge: збіг за іменем
   draft_badge: чернетка ШІ
   pending_badge: очікує оцінювання
@@ -628,6 +630,13 @@ classroom:
   error_storage: Сховище файлів не налаштовано, синхронізація неможлива.
   error_reconnect: Google відкликав доступ. Підключіть Google знову.
   error_busy: Синхронізація вже виконується (нічна або інша). Спробуйте за кілька хвилин.
+  flash_link_link: Студента прив'язано.
+  flash_link_ignore: Запис проігноровано.
+  flash_link_confirm: Збіг підтверджено.
+  flash_links_confirmed: "Підтверджено збігів: {n}."
+  error_pick_student: Оберіть студента зі списку.
+  error_not_name_match: Підтвердити можна лише збіг за іменем.
+  error_bad_action: Невідома дія.
   flash_synced: "Синхронізацію завершено. Нових робіт: {n}."
   sync_error_reconnect: Google відкликав доступ, підключіть Google знову
   sync_error_google: Google недоступний або курс не знайдено
