@@ -18,6 +18,7 @@ from judgelib import (
     build_prompt_with_files,
     cap_text,
     claude_argv,
+    cli_env,
     extract,
     parse_cli_output,
     safe_name,
@@ -90,7 +91,13 @@ def grade_request(stream, length: int, content_type: str) -> dict:
         argv = claude_argv(model, fields.get("system", ""), workdir, n_offered > 0, n_offered)
         timeout = float(os.environ.get("LLM_JUDGE_CLI_TIMEOUT") or 540)
         proc = subprocess.run(
-            argv, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=workdir
+            argv,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=workdir,
+            env=cli_env(os.environ),
         )
         try:
             out = parse_cli_output(proc.stdout)  # is_error results raise with the message

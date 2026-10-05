@@ -18,6 +18,7 @@ from judgelib import (  # noqa: E402
     build_prompt_with_files,
     cap_text,
     claude_argv,
+    cli_env,
     extract,
     parse_cli_output,
     pdf_needs_visual,
@@ -44,7 +45,10 @@ def test_pdf_needs_visual():
 def test_argv_restricts_tools(tmp_path):
     a = claude_argv("opus", "SYS", tmp_path, allow_read=True)
     assert a[:2] == ["claude", "-p"]
-    assert "Read" in a[a.index("--allowedTools") + 1]
+    # No blanket pre-approval: `--allowedTools Read` would approve Read for ANY path
+    # (credentials file, /proc/self/environ). Reads stay confined to the working dirs.
+    assert "--allowedTools" not in a and "--allowed-tools" not in a
+    assert "--restricted" in a
     assert "Bash" in a[a.index("--disallowedTools") + 1]
     assert a[a.index("--model") + 1] == "opus"
     assert a[a.index("--append-system-prompt") + 1] == "SYS"
@@ -57,8 +61,30 @@ def test_argv_restricts_tools(tmp_path):
 
 def test_argv_no_read_when_not_needed(tmp_path):
     a = claude_argv("opus", "S", tmp_path, False)
-    assert "--allowedTools" not in a
+    assert "--allowedTools" not in a and "--restricted" in a
     assert a[a.index("--tools") + 1] == ""  # no tools at all
+
+
+def test_cli_env_drops_judge_secrets_keeps_cli_basics():
+    env = cli_env(
+        {
+            "LLM_JUDGE_TOKEN": "secret",
+            "LLM_JUDGE_MODEL": "opus",
+            "HOME": "/home/judge",
+            "PATH": "/bin",
+            "CLAUDE_CONFIG_DIR": "/home/judge/.claude",
+            "DISABLE_AUTOUPDATER": "1",
+            "LANG": "C.UTF-8",
+        }
+    )
+    assert not any(k.startswith("LLM_JUDGE_") for k in env)
+    assert env == {
+        "HOME": "/home/judge",
+        "PATH": "/bin",
+        "CLAUDE_CONFIG_DIR": "/home/judge/.claude",
+        "DISABLE_AUTOUPDATER": "1",
+        "LANG": "C.UTF-8",
+    }
 
 
 def test_argv_max_turns_scales_with_offered_files(tmp_path):
@@ -361,6 +387,20 @@ def test_grade_request_truncates_text(srv, tmp_path, monkeypatch):
     out = srv.grade_request(io.BytesIO(body), len(body), CT)["result"]
     assert out.count("[truncated]") == 4  # per-file cap hit; total cap hit by the 3rd/4th
     assert len(out) < 400_000 + 5_000
+
+
+def test_claude_subprocess_env_lacks_judge_token(srv, tmp_path, monkeypatch):
+    # A prompt-injected Read of /proc/self/environ must not find the bearer token.
+    _stub_claude(
+        tmp_path, monkeypatch, ECHO.replace("PROMPT=$(cat)", "cat >/dev/null; PROMPT=$(env)")
+    )
+    monkeypatch.setenv("LLM_JUDGE_MODEL", "opus")
+    monkeypatch.setenv("LLM_JUDGE_TOKEN", "tok-6f1d0c")
+    out = srv.grade_request(io.BytesIO(GOOD), len(GOOD), CT)["result"]
+    names = {line.split("=", 1)[0] for line in out.splitlines() if "=" in line}
+    assert "PATH" in names
+    assert not any(n.startswith("LLM_JUDGE_") for n in names)
+    assert "tok-6f1d0c" not in out
 
 
 def test_workdir_removed_when_claude_fails(srv, tmp_path, monkeypatch):

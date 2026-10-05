@@ -6,7 +6,7 @@ import json
 import mmap
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from email.message import Message
 from email.parser import BytesParser
 from email.policy import HTTP
@@ -171,21 +171,32 @@ def build_prompt_with_files(
     return "".join(out)
 
 
+def cli_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """Environment for the claude subprocess: the sidecar's own secrets (LLM_JUDGE_*,
+    above all the bearer token) are dropped so a prompt-injected read of
+    /proc/self/environ finds nothing; HOME/PATH/CLAUDE_CONFIG_DIR/LANG pass through."""
+    return {k: v for k, v in environ.items() if not k.startswith("LLM_JUDGE_")}
+
+
 def claude_argv(
     model: str, system: str, workdir: Path, allow_read: bool, n_offered: int = 0
 ) -> list[str]:
     """Allow-list first: ``--tools`` leaves only Read (or nothing); the deny-list is a
-    second layer. No settings files, MCP servers or session files are picked up."""
+    second layer. No settings files, MCP servers or session files are picked up.
+
+    Read is deliberately NOT pre-approved via ``--allowedTools``: a bare ``Read`` rule
+    approves every path (credentials, /proc). Headless ``-p`` reads inside the working
+    dirs (cwd + ``--add-dir``) without a prompt and denies anything outside, and
+    ``--restricted`` additionally confines the file tools to the working dirs."""
     turns = max(6, 2 + n_offered)
     argv = [
         "claude", "-p", "--output-format", "json", "--model", model,
         "--append-system-prompt", system, "--max-turns", str(turns), "--add-dir", str(workdir),
         "--tools", "Read" if allow_read else "",
-        "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence",
+        "--restricted", "--strict-mcp-config", "--setting-sources", "",
+        "--no-session-persistence", "--disallowedTools", DISALLOWED_TOOLS,
     ]  # fmt: skip
-    if allow_read:
-        argv += ["--allowedTools", "Read"]
-    return argv + ["--disallowedTools", DISALLOWED_TOOLS]
+    return argv
 
 
 def parse_cli_output(stdout: str) -> dict[str, Any]:
