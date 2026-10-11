@@ -19,6 +19,7 @@ from judgelib import (  # noqa: E402
     cap_text,
     claude_argv,
     cli_env,
+    count_pdf_images,
     extract,
     parse_cli_output,
     pdf_needs_visual,
@@ -425,3 +426,57 @@ def test_health_reads_claude_config_dir(srv, tmp_path, monkeypatch):
     assert srv.logged_in() is False
     (cfg / ".credentials.json").write_text("{}")
     assert srv.logged_in() is True
+
+
+PDFIMAGES_LIST = """\
+page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio
+--------------------------------------------------------------------------------------------
+   1     0 image      16    16  rgb     3   8  image  no         9  0    72    72  100B  13%
+  10     1 image    1338   706  rgb     3   8  image  no        84  0   200   200  106K 3.8%
+  11     2 smask    1178   808  gray    1   8  image  no        87  0   176   176 55.6K 2.0%
+"""
+
+
+def test_count_pdf_images_ignores_icons_and_masks():
+    # a 16x16 bullet/icon and a soft mask are not screenshots
+    assert count_pdf_images(PDFIMAGES_LIST) == 1
+    assert count_pdf_images("") == 0
+
+
+def test_text_rich_pdf_with_screenshots_is_offered_for_read(tmp_path, monkeypatch):
+    import judgelib
+
+    p = tmp_path / "r.pdf"
+    p.write_bytes(b"%PDF")
+    page = "x" * 500
+    monkeypatch.setattr(
+        judgelib.subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0, PDFIMAGES_LIST if argv[0] == "pdfimages" else page + "\f" + page, ""
+        ),
+    )
+    text, offered = extract(p, "application/pdf")
+    assert text and offered
+
+
+def test_text_only_pdf_is_not_offered(tmp_path, monkeypatch):
+    import judgelib
+
+    p = tmp_path / "r.pdf"
+    p.write_bytes(b"%PDF")
+    page = "x" * 500
+    monkeypatch.setattr(
+        judgelib.subprocess,
+        "run",
+        lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0, "" if argv[0] == "pdfimages" else page, ""
+        ),
+    )
+    assert extract(p, "application/pdf") == (page, False)
+
+
+def test_prompt_explains_on_disk_names_once():
+    s = build_prompt_with_files("P", [("01_a.pdf", "x", False), ("02_b.py", "y", False)])
+    assert s.count("manifest order") == 1 and "NN_" in s
+    assert build_prompt_with_files("P", []) == "P"

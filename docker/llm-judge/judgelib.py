@@ -32,6 +32,35 @@ def safe_name(name: str, idx: int) -> str:
     return f"{idx:02d}_" + re.sub(r"[^\w.\-]+", "_", base)[:100]
 
 
+MIN_IMAGE_SIDE = 64  # smaller pictures are bullets/icons/logos, not screenshots
+
+
+def count_pdf_images(pdfimages_list: str) -> int:
+    """Screenshot-sized raster images in ``pdfimages -list`` output (masks and icons skipped)."""
+    count = 0
+    for line in pdfimages_list.splitlines()[2:]:
+        cols = line.split()
+        if len(cols) < 5 or cols[2] != "image":
+            continue
+        try:
+            width, height = int(cols[3]), int(cols[4])
+        except ValueError:
+            continue
+        if width >= MIN_IMAGE_SIDE and height >= MIN_IMAGE_SIDE:
+            count += 1
+    return count
+
+
+def _pdf_has_images(path: Path) -> bool:
+    try:
+        proc = subprocess.run(
+            ["pdfimages", "-list", str(path)], capture_output=True, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired:
+        return True
+    return proc.returncode != 0 or count_pdf_images(proc.stdout) > 0
+
+
 def pdf_needs_visual(page_texts: list[str]) -> bool:
     return any(len(re.sub(r"\s", "", p)) < MIN_PAGE_CHARS for p in page_texts)
 
@@ -49,7 +78,11 @@ def _pdf_text(path: Path) -> tuple[str | None, bool]:
     if pages and not pages[-1].strip():
         pages.pop()
     text = proc.stdout.replace("\f", "\n").strip()
-    return (text or None), pdf_needs_visual(pages) if pages else True
+    if not pages or pdf_needs_visual(pages):
+        return (text or None), True
+    # Reports carry their screenshots as images that pdftotext cannot see; let Claude Read
+    # the PDF whenever it holds any, or the "screenshots" point is graded blind.
+    return (text or None), _pdf_has_images(path)
 
 
 def _docx_text(path: Path) -> str | None:
@@ -158,6 +191,12 @@ def build_prompt_with_files(
     ``root / safe_name`` (root = the request's work dir) for the Read-tool pointer.
     """
     out = [prompt]
+    if files:
+        out.append(
+            "\n\nThe files follow in manifest order. On disk each name carries an NN_ index"
+            " prefix and has unusual characters replaced by _, so it can differ slightly from"
+            " the manifest entry; that is expected and not the student's mistake.\n"
+        )
     for name, text, offered in files:
         out.append(f"\n--- FILE: {name} ---\n")
         if text is not None:
