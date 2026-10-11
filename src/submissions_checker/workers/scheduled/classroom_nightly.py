@@ -39,6 +39,23 @@ logger = get_logger(__name__)
 GOOGLE_TIMEOUT = 20.0
 
 
+UNCAPPED = 1_000_000  # "no cap": far above any night's queue
+
+
+def night_limits(settings: Settings, start: datetime) -> tuple[datetime, int]:
+    """(deadline, cap) for a run starting at ``start``.
+
+    The weekday is the run's local date in ``llm_grading_timezone``; on an uncapped weekday
+    the cap is lifted and the window stretches to ``llm_grading_uncapped_end_hour``.
+    """
+    local = start.astimezone(ZoneInfo(settings.llm_grading_timezone))
+    if local.weekday() in settings.llm_grading_uncapped_weekday_set:
+        hours = settings.llm_grading_uncapped_end_hour - settings.llm_grading_start_hour
+        return start + timedelta(hours=hours), UNCAPPED
+    hours = settings.llm_grading_end_hour - settings.llm_grading_start_hour
+    return start + timedelta(hours=hours), settings.llm_grading_nightly_cap
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -102,9 +119,7 @@ async def _run() -> None:
     # Window and budget are anchored to this run's start, not to the local wall clock:
     # on DST nights the cron fires twice (fall back) or at 04:00 local (spring forward).
     start = _now()
-    deadline = start + timedelta(
-        hours=settings.llm_grading_end_hour - settings.llm_grading_start_hour
-    )
+    deadline, cap = night_limits(settings, start)
     night_start = night_start_for(start, ZoneInfo(settings.llm_grading_timezone))
     async with classroom_lock(get_engine()) as locked:
         if not locked:
@@ -129,9 +144,9 @@ async def _run() -> None:
                 storage,
                 now_fn=_now,
                 deadline=deadline,
-                cap=settings.llm_grading_nightly_cap,
+                cap=cap,
                 night_start=night_start,
             )
         finally:
             await judge.aclose()
-        logger.info("classroom_nightly_done", graded=graded)
+        logger.info("classroom_nightly_done", graded=graded, cap=cap)

@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     llm_grading_end_hour: int = 4
     llm_grading_nightly_cap: int = 40
     llm_grading_timezone: str = "Europe/Kyiv"
+    # Nights with no cap: comma-separated weekdays (0 = Monday) of the run's local date,
+    # e.g. "0" = the Sunday→Monday night, spent just before a weekly quota resets. On those
+    # nights the loop also runs until uncapped_end_hour instead of end_hour.
+    llm_grading_uncapped_weekdays: str = ""
+    llm_grading_uncapped_end_hour: int = 7
 
     # SMTP (all optional — if smtp_host is unset, email channel is disabled)
     smtp_host: str | None = None
@@ -205,6 +210,34 @@ class Settings(BaseSettings):
                 f"with start < end (got {start}, {end})"
             )
         return self
+
+    @model_validator(mode="after")
+    def _valid_uncapped_nights(self) -> Self:
+        """Uncapped weekdays are 0..6 and their longer window still ends after the start."""
+        try:
+            days = self._parse_weekdays(self.llm_grading_uncapped_weekdays)
+        except ValueError:
+            days = None
+        if days is None or any(not 0 <= d <= 6 for d in days):
+            raise ValueError(
+                "LLM_GRADING_UNCAPPED_WEEKDAYS must list weekdays 0..6 (0 = Monday), "
+                f"comma-separated (got {self.llm_grading_uncapped_weekdays!r})"
+            )
+        if not (self.llm_grading_start_hour < self.llm_grading_uncapped_end_hour <= 23):
+            raise ValueError(
+                "LLM_GRADING_UNCAPPED_END_HOUR must be after LLM_GRADING_START_HOUR and <= 23 "
+                f"(got {self.llm_grading_uncapped_end_hour})"
+            )
+        return self
+
+    @staticmethod
+    def _parse_weekdays(raw: str) -> frozenset[int]:
+        parts = [p.strip() for p in raw.split(",")] if raw.strip() else []
+        return frozenset(int(p) for p in parts)
+
+    @property
+    def llm_grading_uncapped_weekday_set(self) -> frozenset[int]:
+        return self._parse_weekdays(self.llm_grading_uncapped_weekdays)
 
     @property
     def classroom_enabled(self) -> bool:

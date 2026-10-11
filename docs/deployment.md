@@ -904,6 +904,8 @@ Optional tuning (defaults shown):
 | `LLM_GRADING_START_HOUR` | `3` | The nightly job starts at this hour, Europe/Kyiv |
 | `LLM_GRADING_END_HOUR` | `4` | Must be greater than start. The loop runs for `end - start` hours from the moment it started (DST-safe) and starts no new job after that |
 | `LLM_GRADING_NIGHTLY_CAP` | `40` | Maximum gradings per Kyiv night; jobs already finished that night (including failures) count against it, and a failed job is not retried the same night |
+| `LLM_GRADING_UNCAPPED_WEEKDAYS` | empty | Comma-separated weekdays (0 = Monday) of the run's Kyiv date with **no cap**; e.g. `0` = the Sunday→Monday night, spent before a weekly subscription quota resets |
+| `LLM_GRADING_UNCAPPED_END_HOUR` | `7` | On uncapped nights the loop takes new jobs until this Kyiv hour instead of `LLM_GRADING_END_HOUR` |
 | `LLM_JUDGE_MODEL` | `opus` | Model passed to the sidecar |
 
 A job is attempted at most 3 times; one stuck `RUNNING` for over an hour is marked `FAILED`.

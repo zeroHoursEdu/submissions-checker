@@ -139,3 +139,20 @@ def test_llm_grading_window_must_be_ordered_hours(start: int, end: int) -> None:
 def test_llm_grading_window_default_is_valid() -> None:
     s = _settings(llm_grading_start_hour=0, llm_grading_end_hour=23)
     assert (s.llm_grading_start_hour, s.llm_grading_end_hour) == (0, 23)
+
+
+def test_uncapped_weekdays_parse_and_default_empty() -> None:
+    assert _settings().llm_grading_uncapped_weekday_set == frozenset()
+    s = _settings(llm_grading_uncapped_weekdays=" 0, 6 ")
+    assert s.llm_grading_uncapped_weekday_set == frozenset({0, 6})
+
+
+@pytest.mark.parametrize("raw", ["7", "-1", "mon", "0,,x"])
+def test_uncapped_weekdays_rejects_non_weekdays(raw: str) -> None:
+    with pytest.raises(ValueError, match="LLM_GRADING_UNCAPPED_WEEKDAYS"):
+        _settings(llm_grading_uncapped_weekdays=raw)
+
+
+def test_uncapped_end_hour_must_follow_start() -> None:
+    with pytest.raises(ValueError, match="LLM_GRADING_UNCAPPED_END_HOUR"):
+        _settings(llm_grading_start_hour=3, llm_grading_uncapped_end_hour=3)
