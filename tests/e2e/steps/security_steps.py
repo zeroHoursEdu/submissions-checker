@@ -1,7 +1,7 @@
 """Step definitions for permission & security scenarios.
 
 These assert the *real* authorization outcome the app produces:
-  * unauthenticated access  -> HTTP 401 (raw "Not authenticated", no login redirect)
+  * unauthenticated access  -> redirect to /auth/login?next=<page> (login form shown)
   * wrong-role access       -> HTTP 403 (role gate in dependencies.py)
   * cross-teacher object     -> HTTP 403 (require_subject_access in authz.py)
   * bogus feedback token     -> HTTP 404 rejection page
@@ -169,11 +169,11 @@ def do_logout(page, app_url: str) -> None:
 # --------------------------------------------------------------------------- #
 @then("access should be blocked as unauthenticated")
 def assert_unauthenticated(page, last_status: int) -> None:
-    # The app's dependency layer returns a raw 401 for missing/invalid session
-    # cookies (it does NOT redirect protected HTML pages to /auth/login).
-    assert last_status == 401, f"Expected 401 Unauthorized, got {last_status}"
-    body = page.inner_text("body")
-    assert "Not authenticated" in body, f"Expected auth-rejection body, got: {body[:120]!r}"
+    # A page navigation without a valid session is redirected to the login form,
+    # carrying the requested page in ?next= (API/fetch callers still get a raw 401).
+    assert last_status == 200, f"Expected the login page, got {last_status}"
+    assert "/auth/login?next=" in page.url, f"Expected a login redirect, got {page.url}"
+    assert page.locator('form[action="/auth/login"]').count() == 1
 
 
 @then("access should be forbidden")

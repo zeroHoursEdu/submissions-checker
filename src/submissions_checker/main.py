@@ -3,11 +3,14 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from submissions_checker.api.routes import (
     admin,
@@ -35,6 +38,7 @@ from submissions_checker.core.scheduler import (
     shutdown_scheduler,
     start_scheduler,
 )
+from submissions_checker.core.security import COOKIE_NAME
 from submissions_checker.core.security_headers import SecurityHeadersMiddleware
 from submissions_checker.workers.scheduled.metrics_refresh import refresh_metrics
 
@@ -97,6 +101,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("application_shutdown_complete")
 
 
+async def _login_redirect_on_401(request: Request, exc: StarletteHTTPException) -> Response:
+    """Send a browser opening a page without a valid session to the login page.
+
+    Only top-level page navigations are redirected; fetches, form posts and API
+    clients keep the plain 401 so they can tell "logged out" from "moved".
+    """
+    navigating = (
+        exc.status_code == 401
+        and request.method == "GET"
+        and "text/html" in request.headers.get("accept", "")
+        and request.headers.get("sec-fetch-mode", "navigate") == "navigate"
+    )
+    if not navigating:
+        return await http_exception_handler(request, exc)
+    path = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    response = RedirectResponse(f"/auth/login?next={quote(path, safe='')}", status_code=302)
+    # A cookie that decodes but no longer authenticates (inactive user, password changed)
+    # would otherwise bounce the login page back here forever.
+    response.delete_cookie(COOKIE_NAME, httponly=True, samesite="strict")
+    return response
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     settings = get_settings()
@@ -131,6 +157,8 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
     # Outermost of the app middlewares: counts every request by route template.
     app.add_middleware(PrometheusMiddleware)
+
+    app.add_exception_handler(StarletteHTTPException, _login_redirect_on_401)  # type: ignore[arg-type]
 
     # Register routers
     app.include_router(health.router)

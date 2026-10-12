@@ -62,6 +62,16 @@ def _set_auth_cookie(response: Response, token: str) -> None:
     )
 
 
+def safe_next(target: str | None) -> str | None:
+    """`target` when it is a path on this site, else None (no open redirect via `next`)."""
+    if not target or not target.startswith("/") or target.startswith("//"):
+        return None
+    # Browsers read "/\\host" as "//host"; CR/LF would split the Location header.
+    if any(ch in target for ch in "\\\r\n"):
+        return None
+    return target
+
+
 def _redirect_by_role(role: UserRole) -> str:
     if role == UserRole.TEACHER:
         return "/teacher"
@@ -80,7 +90,11 @@ async def login_page(request: Request) -> HTMLResponse:
             return RedirectResponse(url=_redirect_by_role(role), status_code=302)  # type: ignore[return-value]
         except (TokenError, KeyError, ValueError):
             pass
-    return render(request, "login.html", {"current_user": None, "error": None})
+    return render(
+        request,
+        "login.html",
+        {"current_user": None, "error": None, "next": safe_next(request.query_params.get("next"))},
+    )
 
 
 @router.post("/login")
@@ -89,7 +103,9 @@ async def login(
     db: DBSession,
     username: str = Form(...),
     password: str = Form(...),
+    next: str = Form(""),
 ) -> Response:
+    target = safe_next(next)
     limiter = get_login_limiter()
     ip_limiter = get_login_ip_limiter()
     ip = client_ip(request)
@@ -98,7 +114,11 @@ async def login(
         return render(
             request,
             "login.html",
-            {"current_user": None, "error": _auth_vocab(request).get("error_too_many_attempts")},
+            {
+                "current_user": None,
+                "error": _auth_vocab(request).get("error_too_many_attempts"),
+                "next": target,
+            },
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
@@ -116,7 +136,7 @@ async def login(
         return render(
             request,
             "login.html",
-            {"current_user": None, "error": "Invalid username or password"},
+            {"current_user": None, "error": "Invalid username or password", "next": target},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -126,7 +146,7 @@ async def login(
     metrics.logins_total.labels(role=user.role.value).inc()
 
     token = create_access_token(user.id, user.username, user.role.value)
-    redirect_url = _redirect_by_role(user.role)
+    redirect_url = target or _redirect_by_role(user.role)
     response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
     _set_auth_cookie(response, token)
     return response

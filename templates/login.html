@@ -21,6 +21,7 @@
     {% endif %}
 
     <form method="POST" action="/auth/login" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
       <div>
         <label for="username" class="block text-sm font-medium text-slate-700 mb-1.5">{{ vocab.auth.username }}</label>
         <input
