@@ -23,6 +23,7 @@ from submissions_checker.db.models.enums import SubjectStatus
 from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.main import app
 from submissions_checker.services.google import ingest as ingest_module
+from submissions_checker.services.google import sync_runs
 from submissions_checker.services.google.crypto import encrypt_token
 from submissions_checker.services.google.ingest import ADVISORY_LOCK_KEY
 from submissions_checker.services.google.matching import RosterEntry
@@ -824,17 +825,17 @@ async def test_sync_route_busy_while_nightly_holds_lock(
             await other.commit()
             try:
                 resp = await teacher_client.post(f"/teacher/subjects/{subject.id}/classroom/sync")
+                await sync_runs.wait_for_background()
             finally:
                 await other.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ADVISORY_LOCK_KEY})
-        assert resp.status_code == 303
-        assert resp.headers["location"].endswith("classroom_error=busy")
+        assert resp.headers["location"].endswith("classroom=sync_started")
         assert fake.roster_calls == 0
-        page = await teacher_client.get(resp.headers["location"])
-        assert "Синхронізація вже виконується" in page.text
+        [busy] = (await teacher_client.get("/teacher/classroom/sync/active")).json()["runs"]
+        assert (busy["status"], busy["error"]) == ("failed", "busy")
 
         # Lock free again: the same button syncs and releases the lock afterwards.
-        resp = await teacher_client.post(f"/teacher/subjects/{subject.id}/classroom/sync")
-        assert "classroom=synced" in resp.headers["location"]
+        await teacher_client.post(f"/teacher/subjects/{subject.id}/classroom/sync")
+        await sync_runs.wait_for_background()
         assert fake.roster_calls == 1
         assert await _advisory_holders(functional_engine) == 0
     finally:
