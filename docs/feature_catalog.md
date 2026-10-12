@@ -31,7 +31,8 @@ detail.
 
 | Feature | Who | Route(s) |
 |---|---|---|
-| Log in (sets an 8-hour HTTP-only, strict-same-site JWT cookie; logs the login) | Any active account | `GET /auth/login`, `POST /auth/login` |
+| Log in (sets an 8-hour HTTP-only, strict-same-site JWT cookie; logs the login; returns to a local `next=` path) | Any active account | `GET /auth/login`, `POST /auth/login` |
+| Page navigation without a valid session → 302 to `/auth/login?next=<page>` (stale cookie dropped); fetches, POSTs and API clients keep the plain 401 | — | exception handler in `main.py` |
 | Log out (clears the cookie) | Any account | `POST /auth/logout` |
 | Forgot password (emails a single-use, ~2h reset link; response is uniform to avoid leaking which usernames exist) | Any account | `GET /auth/forgot-password`, `POST /auth/forgot-password` |
 | Reset password (≥ 8 chars, typed twice; token single-use) | Any account | `GET /auth/reset-password`, `POST /auth/reset-password` |
@@ -45,7 +46,7 @@ detail.
 | Health / readiness probes | Public (infra) | `GET /health`, `GET /health/ready` |
 
 > Deactivated accounts are rejected by the session guard (`_get_current_user`) with
-> 401 "User inactive" on their next request.
+> 401 "User inactive" on their next request (a page navigation lands on the login form).
 
 ## 2. Subjects & config
 
@@ -58,9 +59,11 @@ detail.
 | Provision a TEST student for the subject (excluded from analytics) | Owner only | `POST /teacher/subjects/{id}/test-student` |
 | Enter the portal **as** the test student (pilots the student journey) | Owner only | `POST /teacher/subjects/{id}/test-student/enter` |
 | Connect / disconnect the teacher's Google account (Classroom + Drive read-only; OAuth with PKCE, refresh token encrypted; feature off unless `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set) | TEACHER/ADMIN (subject owner) | `GET /teacher/google/connect`, `GET /teacher/google/callback` (hands off to) `GET /teacher/google/complete`, `POST /teacher/google/disconnect` |
-| Link a Classroom course to the subject, and a coursework item to an assignment | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/course`, `POST /teacher/subjects/{id}/classroom/coursework` |
-| «Синхронізувати зараз»: ingest now (refused with `classroom_error=busy` while the nightly job holds the lock) | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/sync` |
-| Resolve Classroom roster entries to platform students: confirm, change, ignore, bulk-confirm name matches ≥ 95% | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/links/{link_id}`, `POST /teacher/subjects/{id}/classroom/links/confirm-all` |
+| Link a Classroom course to the subject, and coursework items to every assignment at once (`coursework_<assignment id>` fields; all or nothing; unlinked rows pre-filled with a guess) | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/course`, `POST /teacher/subjects/{id}/classroom/coursework/batch` |
+| «Синхронізувати зараз»: start the ingest in the background (refused with `classroom_error=busy` while another live run exists; a run that meets the nightly lock ends as FAILED/busy) | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/sync` |
+| Sync progress panel on teacher pages: own subjects' runs that are live or finished in the last 10 min | TEACHER/ADMIN | `GET /teacher/classroom/sync/active` (JSON) |
+| «Звіт оцінювання»: per-criterion draft points, reasoning, evidence, comment, model, approval and teacher changes (teacher-only) | Owner / ADMIN | `GET /teacher/subjects/{id}/classroom/gradings/{grading_id}/report` |
+| Resolve Classroom roster entries to platform students (email and exact name matches confirm themselves): confirm, change, ignore, bulk-confirm name matches ≥ 95% | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/links/{link_id}`, `POST /teacher/subjects/{id}/classroom/links/confirm-all` |
 | Retry a failed AI grading (graded again on the next night) | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/gradings/{grading_id}/retry` |
 | Download a fetched student file | Owner / ADMIN | `GET /teacher/subjects/{id}/classroom/works/{work_id}/files/{idx}` |
 | AI draft rows on the assignment board; saving points approves the shown draft (409 if its student match is unconfirmed or a newer draft appeared) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/scores` (existing route, now gated for `llm_grading` assignments) |

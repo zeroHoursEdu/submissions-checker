@@ -977,14 +977,25 @@ environment.
 
 ### 6. Day to day
 
-- A teacher connects Google in the subject's Операції tab, picks the course, then links each
-  assignment to a Classroom coursework item. Unmatched roster entries are resolved there
-  too; name-only matches must be confirmed before their points can be saved.
+- A teacher connects Google in the subject's Операції tab, picks the course, then links the
+  assignments to Classroom coursework items in one form (unlinked rows come pre-filled with
+  a guess by lab number/title, marked «запропоновано»). Unmatched roster entries are resolved
+  there too. Exact name matches (surname + name equal after transliteration) and email
+  matches are confirmed automatically; fuzzy name matches must be confirmed before their
+  points can be saved.
+- «Синхронізувати зараз» runs in the background: the request records a
+  `classroom_sync_runs` row and returns; a corner panel on teacher pages polls
+  `/teacher/classroom/sync/active`. A deploy kills the task (Watchtower rolls replicas on
+  every push to `main`); the run then shows «перервано» after 5 minutes without a heartbeat,
+  works already fetched are kept, and the teacher just starts it again.
+- Per-work «Звіт оцінювання» (`/teacher/subjects/{id}/classroom/gradings/{gid}/report`)
+  shows the model's points, reasoning and evidence per criterion. Teacher-only: students
+  are never told that a model pre-graded their work.
 - The job logs `classroom_ingest_*` and `llm_grading_*` lines and exports
   `classroom_sync_total{outcome}` and `llm_gradings_total{outcome}`.
 - To pause the feature, empty `GOOGLE_CLIENT_ID` (or the secret) and recreate `app`; to pause only the
   grading, `scripts/ops/prod-compose.sh --profile llm stop llm-judge` (jobs fail and retry on later nights).
-- The migration (`0035`) is purely additive, so replicas on the previous release keep working
+- The migrations (`0035`, `0036`) are purely additive, so replicas on the previous release keep working
   during the rollout.
 
 ---
