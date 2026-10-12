@@ -282,8 +282,8 @@ async def test_link_course_and_coursework(teacher_client: AsyncClient, db, teach
     )
     assert r.status_code == 303
     r = await teacher_client.post(
-        f"/teacher/subjects/{subject.id}/classroom/coursework",
-        data={"assignment_id": str(asg.id), "coursework_id": "w1"},
+        f"/teacher/subjects/{subject.id}/classroom/coursework/batch",
+        data={f"coursework_{asg.id}": "w1"},
     )
     assert r.status_code == 303
     await db.refresh(subject)
@@ -294,8 +294,8 @@ async def test_link_course_and_coursework(teacher_client: AsyncClient, db, teach
     assert asg.classroom_coursework_title == "Work 1"
     # empty id unlinks
     await teacher_client.post(
-        f"/teacher/subjects/{subject.id}/classroom/coursework",
-        data={"assignment_id": str(asg.id), "coursework_id": ""},
+        f"/teacher/subjects/{subject.id}/classroom/coursework/batch",
+        data={f"coursework_{asg.id}": ""},
     )
     await db.refresh(asg)
     assert asg.classroom_coursework_id is None
@@ -312,9 +312,9 @@ async def test_link_rejects_coursework_taken_by_another_assignment(
     await teacher_client.post(
         f"/teacher/subjects/{subject.id}/classroom/course", data={"course_id": "c1"}
     )
-    url = f"/teacher/subjects/{subject.id}/classroom/coursework"
-    await teacher_client.post(url, data={"assignment_id": str(asg.id), "coursework_id": "w1"})
-    r = await teacher_client.post(url, data={"assignment_id": str(other.id), "coursework_id": "w1"})
+    url = f"/teacher/subjects/{subject.id}/classroom/coursework/batch"
+    await teacher_client.post(url, data={f"coursework_{asg.id}": "w1"})
+    r = await teacher_client.post(url, data={f"coursework_{other.id}": "w1"})
     assert r.status_code == 303
     assert r.headers["location"] == (
         f"/teacher/subjects/{subject.id}?classroom_error=coursework_taken"
@@ -324,7 +324,7 @@ async def test_link_rejects_coursework_taken_by_another_assignment(
     page = await teacher_client.get(r.headers["location"])
     assert "вже прив'язане до іншого завдання" in html.unescape(page.text)
     # Re-linking the same assignment to its own coursework is not a conflict.
-    r = await teacher_client.post(url, data={"assignment_id": str(asg.id), "coursework_id": "w1"})
+    r = await teacher_client.post(url, data={f"coursework_{asg.id}": "w1"})
     assert "classroom=coursework_linked" in r.headers["location"]
 
 
@@ -344,10 +344,12 @@ async def test_link_rejects_non_llm_assignment(teacher_client: AsyncClient, db, 
         f"/teacher/subjects/{subject.id}/classroom/course", data={"course_id": "c1"}
     )
     r = await teacher_client.post(
-        f"/teacher/subjects/{subject.id}/classroom/coursework",
-        data={"assignment_id": str(asg.id), "coursework_id": "w1"},
+        f"/teacher/subjects/{subject.id}/classroom/coursework/batch",
+        data={f"coursework_{asg.id}": "w1"},
     )
-    assert r.status_code == 422
+    assert r.status_code == 303
+    await db.refresh(asg)
+    assert asg.classroom_coursework_id is None
 
 
 async def test_other_teacher_cannot_link(teacher_client: AsyncClient, db, make_user):

@@ -43,6 +43,7 @@ from submissions_checker.services import teacher_scores
 from submissions_checker.services.audit import audit
 from submissions_checker.services.google import oauth
 from submissions_checker.services.google.client import ClassroomClient, GoogleApiError
+from submissions_checker.services.google.coursework_match import suggest
 from submissions_checker.services.google.crypto import decrypt_token, encrypt_token
 from submissions_checker.services.google.ingest import (
     classroom_lock,
@@ -213,6 +214,7 @@ async def classroom_card_context(
             ctx["courses"] = await client.list_courses()
         else:
             ctx["coursework_options"] = await client.list_coursework(subject.classroom_course_id)
+            _suggest_coursework(ctx, assignments)
     except oauth.GoogleAuthError as exc:
         logger.warning("classroom_card_auth_error", error=str(exc))
         if exc.invalid_grant:
@@ -225,6 +227,19 @@ async def classroom_card_context(
         logger.warning("classroom_card_api_error", error=str(exc))
         ctx["error"] = "google"
     return ctx
+
+
+def _suggest_coursework(ctx: dict[str, Any], assignments: list[SubjectsAssignment]) -> None:
+    """Pre-select a guessed coursework for every unlinked row of the batch form."""
+    rows = ctx["assignments"]
+    taken = {a.classroom_coursework_id for a in assignments if a.classroom_coursework_id}
+    guesses = suggest(
+        [(r["id"], r["title"]) for r in rows if not r["coursework_id"]],
+        [(w["id"], w["title"]) for w in ctx["coursework_options"]],
+        taken=taken,
+    )
+    for r in rows:
+        r["suggested"] = guesses.get(r["id"])
 
 
 # ── OAuth ────────────────────────────────────────────────────────────────────
@@ -448,66 +463,74 @@ async def link_course(
     return _back(subject_id, classroom="course_linked")
 
 
-@router.post("/subjects/{subject_id}/classroom/coursework")
-async def link_coursework(
+@router.post("/subjects/{subject_id}/classroom/coursework/batch")
+async def link_coursework_batch(
+    request: Request,
     subject_id: int,
     db: DBSession,
     current_user: TeacherUser,
     settings: AppSettings,
-    assignment_id: int = Form(...),
-    coursework_id: str = Form(""),
     http: httpx.AsyncClient = ClassroomHttp,
 ) -> RedirectResponse:
+    """Link every LLM-graded assignment at once from ``coursework_<assignment id>`` fields.
+
+    All or nothing: a coursework picked twice (or already feeding an assignment left out of
+    the form) or one unknown to Classroom saves no row. Absent fields leave a row as it is;
+    an empty value unlinks it.
+    """
     subject = await require_subject_access(db, subject_id, current_user)
-    assignment = (
-        await db.execute(
-            select(SubjectsAssignment).where(
-                SubjectsAssignment.id == assignment_id,
-                SubjectsAssignment.subject_id == subject_id,
+    form = await request.form()
+    assignments = list(
+        (
+            await db.execute(
+                select(SubjectsAssignment).where(SubjectsAssignment.subject_id == subject_id)
             )
         )
-    ).scalar_one_or_none()
-    if assignment is None:
-        raise HTTPException(status_code=404, detail="Assignment not found")
-    if not is_llm_graded(assignment.config):
-        raise HTTPException(status_code=422, detail="Assignment is not graded by the LLM")
+        .scalars()
+        .all()
+    )
+    wanted: dict[int, str] = {}
+    for a in assignments:
+        value = form.get(f"coursework_{a.id}")
+        if isinstance(value, str) and is_llm_graded(a.config):
+            wanted[a.id] = value.strip()
+    final = {a.id: wanted.get(a.id, a.classroom_coursework_id or "") for a in assignments}
+    picked = [cw for cw in final.values() if cw]
+    if len(picked) != len(set(picked)):
+        # One coursework feeding two assignments would ingest (and grade) every
+        # submission twice, against two different task descriptions.
+        return _back(subject_id, classroom_error="coursework_taken")
 
-    if not coursework_id:
-        assignment.classroom_coursework_id = None
-        assignment.classroom_coursework_title = None
-    else:
+    titles: dict[str, str] = {}
+    if any(wanted.values()):
         if not subject.classroom_course_id:
             raise HTTPException(status_code=422, detail="Link a Classroom course first")
-        taken = await db.scalar(
-            select(SubjectsAssignment.id).where(
-                SubjectsAssignment.subject_id == subject_id,
-                SubjectsAssignment.id != assignment_id,
-                SubjectsAssignment.classroom_coursework_id == coursework_id,
-            )
-        )
-        if taken is not None:
-            # One coursework feeding two assignments would ingest (and grade) every
-            # submission twice, against two different task descriptions.
-            return _back(subject_id, classroom_error="coursework_taken")
         _, client = await _linking_client(db, current_user, settings, http)
         try:
-            works = await client.list_coursework(subject.classroom_course_id)
+            titles = {
+                w["id"]: w["title"]
+                for w in await client.list_coursework(subject.classroom_course_id)
+            }
         except (oauth.GoogleAuthError, GoogleApiError):
             return _back(subject_id, classroom_error="google")
-        match = next((w for w in works if w["id"] == coursework_id), None)
-        if match is None:
+        if any(cw and cw not in titles for cw in wanted.values()):
             raise HTTPException(status_code=422, detail="Unknown Classroom coursework")
-        assignment.classroom_coursework_id = match["id"]
-        assignment.classroom_coursework_title = match["title"][:255]
-    await audit(
-        db,
-        "classroom_coursework_linked",
-        actor_id=current_user.user_id,
-        actor_username=current_user.username,
-        target_type="assignment",
-        target_id=assignment_id,
-        coursework_id=coursework_id or None,
-    )
+
+    for a in assignments:
+        if a.id not in wanted or wanted[a.id] == (a.classroom_coursework_id or ""):
+            continue
+        cw = wanted[a.id]
+        a.classroom_coursework_id = cw or None
+        a.classroom_coursework_title = titles[cw][:255] if cw else None
+        await audit(
+            db,
+            "classroom_coursework_linked",
+            actor_id=current_user.user_id,
+            actor_username=current_user.username,
+            target_type="assignment",
+            target_id=a.id,
+            coursework_id=cw or None,
+        )
     return _back(subject_id, classroom="coursework_linked")
 
 

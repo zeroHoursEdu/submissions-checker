@@ -646,6 +646,9 @@ classroom:
   sync_error_google: Google недоступний або курс не знайдено
   sync_error_partial: частину робіт не вдалося завантажити, повтор під час наступної синхронізації
   report_link: Звіт оцінювання
+  suggested: запропоновано
+  save_all: Зберегти всі
+  batch_hint: Завдання, позначені «запропоновано», підібрано за номером і назвою — перевірте й натисніть «Зберегти всі».
   report_title: Звіт оцінювання
   report_classroom_name: Ім'я в Classroom
   report_graded_at: Оцінено AI

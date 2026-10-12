@@ -56,26 +56,32 @@
   <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/sync" class="mt-2">
     <button type="submit" class="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">{{ c.sync_now }}</button>
   </form>
-  <div class="mt-4 space-y-3">
+  {% if classroom.assignments %}
+  <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/coursework/batch" class="mt-4 space-y-3">
+    {% if classroom.assignments | selectattr("suggested") | list %}
+    <p class="text-xs text-slate-500">{{ c.batch_hint }}</p>
+    {% endif %}
     {% for a in classroom.assignments %}
-    <form method="POST" action="/teacher/subjects/{{ subject.id }}/classroom/coursework" class="flex flex-wrap gap-3 items-center">
-      <input type="hidden" name="assignment_id" value="{{ a.id }}" />
-      <label class="text-sm text-slate-700 min-w-[10rem]">{{ c.coursework_for.format(title=a.title) }}</label>
-      <select name="coursework_id" class="text-sm border border-slate-300 rounded-lg px-3 py-2">
+    {% set chosen = a.coursework_id or a.suggested %}
+    <div class="flex flex-wrap gap-3 items-center">
+      <label for="cw-{{ a.id }}" class="text-sm text-slate-700 min-w-[10rem]">{{ c.coursework_for.format(title=a.title) }}</label>
+      <select name="coursework_{{ a.id }}" id="cw-{{ a.id }}" class="text-sm border border-slate-300 rounded-lg px-3 py-2 max-w-full {% if a.suggested %}border-amber-400 bg-amber-50{% endif %}">
         <option value="">{{ c.unlinked }}</option>
         {% set ns = namespace(found=false) %}
         {% for w in classroom.coursework_options %}
-        {% if w.id == a.coursework_id %}{% set ns.found = true %}{% endif %}
-        <option value="{{ w.id }}" {% if w.id == a.coursework_id %}selected{% endif %}>{{ w.title }}</option>
+        {% if w.id == chosen %}{% set ns.found = true %}{% endif %}
+        <option value="{{ w.id }}" {% if w.id == chosen %}selected{% endif %}>{{ w.title }}</option>
         {% endfor %}
         {% if a.coursework_id and not ns.found %}
         <option value="{{ a.coursework_id }}" selected>{{ a.coursework_title or a.coursework_id }}</option>
         {% endif %}
       </select>
-      <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">{{ c.save }}</button>
-    </form>
+      {% if a.suggested %}<span class="text-xs text-amber-700">{{ c.suggested }}</span>{% endif %}
+    </div>
     {% endfor %}
-  </div>
+    <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">{{ c.save_all }}</button>
+  </form>
+  {% endif %}
   {% endif %}
   {% endif %}
 
