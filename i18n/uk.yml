@@ -645,3 +645,16 @@ classroom:
   sync_error_reconnect: Google відкликав доступ, підключіть Google знову
   sync_error_google: Google недоступний або курс не знайдено
   sync_error_partial: частину робіт не вдалося завантажити, повтор під час наступної синхронізації
+  report_link: Звіт оцінювання
+  report_title: Звіт оцінювання
+  report_classroom_name: Ім'я в Classroom
+  report_graded_at: Оцінено AI
+  report_status: Статус
+  report_approved: Затверджено
+  report_not_approved: Чекає на затвердження викладачем
+  report_draft_points: Бали AI
+  report_changed: змінено викладачем на
+  report_teacher_only: оцінює викладач
+  report_comment: Загальний коментар AI
+  report_not_graded: Ще не оцінено — робота чекає на нічну перевірку.
+  report_back: До дошки завдання

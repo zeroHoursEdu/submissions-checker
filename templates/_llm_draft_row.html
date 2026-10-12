@@ -29,6 +29,11 @@
   {% if ls.needs_review %}
   <span class="inline-flex items-center text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">{{ cv.new_version_badge }}</span>
   {% endif %}
+  {% set report_id = ls.draft_grading_id or (g.id if g else none) %}
+  {% if report_id %}
+  <a href="/teacher/subjects/{{ subject_id }}/classroom/gradings/{{ report_id }}/report"
+     class="text-xs text-indigo-600 hover:text-indigo-800 underline underline-offset-2">{{ cv.report_link }}</a>
+  {% endif %}
 </div>
 {% if ls.needs_link_confirm %}
 {% set cl = ls.confirm_link %}

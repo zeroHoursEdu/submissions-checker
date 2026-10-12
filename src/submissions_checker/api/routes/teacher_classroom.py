@@ -26,6 +26,7 @@ from submissions_checker.api.dependencies import (
 )
 from submissions_checker.core.config import Settings
 from submissions_checker.core.logging import get_logger
+from submissions_checker.core.templates import render
 from submissions_checker.db.models.classroom import ClassroomStudentLink, ClassroomWork, LLMGrading
 from submissions_checker.db.models.enums import (
     ClassroomLinkMethod,
@@ -34,8 +35,11 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.db.models.student import Student
+from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.db.models.user import User
+from submissions_checker.services import teacher_scores
 from submissions_checker.services.audit import audit
 from submissions_checker.services.google import oauth
 from submissions_checker.services.google.client import ClassroomClient, GoogleApiError
@@ -46,7 +50,11 @@ from submissions_checker.services.google.ingest import (
     release_waiting,
 )
 from submissions_checker.services.google.matching import BULK_CONFIRM
-from submissions_checker.services.llm_grading.config import is_llm_graded, subject_uses_llm
+from submissions_checker.services.llm_grading.config import (
+    is_llm_graded,
+    llm_criteria,
+    subject_uses_llm,
+)
 from submissions_checker.services.storage import get_storage
 
 logger = get_logger(__name__)
@@ -728,6 +736,79 @@ async def retry_grading(
             subject_id=subject_id,
         )
     return RedirectResponse(f"/teacher/subjects/{subject_id}/assignments/{sa_id}", status_code=303)
+
+
+@router.get(
+    "/subjects/{subject_id}/classroom/gradings/{grading_id}/report", response_class=HTMLResponse
+)
+async def grading_report(
+    request: Request,
+    subject_id: int,
+    grading_id: int,
+    db: DBSession,
+    current_user: TeacherUser,
+) -> HTMLResponse:
+    """Teacher-only: why the overnight grader gave this work its points, per criterion."""
+    await require_subject_access(db, subject_id, current_user)
+    row = (
+        await db.execute(
+            select(LLMGrading, ClassroomWork, ClassroomStudentLink, SubjectsAssignment)
+            .join(ClassroomWork, ClassroomWork.id == LLMGrading.classroom_work_id)
+            .join(ClassroomStudentLink, ClassroomStudentLink.id == ClassroomWork.link_id)
+            .join(SubjectsAssignment, SubjectsAssignment.id == ClassroomWork.subjects_assignment_id)
+            .where(LLMGrading.id == grading_id, SubjectsAssignment.subject_id == subject_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Grading not found")
+    grading, work, link, assignment = row
+    student = await db.get(Student, link.student_id) if link.student_id else None
+    saved: dict[str, Any] | None = None
+    if student is not None:
+        saved = await db.scalar(
+            select(StudentAssignment.teacher_scores).where(
+                StudentAssignment.student_id == student.id,
+                StudentAssignment.subjects_assignment_id == assignment.id,
+            )
+        )
+    grading_cfg = (assignment.config or {}).get("grading")
+    llm_keys = {c.key for c in llm_criteria(grading_cfg)}
+    draft = (grading.draft or {}).get("criteria") or {}
+    rows = []
+    for c in teacher_scores.criteria(grading_cfg):
+        verdict = draft.get(c.key) or {}
+        saved_points = (saved or {}).get(c.key) if grading.approved_at else None
+        rows.append(
+            {
+                "title": c.title,
+                "max": c.max,
+                "by_llm": c.key in llm_keys,
+                "points": verdict.get("points"),
+                "justification": verdict.get("justification"),
+                "evidence": verdict.get("evidence"),
+                "saved": saved_points,
+                "changed": saved_points is not None
+                and verdict.get("points") is not None
+                and saved_points != verdict.get("points"),
+            }
+        )
+    approver = await db.get(User, grading.approved_by) if grading.approved_by else None
+    return render(
+        request,
+        "teacher_llm_report.html",
+        {
+            "current_user": current_user,
+            "subject_id": subject_id,
+            "assignment": assignment,
+            "grading": grading,
+            "work": work,
+            "link": link,
+            "student": student,
+            "criteria": rows,
+            "comment": (grading.draft or {}).get("comment"),
+            "approver": approver,
+        },
+    )
 
 
 @router.get("/subjects/{subject_id}/classroom/works/{work_id}/files/{idx}")
