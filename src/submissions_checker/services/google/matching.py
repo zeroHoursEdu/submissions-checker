@@ -95,6 +95,9 @@ class MatchResult:
     student_id: int | None
     score: float | None
     candidates: list[dict[str, Any]]  # top 3: {"student_id", "full_name", "score"}
+    # Email equal, or every compared name token equal (not merely rounding to 1.00):
+    # the link needs no teacher confirmation.
+    certain: bool = False
 
 
 def _translit(word: str) -> str:
@@ -194,7 +197,7 @@ def match(entry: RosterEntry, candidates: Sequence[Candidate]) -> MatchResult:
     # Step 1: Try exact email match
     for c in candidates:
         if email and c.email.strip().lower() == email:
-            return MatchResult(ClassroomLinkMethod.EMAIL, c.student_id, 1.0, [])
+            return MatchResult(ClassroomLinkMethod.EMAIL, c.student_id, 1.0, [], certain=True)
 
     # Step 2: Score all candidates using name and email tokens
     nt = name_tokens(entry.full_name)
@@ -225,7 +228,13 @@ def match(entry: RosterEntry, candidates: Sequence[Candidate]) -> MatchResult:
     second = scored[1][0] if len(scored) > 1 else 0.0
 
     if best >= NAME_THRESHOLD and best - second >= MARGIN:
-        return MatchResult(ClassroomLinkMethod.NAME, scored[0][1].student_id, round(best, 2), top)
+        return MatchResult(
+            ClassroomLinkMethod.NAME,
+            scored[0][1].student_id,
+            round(best, 2),
+            top,
+            certain=best == 1.0,
+        )
 
     # Return best score but no match
     return MatchResult(ClassroomLinkMethod.NONE, None, round(best, 2), top)

@@ -218,7 +218,7 @@ async def upsert_links(db: AsyncSession, subject: Subject, roster: list[RosterEn
                 method=result.method.value,
                 score=result.score,
                 candidates=result.candidates,
-                confirmed=result.method == ClassroomLinkMethod.EMAIL,
+                confirmed=result.certain,
             )
             db.add(link)
             existing[entry.user_id] = link
@@ -226,6 +226,13 @@ async def upsert_links(db: AsyncSession, subject: Subject, roster: list[RosterEn
             continue
         link.classroom_email = email
         link.classroom_name = name
+        if link.method == ClassroomLinkMethod.NAME.value and not link.confirmed:
+            # Matched before exact names auto-confirmed: confirm once the match is exact
+            # and still names the same student; anything else keeps waiting for the teacher.
+            result = match(entry, candidates)
+            if result.certain and result.student_id == link.student_id:
+                link.confirmed = True
+            continue
         if link.method != ClassroomLinkMethod.NONE.value or link.student_id is not None:
             continue
         result = match(entry, candidates)
@@ -234,7 +241,7 @@ async def upsert_links(db: AsyncSession, subject: Subject, roster: list[RosterEn
         if result.method in (ClassroomLinkMethod.NAME, ClassroomLinkMethod.EMAIL):
             link.method = result.method.value
             link.student_id = result.student_id
-            link.confirmed = result.method == ClassroomLinkMethod.EMAIL
+            link.confirmed = result.certain
             await db.flush()
             await release_waiting(db, link)
     await db.flush()

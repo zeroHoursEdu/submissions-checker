@@ -166,7 +166,8 @@ async def setup(db, teacher, make_student, make_group):
     client = FakeClient()
     client.roster = [
         RosterEntry("u1", "ІП-43 Komin Ivan", "komin@edu.kpi.ua"),
-        RosterEntry("u2", "ІП-43 Repetukha Mykyta Olehovych", "mykyta.r@gmail.com"),
+        # A one-letter typo: a confident name match that still needs the teacher's nod.
+        RosterEntry("u2", "ІП-43 Repetuha Mykyta Olehovych", "mykyta.r@gmail.com"),
         RosterEntry("u3", "ІП-43 Shevchenko Taras", "taras@gmail.com"),
     ]
     return {
@@ -481,6 +482,7 @@ async def test_late_student_enrolment_matches_on_next_sync(db, setup, make_stude
     await ingest_subject(db, s["subject"], s["client"], s["storage"])
     links = await _links(db, s["subject_id"])
     assert (links["u3"].method, links["u3"].student_id) == ("NAME", taras_id)
+    assert links["u3"].confirmed is True  # exact name: no confirmation step
     statuses = {w.classroom_submission_id: g.status for w, g in await _works(db)}
     assert statuses["s3"] == "PENDING"
 
@@ -633,3 +635,52 @@ async def test_sync_route_google_failure_flashes(teacher_client: AsyncClient, ro
     resp = await teacher_client.post(f"/teacher/subjects/{route_env['subject_id']}/classroom/sync")
     assert resp.status_code == 303
     assert resp.headers["location"].endswith("classroom_error=google")
+
+
+async def test_exact_name_match_is_confirmed_on_first_sync(db, setup):
+    s = setup
+    s["client"].roster[1] = RosterEntry("u2", "ІП-43 Repetukha Mykyta Olehovych", "m@gmail.com")
+    await ingest_subject(db, s["subject"], s["client"], s["storage"])
+    links = await _links(db, s["subject_id"])
+    assert (links["u2"].method, links["u2"].confirmed) == ("NAME", True)
+
+
+async def test_unconfirmed_exact_name_link_is_confirmed_on_next_sync(db, setup):
+    """Links created before exact matches auto-confirmed are confirmed by the next sync."""
+    s = setup
+    db.add(
+        ClassroomStudentLink(
+            subject_id=s["subject_id"],
+            classroom_user_id="u2",
+            classroom_name="ІП-43 Repetukha Mykyta Olehovych",
+            student_id=s["rep_id"],
+            method="NAME",
+            score=1.0,
+            confirmed=False,
+        )
+    )
+    await db.commit()
+    s["client"].roster[1] = RosterEntry("u2", "ІП-43 Repetukha Mykyta Olehovych", "m@gmail.com")
+    await ingest_subject(db, s["subject"], s["client"], s["storage"])
+    assert (await _links(db, s["subject_id"]))["u2"].confirmed is True
+
+
+async def test_unconfirmed_link_to_another_student_stays_unconfirmed(db, setup):
+    """A teacher's re-pick (or a stale suggestion) is never confirmed behind their back."""
+    s = setup
+    db.add(
+        ClassroomStudentLink(
+            subject_id=s["subject_id"],
+            classroom_user_id="u2",
+            classroom_name="ІП-43 Repetukha Mykyta Olehovych",
+            student_id=s["komin_id"],
+            method="NAME",
+            score=1.0,
+            confirmed=False,
+        )
+    )
+    await db.commit()
+    s["client"].roster[1] = RosterEntry("u2", "ІП-43 Repetukha Mykyta Olehovych", "m@gmail.com")
+    await ingest_subject(db, s["subject"], s["client"], s["storage"])
+    link = (await _links(db, s["subject_id"]))["u2"]
+    assert (link.student_id, link.confirmed) == (s["komin_id"], False)

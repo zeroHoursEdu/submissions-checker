@@ -113,3 +113,19 @@ def test_empty_candidates_list():
     assert r.student_id is None
     assert r.score is None
     assert r.candidates == []
+
+
+def test_exact_name_match_is_certain():
+    """Surname + name equal after transliteration: no teacher confirmation needed."""
+    r = match(RosterEntry("u", "ІП-43 Repetukha Mykyta Volodymyrovych", None), C)
+    assert (r.method, r.certain) == (ClassroomLinkMethod.NAME, True)
+
+
+def test_typo_name_match_is_not_certain():
+    r = match(RosterEntry("u", "Repetuha Mykyta", None), C)
+    assert (r.method, r.certain) == (ClassroomLinkMethod.NAME, False)
+
+
+def test_email_match_is_certain():
+    r = match(RosterEntry("u", "whatever", "x@edu.kpi.ua"), C)
+    assert r.certain is True
