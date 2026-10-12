@@ -3,6 +3,7 @@
 from submissions_checker.db.models.audit_log import AuditLog
 from submissions_checker.db.models.classroom import (
     ClassroomStudentLink,
+    ClassroomSyncRun,
     ClassroomWork,
     LLMGrading,
 )
@@ -59,6 +60,7 @@ from submissions_checker.db.models.user_login import UserLogin
 __all__ = [
     "ClassroomLinkMethod",
     "ClassroomStudentLink",
+    "ClassroomSyncRun",
     "ClassroomWork",
     "GoogleConnection",
     "GoogleConnectionStatus",

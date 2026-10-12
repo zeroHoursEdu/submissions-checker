@@ -1,0 +1,81 @@
+{# Classroom sync progress panel (teachers/admins). Polls /teacher/classroom/sync/active
+   while a run is going; never blocks the page. "Сховати" hides one run in this browser. #}
+{% set c = vocab.classroom %}
+<div id="sync-progress" class="fixed bottom-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] space-y-2" aria-live="polite"></div>
+<script>
+(function () {
+  const box = document.getElementById('sync-progress');
+  const T = {{ {
+    "title": c.progress_title,
+    "running": c.progress_running,
+    "done": c.progress_done,
+    "failed": c.progress_failed,
+    "interrupted": c.progress_interrupted,
+    "hide": c.progress_hide,
+    "step": c.progress_step,
+    "errors": c.get("progress_error_codes", {}),
+  } | tojson }};
+  const KEY = 'subchk.syncHidden';
+  function hidden() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; }
+  }
+  function hide(id) {
+    try { localStorage.setItem(KEY, JSON.stringify(hidden().concat([id]).slice(-50))); } catch (e) {}
+  }
+  function fmt(s, v) { return s.replace(/\{(\w+)\}/g, (_, k) => (k in v ? v[k] : '')); }
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function card(run) {
+    const tone = {running: 'border-indigo-200', done: 'border-green-300',
+                  failed: 'border-red-300', interrupted: 'border-amber-300'}[run.status];
+    const card = el('div', 'bg-white rounded-xl border shadow-lg p-3 text-sm ' + tone);
+    const head = el('div', 'flex items-start justify-between gap-2');
+    const title = el('a', 'font-medium text-slate-800 hover:text-indigo-700', fmt(T.title, {subject: run.subject_name}));
+    title.href = run.url;
+    const close = el('button', 'text-xs text-slate-400 hover:text-slate-700', T.hide);
+    close.type = 'button';
+    close.addEventListener('click', () => { hide(run.id); card.remove(); });
+    head.append(title, close);
+    card.append(head);
+    const bar = el('div', 'mt-2 h-2 rounded-full bg-slate-100 overflow-hidden');
+    const fill = el('div', 'h-full transition-all ' + (run.status === 'running' ? 'bg-indigo-500 animate-pulse' :
+      run.status === 'done' ? 'bg-green-500' : 'bg-amber-500'));
+    fill.style.width = run.percent + '%';
+    bar.append(fill);
+    card.append(bar);
+    let line;
+    if (run.status === 'running') {
+      line = fmt(T.running, {percent: run.percent}) + ' · ' + fmt(T.step, {
+        a: Math.min(run.assignments_done + 1, run.assignments_total), at: run.assignments_total,
+        s: run.submissions_done, st: run.submissions_total, n: run.new_versions});
+    } else if (run.status === 'done') {
+      line = fmt(T.done, {n: run.new_versions, e: run.errors});
+    } else if (run.status === 'interrupted') {
+      line = T.interrupted;
+    } else {
+      line = fmt(T.failed, {error: T.errors[run.error] || run.error || ''});
+    }
+    card.append(el('p', 'mt-1.5 text-xs text-slate-600', line));
+    return card;
+  }
+  let timer = null;
+  function poll() {
+    fetch('/teacher/classroom/sync/active', {credentials: 'same-origin', headers: {accept: 'application/json'}})
+      .then(r => (r.ok ? r.json() : {runs: []}))
+      .then(data => {
+        const skip = hidden();
+        const runs = (data.runs || []).filter(r => !skip.includes(r.id));
+        box.replaceChildren(...runs.map(card));
+        const live = runs.some(r => r.status === 'running');
+        clearTimeout(timer);
+        if (live) timer = setTimeout(poll, 2000);
+      })
+      .catch(() => { clearTimeout(timer); timer = setTimeout(poll, 10000); });
+  }
+  poll();
+})();
+</script>

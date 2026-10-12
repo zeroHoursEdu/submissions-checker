@@ -170,6 +170,15 @@ class ClassroomLinkMethod(enum.StrEnum):
         return self.value
 
 
+class ClassroomSyncStatus(enum.StrEnum):
+    RUNNING = "RUNNING"
+    DONE = "DONE"
+    FAILED = "FAILED"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 class LLMGradingStatus(enum.StrEnum):
     WAITING_LINK = "WAITING_LINK"
     PENDING = "PENDING"

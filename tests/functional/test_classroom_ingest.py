@@ -13,7 +13,6 @@ from sqlalchemy import select
 from submissions_checker.api.routes import teacher_classroom
 from submissions_checker.core.config import Settings, get_settings
 from submissions_checker.db.models import Subject, SubjectsAssignment
-from submissions_checker.db.models.audit_log import AuditLog
 from submissions_checker.db.models.classroom import (
     ClassroomStudentLink,
     ClassroomWork,
@@ -577,23 +576,6 @@ async def test_sync_route_requires_subject_access(client: AsyncClient, login, ma
     assert route_env["client"].downloads == []
 
 
-async def test_sync_route_ingests_and_redirects(teacher_client: AsyncClient, db, route_env):
-    _three_submissions(route_env["client"])
-    sid = route_env["subject_id"]
-    resp = await teacher_client.post(f"/teacher/subjects/{sid}/classroom/sync")
-    assert resp.status_code == 303
-    assert resp.headers["location"] == f"/teacher/subjects/{sid}?classroom=synced&synced=3"
-    assert len(await _works(db)) == 3
-    audit = (
-        await db.execute(select(AuditLog).where(AuditLog.action == "classroom_synced"))
-    ).scalar_one()
-    assert audit.target_id == sid
-
-    page = await teacher_client.get(resp.headers["location"])
-    assert "Синхронізацію завершено. Нових робіт: 3." in page.text
-    assert f'action="/teacher/subjects/{sid}/classroom/sync"' in page.text
-
-
 async def test_sync_route_not_linked(teacher_client: AsyncClient, db, route_env):
     subject = route_env["subject"]
     subject.classroom_course_id = None
@@ -613,28 +595,6 @@ async def test_sync_route_without_storage(teacher_client: AsyncClient, monkeypat
     monkeypatch.setattr(teacher_classroom, "get_storage", lambda _s: None)
     resp = await teacher_client.post(f"/teacher/subjects/{route_env['subject_id']}/classroom/sync")
     assert resp.headers["location"].endswith("classroom_error=storage")
-
-
-async def test_sync_route_invalid_grant_flashes_reconnect(
-    teacher_client: AsyncClient, db, route_env
-):
-    route_env["client"].roster_error = GoogleAuthError("dead", invalid_grant=True)
-    sid = route_env["subject_id"]
-    resp = await teacher_client.post(f"/teacher/subjects/{sid}/classroom/sync")
-    assert resp.status_code == 303
-    assert resp.headers["location"].endswith("classroom_error=reconnect")
-    page = await teacher_client.get(resp.headers["location"])
-    assert "Google відкликав доступ. Підключіть Google знову." in page.text
-    db.expire_all()
-    conn = await db.get(GoogleConnection, route_env["conn_id"])
-    assert conn is not None and conn.status == "ERROR"
-
-
-async def test_sync_route_google_failure_flashes(teacher_client: AsyncClient, route_env):
-    route_env["client"].roster_error = GoogleApiError("down", 503)
-    resp = await teacher_client.post(f"/teacher/subjects/{route_env['subject_id']}/classroom/sync")
-    assert resp.status_code == 303
-    assert resp.headers["location"].endswith("classroom_error=google")
 
 
 async def test_exact_name_match_is_confirmed_on_first_sync(db, setup):

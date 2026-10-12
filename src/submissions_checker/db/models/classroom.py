@@ -108,3 +108,44 @@ class LLMGrading(Base, TimestampMixin):
     work: Mapped[ClassroomWork] = relationship("ClassroomWork")
 
     __table_args__ = (Index("ix_llm_gradings_status", "status"),)
+
+
+class ClassroomSyncRun(Base, TimestampMixin):
+    """One manual "sync now" run; the teacher's progress panel reads it.
+
+    Written from the background task (another replica may serve the polling request),
+    so progress lives here rather than in process memory. ``heartbeat_at`` moves with
+    every step: a RUNNING row whose heartbeat stopped was killed by a restart.
+    """
+
+    __tablename__ = "classroom_sync_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    subject_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False
+    )
+    started_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    assignments_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    assignments_done: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    submissions_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    submissions_done: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    new_versions: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    errors: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_classroom_sync_runs_subject_id", "subject_id", "id"),)

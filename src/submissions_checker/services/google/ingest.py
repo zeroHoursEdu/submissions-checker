@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -122,6 +122,21 @@ class IngestReport:
     new_versions: int = 0
     unchanged: int = 0
     errors: int = 0
+
+
+@dataclass(frozen=True)
+class SyncProgress:
+    """Where a sync is: assignments done of total, submissions done of the current one's."""
+
+    assignments_total: int
+    assignments_done: int
+    submissions_total: int
+    submissions_done: int
+    new_versions: int
+    errors: int
+
+
+ProgressFn = Callable[[SyncProgress], Awaitable[None]]
 
 
 def storage_key(
@@ -433,7 +448,11 @@ async def _set_sync_result(
 
 
 async def ingest_subject(
-    db: AsyncSession, subject: Subject, client: ClassroomApi, storage: ObjectStore
+    db: AsyncSession,
+    subject: Subject,
+    client: ClassroomApi,
+    storage: ObjectStore,
+    on_progress: ProgressFn | None = None,
 ) -> IngestReport:
     """Sync one subject's roster and LLM-graded coursework submissions.
 
@@ -480,7 +499,21 @@ async def ingest_subject(
         if is_llm_graded(a.config)
     ]
 
-    for assignment_id, coursework_id in assignments:
+    async def progress(done: int, subs_total: int = 0, subs_done: int = 0) -> None:
+        if on_progress is not None:
+            await on_progress(
+                SyncProgress(
+                    len(assignments),
+                    done,
+                    subs_total,
+                    subs_done,
+                    report.new_versions,
+                    report.errors,
+                )
+            )
+
+    await progress(0)
+    for index, (assignment_id, coursework_id) in enumerate(assignments):
         assert coursework_id is not None
         try:
             submissions = await client.list_submissions(course_id, coursework_id)
@@ -496,11 +529,12 @@ async def ingest_subject(
                 coursework_id=coursework_id,
                 error=str(exc),
             )
+            await progress(index + 1)
             continue
 
-        for sub in submissions:
-            if sub.state not in KEPT_STATES or not sub.files:
-                continue
+        kept = [sub for sub in submissions if sub.state in KEPT_STATES and sub.files]
+        await progress(index, len(kept), 0)
+        for done, sub in enumerate(kept, 1):
             try:
                 await _ingest_submission(
                     db, subject_id, assignment_id, sub, client, storage, report
@@ -517,6 +551,8 @@ async def ingest_subject(
                     classroom_submission_id=sub.id,
                     error=str(exc),
                 )
+            await progress(index, len(kept), done)
+        await progress(index + 1, len(kept), len(kept))
 
     await _set_sync_result(
         db, subject_id, synced=True, error=SYNC_ERROR_PARTIAL if report.errors else None

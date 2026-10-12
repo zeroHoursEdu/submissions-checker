@@ -641,11 +641,24 @@ classroom:
   error_pick_student: Оберіть студента зі списку.
   error_not_name_match: Підтвердити можна лише збіг за іменем.
   error_bad_action: Невідома дія.
-  flash_synced: "Синхронізацію завершено. Нових робіт: {n}."
   sync_error_reconnect: Google відкликав доступ, підключіть Google знову
   sync_error_google: Google недоступний або курс не знайдено
   sync_error_partial: частину робіт не вдалося завантажити, повтор під час наступної синхронізації
   report_link: Звіт оцінювання
+  flash_sync_started: Синхронізацію запущено у фоні — прогрес праворуч унизу, сторінкою можна користуватися.
+  progress_title: "Синхронізація Classroom: {subject}"
+  progress_running: "{percent}%"
+  progress_step: "завдання {a}/{at}, робота {s}/{st}, нових {n}"
+  progress_done: "Завершено. Нових робіт: {n}, помилок: {e}."
+  progress_failed: "Не вдалося: {error}"
+  progress_interrupted: Синхронізацію перервано (перезапуск сервера). Отримані роботи збережено — запустіть ще раз.
+  progress_hide: Сховати
+  progress_error_codes:
+    busy: уже виконується інша синхронізація (нічна чи інша), спробуйте за кілька хвилин
+    reconnect: Google відкликав доступ, підключіть Google знову
+    google: Google недоступний або курс не знайдено
+    not_linked: курс не прив'язано
+    internal: внутрішня помилка, деталі в журналі сервера
   suggested: запропоновано
   save_all: Зберегти всі
   batch_hint: Завдання, позначені «запропоновано», підібрано за номером і назвою — перевірте й натисніть «Зберегти всі».

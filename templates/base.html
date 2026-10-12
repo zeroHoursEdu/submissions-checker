@@ -83,6 +83,7 @@
     {% block content %}{% endblock %}
   </main>
 
+{% if current_user and current_user.role in ["TEACHER", "ADMIN"] %}{% include "_sync_progress.html" %}{% endif %}
 <script>
   (function() {
     const bell = document.getElementById('notif-bell');

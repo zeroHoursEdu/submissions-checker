@@ -12,7 +12,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -32,6 +32,7 @@ from submissions_checker.db.models.enums import (
     ClassroomLinkMethod,
     GoogleConnectionStatus,
     LLMGradingStatus,
+    UserRole,
 )
 from submissions_checker.db.models.google_connection import GoogleConnection
 from submissions_checker.db.models.student import Student
@@ -41,13 +42,11 @@ from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.user import User
 from submissions_checker.services import teacher_scores
 from submissions_checker.services.audit import audit
-from submissions_checker.services.google import oauth
+from submissions_checker.services.google import oauth, sync_runs
 from submissions_checker.services.google.client import ClassroomClient, GoogleApiError
 from submissions_checker.services.google.coursework_match import suggest
 from submissions_checker.services.google.crypto import decrypt_token, encrypt_token
 from submissions_checker.services.google.ingest import (
-    classroom_lock,
-    ingest_subject,
     release_waiting,
 )
 from submissions_checker.services.google.matching import BULK_CONFIRM
@@ -543,9 +542,11 @@ async def sync_now(
     db: DBSession,
     current_user: TeacherUser,
     settings: AppSettings,
-    http: httpx.AsyncClient = ClassroomHttp,
 ) -> RedirectResponse:
-    """Run the nightly ingest for this subject now, with the subject's linked connection."""
+    """Start the nightly ingest for this subject now, in the background.
+
+    Returns at once; the progress panel polls ``/teacher/classroom/sync/active``.
+    """
     subject = await require_subject_access(db, subject_id, current_user)
     if not settings.classroom_enabled:
         return _back(subject_id, classroom_error="not_configured")
@@ -566,29 +567,36 @@ async def sync_now(
     engine = db.bind
     if not isinstance(engine, AsyncEngine):
         raise RuntimeError("session is not bound to an engine")
-    try:
-        async with classroom_lock(engine) as locked:
-            if not locked:  # the nightly job (or another sync) is ingesting right now
-                return _back(subject_id, classroom_error="busy")
-            report = await ingest_subject(db, subject, _client(settings, conn, http), storage)
-    except oauth.GoogleAuthError as exc:
-        logger.warning("classroom_sync_auth_error", subject_id=subject_id, error=str(exc))
-        return _back(subject_id, classroom_error="reconnect" if exc.invalid_grant else "google")
-    except GoogleApiError as exc:
-        logger.warning("classroom_sync_api_error", subject_id=subject_id, error=str(exc))
-        return _back(subject_id, classroom_error="google")
-    await audit(
-        db,
-        "classroom_synced",
-        actor_id=current_user.user_id,
-        actor_username=current_user.username,
-        target_type="subject",
-        target_id=subject_id,
-        new_versions=report.new_versions,
-        unchanged=report.unchanged,
-        errors=report.errors,
+    # The background task outlives this session: detach the loaded connection so the
+    # commit below does not expire the token it needs.
+    db.expunge(conn)
+    started = await sync_runs.start(db, subject_id, current_user.user_id)
+    if started is None:
+        return _back(subject_id, classroom_error="busy")
+    sync_runs.spawn(
+        sync_runs.run(
+            engine,
+            started.id,
+            subject_id,
+            lambda http: _client(settings, conn, http),
+            storage,
+            sync_runs.Actor(current_user.user_id, current_user.username),
+        )
     )
-    return _back(subject_id, classroom="synced", synced=str(report.new_versions))
+    return _back(subject_id, classroom="sync_started")
+
+
+@router.get("/classroom/sync/active")
+async def sync_active(db: DBSession, current_user: TeacherUser) -> JSONResponse:
+    """Manual syncs the progress panel shows: running, or just finished, in own subjects."""
+    query = select(Subject.id)
+    if current_user.role != UserRole.ADMIN:
+        query = query.where(Subject.owner_id == current_user.user_id)
+    subject_ids = list((await db.execute(query)).scalars())
+    return JSONResponse(
+        {"runs": await sync_runs.visible_runs(db, subject_ids)},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ── Student matching ─────────────────────────────────────────────────────────
