@@ -337,6 +337,35 @@ async def test_an_answer_arriving_after_its_window_scores_zero(
     assert answers[0].points_earned == 0
 
 
+async def test_an_auto_submitted_answer_landing_just_after_the_window_counts(
+    student_client: AsyncClient, db, student_user, teacher
+) -> None:
+    subject, sa, submission = await _arrange(
+        db, student_user.student_id, teacher.id, quiz_cfg=STEPPED_QUIZ
+    )
+    await _start(student_client, subject, sa)
+    attempt = await _attempt_of(db, submission.id)
+
+    # 30s window; the countdown's own post at 0:00 lands two seconds later.
+    attempt.question_started_at = datetime.now(UTC) - timedelta(seconds=32)
+    await db.commit()
+
+    await student_client.post(
+        f"/portal/quiz/{attempt.id}/answer",
+        data={"index": "0", "answer_0": "1"},
+        follow_redirects=False,
+    )
+
+    answers = (
+        (await db.execute(select(QuizAnswer).where(QuizAnswer.attempt_id == attempt.id)))
+        .scalars()
+        .all()
+    )
+    assert len(answers) == 1
+    assert answers[0].timed_out is False
+    assert answers[0].points_earned == 1
+
+
 async def test_bulk_submit_is_refused_for_a_stepped_attempt(
     student_client: AsyncClient, db, student_user, teacher
 ) -> None:

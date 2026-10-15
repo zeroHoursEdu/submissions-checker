@@ -113,8 +113,19 @@ def test_advance_expired_leaves_a_live_question_alone() -> None:
     assert db.added == []
 
 
+def test_advance_expired_spares_an_answer_landing_just_after_the_window() -> None:
+    # The page's own countdown posts the selection at 0:00, which reaches the server a
+    # moment after the window closed (render time, latency, timer drift). That post must
+    # still count: prod burned every such auto-submitted answer, selection and all.
+    attempt = _attempt([30, 30], started_ago=32)
+    db = _Recorder()
+    assert student_quiz._advance_expired(attempt, db) == 0
+    assert attempt.current_index == 0
+    assert db.added == []
+
+
 def test_advance_expired_burns_one_elapsed_window() -> None:
-    attempt = _attempt([30, 30], started_ago=31)
+    attempt = _attempt([30, 30], started_ago=40)
     db = _Recorder()
     assert student_quiz._advance_expired(attempt, db) == 1
     assert attempt.current_index == 1

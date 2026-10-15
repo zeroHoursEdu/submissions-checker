@@ -76,6 +76,13 @@ from submissions_checker.workers.tasks.notification_tasks import (
 
 logger = get_logger(__name__)
 
+# A question's page posts its selection itself when the countdown hits 0:00. That post
+# reaches us after the window has closed: the window opened before the page was rendered,
+# the countdown rounds up, timers drift and the request takes time. Without this slack every
+# auto-submitted answer was burned as timed out, selection and all. A stopped or forged
+# timer gains nothing past it: the question still expires on the next request.
+QUESTION_GRACE_SECONDS = 5
+
 router = APIRouter(prefix="/portal", tags=["student-quiz"])
 
 _TERMINAL_STATUSES = (
@@ -315,7 +322,7 @@ def _advance_expired(attempt: QuizAttempt, db: DBSession) -> int:
             attempt.question_started_at = now
             break
         elapsed = (now - attempt.question_started_at.replace(tzinfo=UTC)).total_seconds()
-        if elapsed <= limit:
+        if elapsed <= limit + QUESTION_GRACE_SECONDS:
             break
         _record_timed_out(attempt, db)
         attempt.current_index += 1
