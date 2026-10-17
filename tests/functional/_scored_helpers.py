@@ -146,8 +146,10 @@ async def attempt(
     max_score: int,
     passed: bool,
     status: QuizAttemptStatus = QuizAttemptStatus.COMPLETED,
+    commit: bool = True,
 ) -> QuizAttempt:
-    """A finished quiz attempt on ``sub`` by ``student_id`` (committed)."""
+    """A finished quiz attempt on ``sub`` by ``student_id`` (committed, or only flushed
+    with ``commit=False``)."""
     a = QuizAttempt(
         submission_id=sub.id,
         student_id=student_id,
@@ -172,6 +174,9 @@ async def attempt(
         max_score=max_score,
     )
     db.add(a)
+    if not commit:
+        await db.flush()
+        return a
     await db.commit()
     await db.refresh(a)
     return a

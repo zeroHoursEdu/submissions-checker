@@ -144,17 +144,25 @@ def _code_facts(subs: list[Submission]) -> tuple[Fact, Fact]:
     return tests, ai
 
 
+async def _scope(db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment) -> list[int]:
+    return await squads.scope_sa_ids(db, sa.student_id, asg.subject_id, asg.id) or [sa.id]
+
+
 async def gather_facts(
-    db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment
+    db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment, *, fresh: bool = False
 ) -> tuple[requirements.Facts, list[Submission], Squad | None, list[int]]:
-    """(facts, scope submissions newest first, squad, scope SA ids)."""
-    scope = await squads.scope_sa_ids(db, sa.student_id, asg.subject_id, asg.id) or [sa.id]
+    """(facts, scope submissions newest first, squad, scope SA ids).
+
+    ``fresh`` reloads submissions already in the session from the database (settle uses it
+    after taking its lock, having flushed first, so nothing pending is lost)."""
+    scope = await _scope(db, sa, asg)
     subs = list(
         (
             await db.execute(
                 select(Submission)
                 .where(Submission.students_assignment_id.in_(scope))
                 .order_by(Submission.created_at.desc(), Submission.id.desc())
+                .execution_options(populate_existing=fresh)
             )
         )
         .scalars()
@@ -208,7 +216,9 @@ async def _write_grade(
             row.grade = evaluation.grade
     breakdown = dict(evaluation.breakdown or {})
     if squad is not None:
-        _, members = squad_quiz_pct(await _attempts(db, [s.id for s in subs]))
+        # Same attempts as the quiz percentage: the submission that completed the quiz.
+        completing = [s.id for s in subs if await squads.quiz_complete(db, s)][:1]
+        _, members = squad_quiz_pct(await _attempts(db, completing))
         breakdown["squad"] = {"unified": True, "squad_id": squad.id, "members": members}
     latest.grade_breakdown = breakdown
     # The sessions run with autoflush off; flush so a caller's later query or refresh in
@@ -216,13 +226,37 @@ async def _write_grade(
     await db.flush()
 
 
-async def settle(db: AsyncSession, sa: StudentAssignment) -> SettleResult:
-    """Grade and status of ``sa`` (and its squad) from what is done now. Does not commit."""
+async def _lock_scope(db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment) -> None:
+    """Row-lock every StudentAssignment in the scope (ordered by id, so squad members never
+    deadlock each other) and reload them. Two members finishing their last attempts at once
+    then settle one after the other, and the second reads the facts only after the first
+    committed — under READ COMMITTED it sees the first one's pass."""
+    await db.flush()  # the reload below must not discard the caller's pending changes
+    scope = await _scope(db, sa, asg)
+    await db.execute(
+        select(StudentAssignment)
+        .where(StudentAssignment.id.in_(scope))
+        .order_by(StudentAssignment.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
+async def settle(
+    db: AsyncSession, sa: StudentAssignment, *, previous_status: SubmissionStatus | None = None
+) -> SettleResult:
+    """Grade and status of ``sa`` (and its squad) from what is done now. Does not commit.
+
+    ``previous_status``: the status before the caller's own transition (a worker applies
+    ``processing_done`` and then settles); the teacher is notified on entering
+    AWAITING_TEACHER_REVIEW relative to it instead of to the status found here.
+    """
     asg = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
     if asg is None:
         raise ValueError(f"students_assignment {sa.id} has no assignment")
     plan = plan_for(asg)
-    facts, subs, squad, scope = await gather_facts(db, sa, asg)
+    await _lock_scope(db, sa, asg)
+    facts, subs, squad, scope = await gather_facts(db, sa, asg, fresh=True)
     evaluation = requirements.evaluate(
         plan, facts, asg.min_grade, asg.max_grade, round_up=squad is not None
     )
@@ -231,9 +265,13 @@ async def settle(db: AsyncSession, sa: StudentAssignment) -> SettleResult:
             return SettleResult(None, None, None, evaluation)
         subs = [await _new_upload_less(db, sa, asg, squad)]
     latest = subs[0]
-    # Squad members settle the same row; the lock makes one of them do the transition and
-    # the other see its result.
-    await db.refresh(latest, attribute_names=["status", "source_metadata"], with_for_update=True)
+    # Settles are serialised by the scope lock; this guards against status writers outside
+    # settle. NO KEY UPDATE, not UPDATE: a quiz attempt insert holds KEY SHARE on its
+    # submission, and FOR UPDATE would wait for that member's transaction while it waits
+    # for our scope lock — a deadlock.
+    await db.refresh(
+        latest, attribute_names=["status", "source_metadata"], with_for_update={"key_share": True}
+    )
     old = latest.status
     if (
         old in PROCESSING
@@ -262,7 +300,8 @@ async def settle(db: AsyncSession, sa: StudentAssignment) -> SettleResult:
         await _write_grade(db, latest, scope, squad, evaluation, subs)
     await db.flush()
     new = latest.status
-    if new == S.AWAITING_TEACHER_REVIEW and old != S.AWAITING_TEACHER_REVIEW:
+    before = previous_status if previous_status is not None else old
+    if new == S.AWAITING_TEACHER_REVIEW and before != S.AWAITING_TEACHER_REVIEW:
         await enqueue_teacher_review_notification(db, latest.id)
     logger.info(
         "settled", submission_id=latest.id, old=str(old), new=str(new), grade=evaluation.grade

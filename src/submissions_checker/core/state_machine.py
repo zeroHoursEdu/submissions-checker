@@ -92,7 +92,10 @@ for _status in (SubmissionStatus.TESTING, SubmissionStatus.AI_REVIEWING):
 
 # A teacher may send a stuck or failed submission back through the checks. Every
 # state that can be reached by the pipeline (or by a worker dying mid-flight) gets
-# the same exit; terminal COMPLETED is deliberately excluded.
+# the same exit; terminal COMPLETED is deliberately excluded. (The requirements events
+# above are also defined from COMPLETED, but only services.settle may emit
+# requirements_met / requirement_failed / awaiting_teacher / awaiting_quiz, and settle
+# never leaves COMPLETED: it only rewrites the grade there.)
 for _status in (
     SubmissionStatus.VALIDATING,
     SubmissionStatus.TESTING,
