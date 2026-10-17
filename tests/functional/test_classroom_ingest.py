@@ -41,7 +41,14 @@ from submissions_checker.services.google.oauth import GoogleAuthError
 pytestmark = pytest.mark.asyncio
 
 KEY = Fernet.generate_key().decode()
-LLM_CFG = {"review_mode": "quiz_and_teacher_scores", "llm_grading": {"enabled": True}}
+LLM_CFG = {
+    "review_mode": "quiz_and_teacher_scores",
+    "grading": {
+        "quiz_points": 0,
+        "teacher_criteria": [{"key": "r", "title": "R", "max": 10, "requirements": "x"}],
+    },
+    "llm_grading": {"enabled": True},
+}
 T0 = "2026-10-01T10:00:00.000Z"
 T1 = "2026-10-02T10:00:00.000Z"
 

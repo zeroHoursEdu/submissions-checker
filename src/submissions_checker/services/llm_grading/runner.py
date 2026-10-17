@@ -107,10 +107,7 @@ async def build_request(
         raise RuntimeError(f"assignment {work.subjects_assignment_id} not found")
     cfg = assignment.config or {}
     block = cfg.get("llm_grading") or {}
-    criteria = [
-        JudgeCriterion(c.key, c.title, c.max, c.requirements)
-        for c in llm_criteria(cfg.get("grading"))
-    ]
+    criteria = [JudgeCriterion(c.key, c.title, c.max, c.requirements) for c in llm_criteria(cfg)]
     files = [
         WorkFile(
             name=str(e["name"]),

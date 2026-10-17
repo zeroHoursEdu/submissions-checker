@@ -736,3 +736,86 @@ async def test_apply_writes_and_clears_squad_max_size(
     await svc.apply(_make_zip(cfg), owner.id, db_session)
     await db_session.refresh(subject)
     assert subject.squad_max_size is None
+
+
+# ---------------------------------------------------------------------------
+# requirements: lists
+# ---------------------------------------------------------------------------
+
+_QUIZ_BLOCK = {
+    "questions": [
+        {"id": "q1", "type": "single_choice", "text": "?", "options": ["a", "b"], "correct": 0}
+    ]
+}
+_NEW_STYLE: dict[str, Any] = {
+    "title": "Lab 4",
+    "min_grade": 0,
+    "max_grade": 16,
+    "source": "classroom",
+    "requirements": [
+        {"type": "quiz", "key": "quiz", "points": 8},
+        {"type": "score", "key": "report", "title": "Звіт", "max": 5, "llm": "rubric"},
+        {"type": "score", "key": "star", "title": "Зірочка", "max": 3, "optional": True},
+        {"type": "check", "key": "accepted", "title": "Прийнято викладачем", "points": 0},
+    ],
+    "quiz": _QUIZ_BLOCK,
+}
+_V7_SCORED: dict[str, Any] = {
+    "title": "Lab 4",
+    "min_grade": 0,
+    "max_grade": 13,
+    "review_mode": "quiz_and_teacher_scores",
+    "quiz": _QUIZ_BLOCK,
+    "grading": {
+        "quiz_points": 8,
+        "teacher_criteria": [{"key": "report", "title": "Звіт", "max": 5}],
+    },
+}
+
+
+async def _apply_lab4(db: AsyncSession, lab: dict[str, Any]) -> SubjectsAssignment:
+    owner = await _make_owner(db)
+    await db.commit()
+    cfg = _base_config()
+    cfg["assignments"] = {"lab4": lab}
+    await ConfigApplyService(storage=None).apply(_make_zip(cfg), owner_id=owner.id, db=db)
+    return (
+        await db.execute(select(SubjectsAssignment).where(SubjectsAssignment.code == "lab4"))
+    ).scalar_one()
+
+
+async def test_new_style_assignment_applies_and_is_stored(db_session: AsyncSession) -> None:
+    asg = await _apply_lab4(db_session, _NEW_STYLE)
+    assert asg.config["requirements"][3]["key"] == "accepted"
+    assert asg.config["source"] == "classroom"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {**_NEW_STYLE, "review_mode": "quiz_and_teacher_scores"},
+        {**_NEW_STYLE, "max_grade": 17},
+        {
+            **_NEW_STYLE,
+            "requirements": [
+                *_NEW_STYLE["requirements"],
+                {"type": "check", "key": "x", "title": "X", "max": 1},
+            ],
+        },
+        {
+            **_NEW_STYLE,
+            "requirements": [
+                *_NEW_STYLE["requirements"],
+                {"type": "tests", "key": "t", "points": 0},
+            ],
+        },
+    ],
+)
+async def test_bad_new_style_refused(db_session: AsyncSession, bad: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        await _apply_lab4(db_session, bad)
+
+
+async def test_v7_style_scored_config_still_applies(db_session: AsyncSession) -> None:
+    asg = await _apply_lab4(db_session, _V7_SCORED)
+    assert asg.config["review_mode"] == "quiz_and_teacher_scores"

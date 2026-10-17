@@ -49,7 +49,7 @@ async def test_apply_rejects_llm_on_tests_only(
     cfg = _llm_config()
     cfg["assignments"]["lab1"]["review_mode"] = "tests_only"
     resp = await _post(teacher_client, _make_zip(cfg, _files()))
-    assert "quiz_and_teacher_scores" in urllib.parse.unquote(resp.headers["location"])
+    assert "classroom" in urllib.parse.unquote(resp.headers["location"])
     assert (await db.execute(select(func.count()).select_from(Subject))).scalar_one() == 0
 
 

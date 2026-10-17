@@ -803,7 +803,7 @@ async def grading_report(
             )
         )
     grading_cfg = (assignment.config or {}).get("grading")
-    llm_keys = {c.key for c in llm_criteria(grading_cfg)}
+    llm_keys = {c.key for c in llm_criteria(assignment.config)}
     draft = (grading.draft or {}).get("criteria") or {}
     rows = []
     for c in teacher_scores.criteria(grading_cfg):

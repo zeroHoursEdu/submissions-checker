@@ -30,7 +30,7 @@ from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
-from submissions_checker.services import teacher_scores
+from submissions_checker.services import requirements, teacher_scores
 from submissions_checker.services.llm_grading import config as llm_config
 from submissions_checker.services.subject_config import validate_subject_code
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
@@ -148,7 +148,7 @@ class ConfigApplyService:
         self._validate_quiz_questions(new_cfg)
         self._validate_check_commands(new_cfg)
         self._validate_quiz_reachability(new_cfg)
-        self._validate_teacher_scores(new_cfg)
+        self._validate_requirements(new_cfg)
         self._parse_squad_max_size(new_cfg)
 
         sha256 = hashlib.sha256(zip_bytes).hexdigest()
@@ -208,6 +208,8 @@ class ConfigApplyService:
     def _validate_quiz_reachability(self, new_cfg: dict[str, Any]) -> None:
         """Reject a quiz block under a review mode that can never send it."""
         for code, a_cfg in (new_cfg.get("assignments") or {}).items():
+            if "requirements" in (a_cfg or {}):
+                continue  # requirements.validate covers quiz reachability
             has_quiz = bool(((a_cfg or {}).get("quiz") or {}).get("questions"))
             mode = str((a_cfg or {}).get("review_mode", "tests_only"))
             if has_quiz and mode not in _QUIZ_REACHABLE_MODES:
@@ -216,11 +218,15 @@ class ConfigApplyService:
                     f"use one of: {', '.join(sorted(_QUIZ_REACHABLE_MODES))}"
                 )
 
-    def _validate_teacher_scores(self, new_cfg: dict[str, Any]) -> None:
-        """Reject a quiz_and_teacher_scores assignment whose points cannot add up."""
+    def _validate_requirements(self, new_cfg: dict[str, Any]) -> None:
+        """New-style lists must add up; old scored configs keep their own check."""
         for code, a_cfg in (new_cfg.get("assignments") or {}).items():
-            if teacher_scores.is_scored_mode(a_cfg):
-                teacher_scores.validate_assignment(code, a_cfg or {})
+            a_cfg = a_cfg or {}
+            has_quiz = bool((a_cfg.get("quiz") or {}).get("questions"))
+            if "requirements" in a_cfg:
+                requirements.validate(code, a_cfg, has_quiz_block=has_quiz)
+            elif teacher_scores.is_scored_mode(a_cfg):
+                teacher_scores.validate_assignment(code, a_cfg)
 
     @staticmethod
     def _parse_squad_max_size(new_cfg: dict[str, Any]) -> int | None:
@@ -414,6 +420,8 @@ class ConfigApplyService:
         # Config JSONB fields
         config_keys = [
             "review_mode",
+            "requirements",
+            "source",
             "late_policy",
             "max_submissions",
             "download_links",
@@ -701,6 +709,8 @@ class ConfigApplyService:
         config: dict[str, Any] = {}
         for key in (
             "review_mode",
+            "requirements",
+            "source",
             "late_policy",
             "max_submissions",
             "download_links",

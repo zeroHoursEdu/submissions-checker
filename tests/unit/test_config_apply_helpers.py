@@ -348,17 +348,17 @@ def _scored_cfg(max_grade: int) -> dict:  # type: ignore[type-arg]
     }
 
 
-def test_validate_teacher_scores_rejects_bad_total(svc: ConfigApplyService) -> None:
+def test_validate_requirements_rejects_bad_total(svc: ConfigApplyService) -> None:
     with pytest.raises(ValueError, match="lab1"):
-        svc._validate_teacher_scores(_scored_cfg(14))
+        svc._validate_requirements(_scored_cfg(14))
 
 
-def test_validate_teacher_scores_accepts_matching_total(svc: ConfigApplyService) -> None:
-    svc._validate_teacher_scores(_scored_cfg(13))
+def test_validate_requirements_accepts_matching_total(svc: ConfigApplyService) -> None:
+    svc._validate_requirements(_scored_cfg(13))
 
 
-def test_validate_teacher_scores_ignores_other_modes(svc: ConfigApplyService) -> None:
-    svc._validate_teacher_scores({"assignments": {"lab1": {"review_mode": "quiz_then_teacher"}}})
+def test_validate_requirements_ignores_other_modes(svc: ConfigApplyService) -> None:
+    svc._validate_requirements({"assignments": {"lab1": {"review_mode": "quiz_then_teacher"}}})
 
 
 def test_scored_mode_is_quiz_reachable_and_quiz_first() -> None:

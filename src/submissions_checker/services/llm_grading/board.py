@@ -112,7 +112,7 @@ async def llm_board_state(
             )
             if scores
         }
-    keys = [c.key for c in llm_criteria((assignment.config or {}).get("grading"))]
+    keys = [c.key for c in llm_criteria(assignment.config)]
 
     state: dict[int, dict[str, Any]] = {}
     for sid in student_ids:

@@ -41,7 +41,7 @@ def test_valid_inline_task():
 def test_rejects_other_mode():
     c = _cfg()
     c["review_mode"] = "tests_only"
-    with pytest.raises(ValueError, match="quiz_and_teacher_scores"):
+    with pytest.raises(ValueError, match="classroom"):
         validate("l1", c, no_files)
 
 
@@ -95,5 +95,39 @@ def test_helpers():
     assert is_llm_graded(_cfg()) and not is_llm_graded(
         {**_cfg(), "llm_grading": {"enabled": False}}
     )
-    assert [c.key for c in llm_criteria(BASE["grading"])] == ["report"]
+    assert [c.key for c in llm_criteria(BASE)] == ["report"]
     assert subject_uses_llm([None, {}, _cfg()]) and not subject_uses_llm([{}])
+
+
+NEW = {
+    "source": "classroom",
+    "llm_grading": {"enabled": True, "source": "google_classroom", "task": "T"},
+    "max_grade": 5,
+    "requirements": [{"type": "score", "key": "r", "title": "R", "max": 5, "llm": "x"}],
+}
+
+
+def test_new_style_llm_graded() -> None:
+    assert is_llm_graded(NEW)
+    assert [c.key for c in llm_criteria(NEW)] == ["r"]
+    c = llm_criteria(NEW)[0]
+    assert (c.title, c.max, c.requirements) == ("R", 5, "x")
+
+
+def test_new_style_validates() -> None:
+    validate("l1", NEW, no_files)
+
+
+def test_new_style_needs_classroom_source() -> None:
+    c = copy.deepcopy(NEW)
+    c["source"] = "upload"
+    with pytest.raises(ValueError, match="classroom"):
+        validate("l1", c, no_files)
+
+
+def test_new_style_needs_an_llm_score_item() -> None:
+    c = copy.deepcopy(NEW)
+    del c["requirements"][0]["llm"]
+    assert not is_llm_graded(c)
+    with pytest.raises(ValueError, match="score item with llm"):
+        validate("l1", c, no_files)

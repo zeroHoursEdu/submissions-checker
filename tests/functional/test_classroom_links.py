@@ -28,7 +28,14 @@ from submissions_checker.services.google.links import link_state_for_students
 
 pytestmark = pytest.mark.asyncio
 
-LLM_CFG = {"review_mode": "quiz_and_teacher_scores", "llm_grading": {"enabled": True}}
+LLM_CFG = {
+    "review_mode": "quiz_and_teacher_scores",
+    "grading": {
+        "quiz_points": 0,
+        "teacher_criteria": [{"key": "r", "title": "R", "max": 10, "requirements": "x"}],
+    },
+    "llm_grading": {"enabled": True},
+}
 
 
 @pytest.fixture(autouse=True)
