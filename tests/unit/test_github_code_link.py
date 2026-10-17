@@ -187,3 +187,17 @@ def test_tab_element_is_not_a_text_run() -> None:
     assert ref is not None
     assert ref.repo == "tabbed"
     assert gh._RUN_RE.findall("<w:tab/>") == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "https://github.com/a/..",
+        "https://github.com/a/.",
+        "https://github.com/a/b/tree/main/../x",
+    ],
+)
+def test_dot_segments_rejected(text: str) -> None:
+    from submissions_checker.services.llm_grading.github_code import parse_repo_url
+
+    assert parse_repo_url(text) is None

@@ -232,3 +232,89 @@ async def test_nothing_written_to_disk(tmp_path: Path, monkeypatch: pytest.Monke
         bundle = await gh.fetch_code(http, gh.RepoRef("a", "b"))
     assert bundle.error is None and len(bundle.files) == 1
     assert list(tmp_path.iterdir()) == []
+
+
+def _pax_bomb(size: int) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.PAX_FORMAT) as t:
+        info = tarfile.TarInfo("a-b-c/x.cpp")
+        info.pax_headers = {"comment": "A" * size}
+        t.addfile(info)
+    return buf.getvalue()
+
+
+def test_huge_pax_header_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gh, "MAX_SCANNED", 100_000)
+    with pytest.raises(gh.RepoTooLarge):
+        gh.select_files(_pax_bomb(5_000_000), None)
+
+
+def test_huge_non_file_member_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gh, "MAX_SCANNED", 100_000)
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        info = tarfile.TarInfo("a-b-c/odd")
+        info.type = b"Z"  # unsupported type: tarfile skips its payload
+        info.size = 5_000_000
+        t.addfile(info, io.BytesIO(b"\0" * 5_000_000))
+    with pytest.raises(gh.RepoTooLarge):
+        gh.select_files(buf.getvalue(), None)
+
+
+def test_plain_uncompressed_tar_works() -> None:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as t:
+        info = tarfile.TarInfo("a-b-c/m.cpp")
+        info.size = 1
+        t.addfile(info, io.BytesIO(b"x"))
+    _, files, _ = gh.select_files(buf.getvalue(), None)
+    assert [f.path for f in files] == ["m.cpp"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_pax_bomb_is_too_large(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gh, "MAX_SCANNED", 100_000)
+    body = _pax_bomb(5_000_000)
+    async with _client(lambda r: httpx.Response(200, content=body)) as http:
+        bundle = await gh.fetch_code(http, gh.RepoRef("a", "b"))
+    assert bundle.error == "too_large" and bundle.files == ()
+
+
+@pytest.mark.asyncio
+async def test_fetch_memory_error_is_too_large(monkeypatch: pytest.MonkeyPatch) -> None:
+    def oom(*a: object) -> None:
+        raise MemoryError
+
+    monkeypatch.setattr(gh, "select_files", oom)
+    async with _client(lambda r: httpx.Response(200, content=b"x")) as http:
+        bundle = await gh.fetch_code(http, gh.RepoRef("a", "b"))
+    assert bundle.error == "too_large"
+
+
+@pytest.mark.asyncio
+async def test_fetch_total_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    monkeypatch.setattr(gh, "TIMEOUT", 0.2)
+
+    class Slow(httpx.AsyncByteStream):
+        async def __aiter__(self):  # type: ignore[no-untyped-def]
+            while True:
+                yield b"x"
+                await asyncio.sleep(0.05)
+
+    async with _client(lambda r: httpx.Response(200, stream=Slow())) as http:
+        bundle = await gh.fetch_code(http, gh.RepoRef("a", "b"))
+    assert bundle.error == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_redirect_to_other_host() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.github.com":
+            return httpx.Response(302, headers={"location": "https://evil.example/x"})
+        return httpx.Response(200, content=_tar({"main.cpp": b"int"}))
+
+    async with _client(handler) as http:
+        bundle = await gh.fetch_code(http, gh.RepoRef("a", "b"))
+    assert bundle.error == "bad_redirect" and bundle.files == ()

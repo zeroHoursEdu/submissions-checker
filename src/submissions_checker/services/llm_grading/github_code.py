@@ -9,6 +9,8 @@ sent lands in the draft. Any failure degrades to grading the report alone.
 
 from __future__ import annotations
 
+import asyncio
+import gzip
 import html
 import io
 import posixpath
@@ -61,6 +63,9 @@ def parse_repo_url(text: str) -> RepoRef | None:
         return None
     owner, repo, ref, path = m.groups()
     path = (path or "").strip("/") or None
+    segments = [repo, *(ref or "").split("/"), *(path or "").split("/")]
+    if any(seg in (".", "..") for seg in segments):
+        return None
     if len(repo) > MAX_REPO_LEN or len(ref or "") > MAX_REF_LEN or len(path or "") > MAX_REF_LEN:
         return None
     return RepoRef(owner, repo, ref or None, path)
@@ -156,6 +161,32 @@ class RepoTooLarge(Exception):
     """The archive has more entries or data than we are willing to walk."""
 
 
+class _BoundedReader:
+    """Decompressed byte stream that refuses to yield more than MAX_SCANNED bytes.
+
+    tarfile swallows non-file payloads (PAX/long-name headers, unsupported types)
+    without telling us, so the bound has to sit under it, on the stream itself.
+    """
+
+    def __init__(self, raw: io.BufferedIOBase) -> None:
+        self._raw = raw
+        self._count = 0
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._raw.read(size)
+        self._count += len(data)
+        if self._count > MAX_SCANNED:
+            raise RepoTooLarge("too much data")
+        return data
+
+
+def _open_stream(tar_bytes: bytes) -> _BoundedReader:
+    raw: io.BufferedIOBase = io.BytesIO(tar_bytes)
+    if tar_bytes[:2] == b"\x1f\x8b":
+        raw = gzip.GzipFile(fileobj=raw)
+    return _BoundedReader(raw)
+
+
 @dataclass(frozen=True)
 class CodeFile:
     path: str
@@ -203,7 +234,8 @@ def select_files(
     members = 0
     scanned = 0
     prefix = (path.strip("/") + "/") if path else ""
-    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar:
+    # Stream mode: one forward pass over the bounded decompressed bytes.
+    with tarfile.open(fileobj=_open_stream(tar_bytes), mode="r|") as tar:  # type: ignore[call-overload]
         for member in tar:
             members += 1
             if members > MAX_MEMBERS:
@@ -238,28 +270,35 @@ async def fetch_code(http: httpx.AsyncClient, ref: RepoRef) -> CodeBundle:
         f"/{ref.ref}" if ref.ref else ""
     )
     try:
-        async with http.stream(
-            "GET",
-            url,
-            follow_redirects=True,
-            timeout=TIMEOUT,
-            headers={"Accept": "application/vnd.github+json"},
-        ) as resp:
-            if resp.status_code == 404:
-                return CodeBundle(ref, error="not_found")
-            if resp.status_code in (401, 403, 429):
-                return CodeBundle(ref, error="forbidden_or_rate_limited")
-            if resp.status_code != 200:
-                return CodeBundle(ref, error=f"http_{resp.status_code}")
-            buf = bytearray()
-            async for chunk in resp.aiter_bytes():
-                buf += chunk
-                if len(buf) > MAX_DOWNLOAD:
-                    return CodeBundle(ref, error="too_large")
-        commit, files, skipped = select_files(bytes(buf), ref.path)
+        async with asyncio.timeout(TIMEOUT):  # one deadline for the whole download
+            async with http.stream(
+                "GET",
+                url,
+                follow_redirects=True,
+                timeout=TIMEOUT,
+                headers={"Accept": "application/vnd.github+json"},
+            ) as resp:
+                host = resp.url.host
+                if host != "github.com" and not host.endswith(".github.com"):
+                    return CodeBundle(ref, error="bad_redirect")
+                if resp.status_code == 404:
+                    return CodeBundle(ref, error="not_found")
+                if resp.status_code in (401, 403, 429):
+                    return CodeBundle(ref, error="forbidden_or_rate_limited")
+                if resp.status_code != 200:
+                    return CodeBundle(ref, error=f"http_{resp.status_code}")
+                buf = bytearray()
+                async for chunk in resp.aiter_bytes():
+                    buf += chunk
+                    if len(buf) > MAX_DOWNLOAD:
+                        return CodeBundle(ref, error="too_large")
+        body = bytes(buf)
         del buf
-    except RepoTooLarge:
+        commit, files, skipped = await asyncio.to_thread(select_files, body, ref.path)
+    except (RepoTooLarge, MemoryError):
         return CodeBundle(ref, error="too_large")
+    except TimeoutError:
+        return CodeBundle(ref, error="timeout")
     except (httpx.HTTPError, tarfile.TarError, EOFError, zlib.error, OSError, ValueError) as exc:
         logger.info("github_fetch_failed", url=ref.url, error=type(exc).__name__)
         return CodeBundle(ref, error=type(exc).__name__)
