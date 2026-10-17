@@ -11,10 +11,15 @@ from __future__ import annotations
 
 import html
 import io
+import posixpath
 import re
+import tarfile
 import zipfile
+import zlib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+
+import httpx
 
 from submissions_checker.core.logging import get_logger
 
@@ -133,3 +138,131 @@ def find_repo_link(files: Iterable[tuple[str, bytes]]) -> RepoRef | None:
         except Exception:  # noqa: BLE001
             logger.info("github_link_unreadable", file=name)
     return None
+
+
+MAX_DOWNLOAD = 20 * 1024 * 1024
+MAX_FILES = 200
+MAX_TOTAL = 1024 * 1024
+MAX_MEMBERS = 5000  # tar entries looked at before the archive is called hostile
+MAX_SCANNED = 200 * 1024 * 1024  # sum of regular-file sizes looked at (bounds gzip bombs)
+TIMEOUT = 20.0
+KEEP_EXT = (".cpp", ".cc", ".c", ".h", ".hpp", ".rc", ".txt")
+KEEP_NAMES = ("CMakeLists.txt",)
+KEEP_SUFFIX = (".sln", ".vcxproj")
+SKIP_DIRS = frozenset({".git", "x64", "Debug", "Release", ".vs", "build"})
+
+
+class RepoTooLarge(Exception):
+    """The archive has more entries or data than we are willing to walk."""
+
+
+@dataclass(frozen=True)
+class CodeFile:
+    path: str
+    content: bytes
+
+
+@dataclass(frozen=True)
+class CodeBundle:
+    ref: RepoRef | None
+    commit: str | None = None
+    files: tuple[CodeFile, ...] = ()
+    skipped: tuple[str, ...] = ()
+    error: str | None = None
+
+    def manifest(self) -> dict[str, object]:
+        return {
+            "url": self.ref.url if self.ref else None,
+            "commit": self.commit,
+            "files": [{"path": f.path, "size": len(f.content)} for f in self.files],
+            "skipped": list(self.skipped),
+            "error": self.error,
+        }
+
+
+def _keep(rel: str) -> bool:
+    parts = rel.split("/")
+    if any(p in SKIP_DIRS for p in parts[:-1]):
+        return False
+    name = parts[-1]
+    return name in KEEP_NAMES or name.endswith(KEEP_EXT) or name.endswith(KEEP_SUFFIX)
+
+
+def select_files(
+    tar_bytes: bytes, path: str | None
+) -> tuple[str | None, list[CodeFile], list[str]]:
+    """Source files from a GitHub tarball, in memory; unsafe or filtered entries dropped.
+
+    Raises RepoTooLarge past MAX_MEMBERS entries or MAX_SCANNED bytes of member data.
+    Only extractfile() reads are used: nothing is extracted to disk.
+    """
+    files: list[CodeFile] = []
+    skipped: list[str] = []
+    commit: str | None = None
+    total = 0
+    members = 0
+    scanned = 0
+    prefix = (path.strip("/") + "/") if path else ""
+    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar:
+        for member in tar:
+            members += 1
+            if members > MAX_MEMBERS:
+                raise RepoTooLarge("too many entries")
+            name = member.name
+            if name.startswith("/") or ".." in name.split("/") or not member.isfile():
+                continue
+            scanned += member.size
+            if scanned > MAX_SCANNED:
+                raise RepoTooLarge("too much data")
+            top, _, rel = name.partition("/")
+            if commit is None and "-" in top:
+                commit = top.rsplit("-", 1)[1]
+            rel = posixpath.normpath(rel) if rel else ""
+            if not rel or rel.startswith("..") or not rel.startswith(prefix) or not _keep(rel):
+                continue
+            if len(files) >= MAX_FILES or total + member.size > MAX_TOTAL:
+                skipped.append(rel)
+                continue
+            handle = tar.extractfile(member)
+            if handle is None:
+                continue
+            data = handle.read()
+            files.append(CodeFile(rel, data))
+            total += len(data)
+    return commit, files, skipped
+
+
+async def fetch_code(http: httpx.AsyncClient, ref: RepoRef) -> CodeBundle:
+    """The repository's source files, or a bundle naming why there are none. Never raises."""
+    url = f"https://api.github.com/repos/{ref.owner}/{ref.repo}/tarball" + (
+        f"/{ref.ref}" if ref.ref else ""
+    )
+    try:
+        async with http.stream(
+            "GET",
+            url,
+            follow_redirects=True,
+            timeout=TIMEOUT,
+            headers={"Accept": "application/vnd.github+json"},
+        ) as resp:
+            if resp.status_code == 404:
+                return CodeBundle(ref, error="not_found")
+            if resp.status_code in (401, 403, 429):
+                return CodeBundle(ref, error="forbidden_or_rate_limited")
+            if resp.status_code != 200:
+                return CodeBundle(ref, error=f"http_{resp.status_code}")
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes():
+                buf += chunk
+                if len(buf) > MAX_DOWNLOAD:
+                    return CodeBundle(ref, error="too_large")
+        commit, files, skipped = select_files(bytes(buf), ref.path)
+        del buf
+    except RepoTooLarge:
+        return CodeBundle(ref, error="too_large")
+    except (httpx.HTTPError, tarfile.TarError, EOFError, zlib.error, OSError, ValueError) as exc:
+        logger.info("github_fetch_failed", url=ref.url, error=type(exc).__name__)
+        return CodeBundle(ref, error=type(exc).__name__)
+    return CodeBundle(
+        ref, commit, tuple(files), tuple(skipped), None if files else "no_source_files"
+    )
