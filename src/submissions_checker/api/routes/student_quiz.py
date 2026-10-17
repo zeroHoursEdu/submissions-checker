@@ -49,7 +49,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import quiz_open, settle, squads
+from submissions_checker.services import quiz_grants, quiz_open, settle, squads
 from submissions_checker.services.air_raid.base import AirRaidProviderError
 from submissions_checker.services.air_raid.geo import resolve_region
 from submissions_checker.services.audit import audit
@@ -640,8 +640,9 @@ async def _grade_and_finalize(
     if submission is not None:
         await db.flush()  # settle must see this attempt's is_passed / status
         if not is_passed:
+            # The same cap settle and the grant logic use: the pinned config's, plus grants.
             max_attempts = effective_max_attempts(
-                attempt.config_snapshot.get("max_quiz_attempts"), submission, attempt.student_id
+                await quiz_grants.base_max_attempts(db, submission), submission, attempt.student_id
             )
             if max_attempts is not None:
                 prior = await _count_used_attempts(
@@ -651,7 +652,11 @@ async def _grade_and_finalize(
         owner_sa = await db.get(StudentAssignment, submission.students_assignment_id)
         if owner_sa is not None:
             result = await settle.settle(db, owner_sa)
-            if is_passed and submission.squad_id is not None and not result.evaluation.complete:
+            quiz_state = next(
+                (i.state for i in result.evaluation.items if i.type == "quiz"), "pending"
+            )
+            # The squad's quiz still waits on a mate (other items may be open regardless).
+            if is_passed and submission.squad_id is not None and quiz_state != "done":
                 await _notify_partners_passed(db, submission, attempt.student_id)
 
     db.add(
@@ -726,12 +731,37 @@ async def start_or_resume_quiz(
     if sa is None:
         raise HTTPException(status_code=404)
 
+    asg = sa.subjects_assignment
+    facts, known_subs, _squad, _scope = await settle.gather_facts(db, sa, asg)
+    # An attempt already running is resumed whatever the rest says: refusing would strand
+    # the student mid-quiz with the clock still going.
+    in_progress = await db.scalar(
+        select(QuizAttempt)
+        .where(
+            QuizAttempt.submission_id.in_([s.id for s in known_subs] or [-1]),
+            QuizAttempt.status == QuizAttemptStatus.IN_PROGRESS,
+            or_(QuizAttempt.student_id == student_id, QuizAttempt.student_id.is_(None)),
+        )
+        .order_by(QuizAttempt.started_at.desc())
+        .limit(1)
+    )
+    if in_progress is not None:
+        logger.info(
+            "quiz_attempt_resumed",
+            attempt_id=in_progress.id,
+            student_id=student_id,
+            assignment_id=sa.subjects_assignment_id,
+            squad_id=next(
+                (s.squad_id for s in known_subs if s.id == in_progress.submission_id), None
+            ),
+            question_count=len(in_progress.questions_snapshot or []),
+        )
+        return RedirectResponse(url=f"/portal/quiz/{in_progress.id}", status_code=303)
+
     # The quiz is its own requirement: it opens whenever that item is pending, before or
     # after any upload, whatever else is still outstanding.
-    asg = sa.subjects_assignment
     if not settle.plan_for(asg).has("quiz"):
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
-    facts, known_subs, _squad, _scope = await settle.gather_facts(db, sa, asg)
     if facts.quiz[0] in ("done", "failed"):
         # Passed (for a squad: every member passed) or exhausted. A member who passed while
         # a mate has not is sent to their result by the per-student check further down.
@@ -747,8 +777,10 @@ async def start_or_resume_quiz(
             student_id=student_id,
             assignment_id=sa.subjects_assignment_id,
         )
-    # COMPLETED is final; FAILED with the quiz still pending is a teacher's rejection.
-    if latest_sub.status in (SubmissionStatus.COMPLETED, SubmissionStatus.FAILED):
+    # Only COMPLETED is final. A FAILED host with the quiz still pending is an older,
+    # rejected version: settle keeps a rejected *latest* submission failed, so a quiz taken
+    # here cannot complete work the teacher refused.
+    if latest_sub.status == SubmissionStatus.COMPLETED:
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
 
     attempts_result = await db.execute(
@@ -760,18 +792,6 @@ async def start_or_resume_quiz(
         .order_by(QuizAttempt.started_at)
     )
     existing = list(attempts_result.scalars().all())
-
-    in_progress = next((a for a in existing if a.status == QuizAttemptStatus.IN_PROGRESS), None)
-    if in_progress:
-        logger.info(
-            "quiz_attempt_resumed",
-            attempt_id=in_progress.id,
-            student_id=student_id,
-            assignment_id=sa.subjects_assignment_id,
-            squad_id=latest_sub.squad_id,
-            question_count=len(in_progress.questions_snapshot or []),
-        )
-        return RedirectResponse(url=f"/portal/quiz/{in_progress.id}", status_code=303)
 
     passed = next((a for a in existing if a.is_passed), None)
     if passed:

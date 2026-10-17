@@ -312,13 +312,12 @@ async def test_start_quiz_refused_when_attempts_exhausted(
     subject, sa, sub, cfg = await _arrange_quiz(db, student_user.student_id, quiz_cfg=cfg_with_max)
     # Two finished (failed) attempts already used.
     await _make_attempt(db, sub.id, cfg, status=QuizAttemptStatus.COMPLETED, is_passed=False)
-    last = await _make_attempt(db, sub.id, cfg, status=QuizAttemptStatus.TIMED_OUT, is_passed=False)
+    await _make_attempt(db, sub.id, cfg, status=QuizAttemptStatus.TIMED_OUT, is_passed=False)
     resp = await student_client.get(
         f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz",
         follow_redirects=False,
     )
     assert resp.status_code == 403
-    assert last.id  # the finished attempts stay; the result page is reached from them
     # No new attempt created.
     attempts = (
         (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))

@@ -247,9 +247,7 @@ async def _write_grade(
     await db.flush()
 
 
-async def _lock_scope(
-    db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment
-) -> list[int]:
+async def lock_scope(db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment) -> list[int]:
     """Row-lock every StudentAssignment in the scope (ordered by id, so squad members never
     deadlock each other) and reload them. Two members finishing their last attempts at once
     then settle one after the other, and the second reads the facts only after the first
@@ -257,7 +255,12 @@ async def _lock_scope(
 
     NO KEY UPDATE, not UPDATE: inserting a submission or quiz attempt takes KEY SHARE on the
     referenced row, which plain FOR UPDATE would wait on — two squad members could then each
-    hold what the other needs. Returns the locked scope's SA ids."""
+    hold what the other needs. Returns the locked scope's SA ids.
+
+    Public so a caller that writes the submission before settling (the attempt grant) can
+    take this lock first and keep the order scope -> submission; settle re-locking rows its
+    own transaction holds is a no-op. Flushes first: a pending submission write would
+    otherwise be sent here, before the scope lock, inverting that order."""
     await db.flush()  # the reload below must not discard the caller's pending changes
     scope = await _scope(db, sa, asg)
     await db.execute(
@@ -270,20 +273,32 @@ async def _lock_scope(
     return scope
 
 
+def _waits_only_on_teacher(evaluation: requirements.Evaluation) -> bool:
+    """Every required non-teacher item (quiz, tests, AI review) is done: what is left is
+    the teacher's."""
+    return not any(
+        i.type not in requirements.TEACHER_TYPES
+        and not i.optional
+        and i.state in ("pending", "running")
+        for i in evaluation.items
+    )
+
+
 async def settle(
     db: AsyncSession, sa: StudentAssignment, *, previous_status: SubmissionStatus | None = None
 ) -> SettleResult:
     """Grade and status of ``sa`` (and its squad) from what is done now. Does not commit.
 
     ``previous_status``: the status before the caller's own transition (a worker applies
-    ``processing_done`` and then settles); the teacher is notified on entering
-    AWAITING_TEACHER_REVIEW relative to it instead of to the status found here.
+    ``processing_done`` and then settles); logged only. The teacher is notified whenever
+    the result waits on the teacher alone (idempotent per submission), so it no longer
+    depends on which status the submission came from.
     """
     asg = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
     if asg is None:
         raise ValueError(f"students_assignment {sa.id} has no assignment")
     plan = plan_for(asg)
-    locked = await _lock_scope(db, sa, asg)
+    locked = await lock_scope(db, sa, asg)
     facts, subs, squad, scope = await gather_facts(db, sa, asg, fresh=True, scope=locked)
     evaluation = requirements.evaluate(
         plan, facts, asg.min_grade, asg.max_grade, round_up=squad is not None
@@ -328,10 +343,17 @@ async def settle(
         await _write_grade(db, latest, scope, squad, evaluation, subs)
     await db.flush()
     new = latest.status
-    before = previous_status if previous_status is not None else old
-    if new == S.AWAITING_TEACHER_REVIEW and before != S.AWAITING_TEACHER_REVIEW:
+    if new == S.AWAITING_TEACHER_REVIEW and _waits_only_on_teacher(evaluation):
+        # Not on merely entering the status: while a quiz (or checks) is still open the work
+        # is not the teacher's to look at yet. The enqueue is idempotent per (teacher,
+        # submission) for good, so a later settle that finds the same wait adds nothing.
         await enqueue_teacher_review_notification(db, latest.id)
     logger.info(
-        "settled", submission_id=latest.id, old=str(old), new=str(new), grade=evaluation.grade
+        "settled",
+        submission_id=latest.id,
+        old=str(old),
+        new=str(new),
+        previous=str(previous_status) if previous_status is not None else None,
+        grade=evaluation.grade,
     )
     return SettleResult(latest.id, old, new, evaluation)

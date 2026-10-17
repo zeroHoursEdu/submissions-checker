@@ -7,8 +7,13 @@ import asyncio
 import pytest
 from sqlalchemy import func, select
 
-from submissions_checker.db.models import StudentAssignment, Submission
-from submissions_checker.db.models.enums import SubmissionStatus, UserRole
+from submissions_checker.db.models import QuizAttempt, StudentAssignment, Submission
+from submissions_checker.db.models.enums import (
+    QuizAttemptStatus,
+    SubmissionSourceType,
+    SubmissionStatus,
+    UserRole,
+)
 from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.services import settle
 from tests.functional._scored_helpers import (
@@ -188,26 +193,109 @@ async def test_concurrent_settles_create_one_upload_less_submission(
         assert n == 1
 
 
-async def test_previous_status_drives_the_teacher_notification(db, teacher, make_student) -> None:
-    """A worker applies processing_done (-> AWAITING_TEACHER_REVIEW) and then settles; the
-    teacher must still hear about it although the status at lock time is already ATR."""
-    _, _, student, sa, sub = await arrange(
-        db, teacher, make_student, config=CFG, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+async def _queued(db, sub) -> int:
+    return await db.scalar(
+        select(func.count())
+        .select_from(TeacherNotificationQueue)
+        .where(TeacherNotificationQueue.submission_id == sub.id)
     )
-    await attempt(db, sub, student.id, score=4, max_score=4, passed=True)
 
-    async def queued() -> int:
-        return await db.scalar(
-            select(func.count())
-            .select_from(TeacherNotificationQueue)
-            .where(TeacherNotificationQueue.submission_id == sub.id)
-        )
 
-    await settle.settle(db, sa)
-    assert await queued() == 0
-    res = await settle.settle(db, sa, previous_status=SubmissionStatus.TESTING)
+async def test_teacher_notified_only_once_the_work_waits_on_them(db, teacher, make_student) -> None:
+    """A quiz still open (failed, attempts left) with teacher items owed parks the work with
+    the teacher but does not ping them; the pass that leaves only their items does, once."""
+    _, _, student, sa, sub = await arrange(db, teacher, make_student, config=CFG)
+    await attempt(db, sub, student.id, score=0, max_score=4, passed=False)
+    res = await settle.settle(db, sa)
     assert res.new_status == SubmissionStatus.AWAITING_TEACHER_REVIEW
-    assert await queued() == 1
+    assert await _queued(db, sub) == 0
+    await attempt(db, sub, student.id, score=4, max_score=4, passed=True)
+    res = await settle.settle(db, sa)
+    assert res.new_status == SubmissionStatus.AWAITING_TEACHER_REVIEW  # unchanged status
+    assert await _queued(db, sub) == 1
+    await settle.settle(db, sa, previous_status=SubmissionStatus.TESTING)
+    assert await _queued(db, sub) == 1  # idempotent per submission
+
+
+async def test_grant_route_settles_a_squad_member(db, client, teacher, make_student) -> None:
+    """Granting the exhausted member of a squad takes the scope lock first, grants and
+    settles: with the teacher's items in, only the quiz is left -> QUIZ_SENT."""
+    sa_a, sa_b, sub = await squad_of_two(
+        db,
+        teacher,
+        make_student,
+        config=CFG,
+        scores={"report": 4, "accepted": 1},
+        status=SubmissionStatus.FAILED,
+    )
+    await attempt(db, sub, sa_a.student_id, score=1, max_score=1, passed=True)
+    for _ in range(2):
+        await attempt(db, sub, sa_b.student_id, score=0, max_score=1, passed=False)
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/grant-quiz-attempt",
+        data={"student_id": str(sa_b.student_id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.QUIZ_SENT
+    assert sub.source_metadata["quiz_extra_attempts"] == {str(sa_b.student_id): 1}
+
+
+async def test_quiz_starts_on_rejected_older_version(
+    db, client, teacher, make_user, make_student
+) -> None:
+    """A rejected first version keeps the attempts; a newer version is in. The quiz item is
+    still pending, so the quiz starts — on the submission the attempts hang off."""
+    subject, asg, student, sa, sub1 = await arrange(
+        db, teacher, make_student, config=CFG, status=SubmissionStatus.FAILED
+    )
+    sub1.source_metadata = {settle.REJECTED_KEY: {"reason": "copy"}}
+    await db.commit()
+    await attempt(db, sub1, student.id, score=0, max_score=1, passed=False)
+    sub2 = Submission(
+        students_assignment_id=sa.id,
+        source_type=SubmissionSourceType.QUIZ_ONLY,
+        source_metadata={},
+        status=SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        plugin_config_id=sub1.plugin_config_id,
+        test_results={"skipped": True, "reason": "requirements"},
+    )
+    db.add(sub2)
+    await db.commit()
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 303 and "/portal/quiz/" in r.headers["location"], r.text
+    new = await db.get(QuizAttempt, int(r.headers["location"].rsplit("/", 1)[-1]))
+    assert new.submission_id == sub1.id
+
+
+async def test_in_progress_attempt_resumes_before_any_refusal(
+    db, client, teacher, make_user, make_student
+) -> None:
+    subject, asg, student, sa, sub = await arrange(
+        db, teacher, make_student, config=CFG, status=SubmissionStatus.COMPLETED
+    )
+    running = await attempt(
+        db,
+        sub,
+        student.id,
+        score=0,
+        max_score=1,
+        passed=False,
+        status=QuizAttemptStatus.IN_PROGRESS,
+    )
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/portal/quiz/{running.id}"
 
 
 async def test_quiz_before_upload_on_upload_source(db, client, teacher, make_user, make_student):

@@ -1893,19 +1893,24 @@ async def teacher_grant_quiz_attempt(
     Attempt history is kept — only the allowance and the status change.
     """
     submission = await _load_submission_for_teacher(db, submission_id, current_user)
-    target = student_id if student_id is not None else submission.students_assignment.student_id
+    owner_sa = submission.students_assignment
+    target = student_id if student_id is not None else owner_sa.student_id
+    # Read before locking: the lock's reload of the assignment rows drops loaded relations.
+    assignment = owner_sa.subjects_assignment
+    board_url = _board_url(submission)
+    # Lock order is scope -> submission (settle's). The grant writes the submission, so take
+    # the scope lock first, then re-read what the grant decides on under it.
+    await settle.lock_scope(db, owner_sa, assignment)
+    await db.refresh(submission, attribute_names=["status", "source_metadata"])
     try:
         total = await quiz_grants.grant_extra_attempt(db, submission, target)
     except quiz_grants.GrantError as exc:
         raise HTTPException(
             status_code=409, detail="Submission is not in a state that allows this action"
         ) from exc
-    # Read before settle: its locking reload of the assignment rows drops loaded relations.
-    assignment = submission.students_assignment.subjects_assignment
-    board_url = _board_url(submission)
     # The grant reopened the quiz item; settle places the status from everything else (it
     # waits on the teacher when their items are still open — the student can start anyway).
-    await settle.settle(db, submission.students_assignment)
+    await settle.settle(db, owner_sa)
 
     await audit(
         db,

@@ -512,6 +512,16 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
     from submissions_checker.services import squads  # local: avoids a module-level cycle
 
     shares = await squads.shared_submissions(db, subject_id)
+    # Unenrolled members no longer block a squad (as in quiz_grants.students_on).
+    enrolled = set(
+        (
+            await db.execute(
+                select(SubjectsStudents.student_id).where(SubjectsStudents.subject_id == subject_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     rows = []
     for row in result:
@@ -530,7 +540,11 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
             waiting = (
                 status in (SubmissionStatus.QUIZ_SENT, SubmissionStatus.AWAITING_TEACHER_REVIEW)
                 and row.student_id in share.passed_student_ids
-                and any(m.student_id not in share.passed_student_ids for m in share.squad.members)
+                and any(
+                    m.student_id not in share.passed_student_ids
+                    for m in share.squad.members
+                    if m.student_id in enrolled
+                )
             )
         quiz_score = breakdown.get("quiz_score")
         review_score = breakdown.get("quality_score")
