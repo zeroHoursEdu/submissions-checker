@@ -170,3 +170,20 @@ def test_overlong_repo_or_ref_is_rejected() -> None:
     assert gh.parse_repo_url("https://github.com/a/b/tree/" + "r" * 501) is None
     assert gh.parse_repo_url("https://github.com/a/b/tree/m/" + "p" * 501) is None
     assert gh.parse_repo_url("https://github.com/a/" + "r" * 100) is not None
+
+
+def test_unterminated_run_openers_parse_fast() -> None:
+    body = "<w:t " * 200_000 + "</w:p><w:p>" + _run("https://github.com/a/fast2")
+    start = time.monotonic()
+    ref = gh.find_repo_link([("r.docx", _docx(body))])
+    assert time.monotonic() - start < 2
+    assert ref is not None
+    assert ref.repo == "fast2"
+
+
+def test_tab_element_is_not_a_text_run() -> None:
+    body = "<w:r><w:tab/><w:t>https://github.com/a/tabbed</w:t></w:r>"
+    ref = gh.find_repo_link([("r.docx", _docx(body))])
+    assert ref is not None
+    assert ref.repo == "tabbed"
+    assert gh._RUN_RE.findall("<w:tab/>") == []

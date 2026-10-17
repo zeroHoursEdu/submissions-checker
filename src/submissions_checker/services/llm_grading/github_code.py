@@ -25,7 +25,9 @@ MAX_PDF_PAGES = 200
 MAX_REPO_LEN = 100
 MAX_REF_LEN = 500
 
-_RUN_RE = re.compile(r"<w:t[^>]*>([^<]*)</w:t>")
+# Attributes may not contain "<" or ">", so a scan never runs past the next tag
+# (an unterminated "<w:t " cannot make this quadratic) and <w:tab/> is not a text run.
+_RUN_RE = re.compile(r"<w:t(?:\s[^<>]*)?>([^<]*)</w:t>")
 
 _URL_RE = re.compile(
     r"https?://(?:www\.)?github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/([A-Za-z0-9._-]+?)"
