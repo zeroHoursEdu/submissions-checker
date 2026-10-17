@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
+from submissions_checker.core.i18n import get_vocab
 from submissions_checker.db.models import Submission
+from submissions_checker.db.models.enums import SubmissionStatus
 from tests.functional.test_squad_quiz import _answer_all, _start, _upload
 from tests.functional.test_squad_submission import _arrange, _client, _lock_pair
 
@@ -24,7 +26,11 @@ async def test_board_and_grid_show_shared_submission_for_both_members(
 
     board = await teacher_client.get(f"/teacher/subjects/{subject.id}/assignments/{asg.id}")
     assert board.text.count("👥") >= 2  # both rows carry the badge
-    assert board.text.count("QUIZ_SENT") >= 2 or board.text.count("Тест") >= 2
+    # B's half is still pending and the teacher's acceptance is owed, so settle parks the
+    # shared submission with the teacher; both rows show that one status.
+    sub = (await db.execute(select(Submission))).scalar_one()
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    assert board.text.count(get_vocab(None)["common"]["status_awaiting_review"]) >= 2
 
     page = await teacher_client.get(f"/teacher/subjects/{subject.id}")
     assert "waiting_partner" in page.text or "чекаємо" in page.text

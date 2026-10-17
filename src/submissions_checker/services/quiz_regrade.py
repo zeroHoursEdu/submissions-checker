@@ -20,13 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from submissions_checker.core.logging import get_logger
-from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
     QuizAttemptStatus,
     QuizDisputeStatus,
-    SubmissionStatus,
 )
 from submissions_checker.db.models.outbox import OutboxMessage
 from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute, QuizQuestionOverride
@@ -34,14 +32,9 @@ from submissions_checker.db.models.quiz_template import QuizAttempt
 from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.submission import Submission
 from submissions_checker.db.models.user import User
-from submissions_checker.services import quiz_open
-from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services import settle
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.quiz_scoring import apply_question_overrides, score_attempt
-from submissions_checker.services.squads import quiz_complete
-from submissions_checker.workers.tasks.notification_tasks import (
-    enqueue_teacher_review_notification,
-)
 
 logger = get_logger(__name__)
 
@@ -140,49 +133,17 @@ async def regrade_question(
 
 
 async def _advance_submission(db: AsyncSession, attempt: QuizAttempt) -> None:
-    """Move a submission whose quiz outcome just flipped to passing, then re-grade it."""
+    """Settle the student's assignment whose quiz outcome just flipped to passing.
+
+    settle covers what the old per-mode edges did: a FAILED submission whose quiz now passes
+    moves on (a rejection stays failed), a COMPLETED one gets its quiz component re-graded,
+    and one waiting on the teacher keeps waiting."""
     submission = attempt.submission
     if submission is None:
         return
-
-    if await quiz_open.is_scored_submission(db, submission):
-        # The quiz is one half; without the teacher's points it waits on the teacher.
-        to_teacher = not await quiz_open.scores_complete_for(db, submission)
-    else:
-        to_teacher = attempt.config_snapshot.get("review_mode") == "quiz_then_teacher"
-    status = submission.status
-
-    if status == SubmissionStatus.QUIZ_SENT:
-        # Never finished. The ordinary quiz edges apply — but a squad-shared submission
-        # only moves once every enrolled member has a passing attempt.
-        if not await quiz_complete(db, submission):
-            return
-        event = "quiz_passed_teacher" if to_teacher else "quiz_passed"
-    elif status == SubmissionStatus.FAILED:
-        # The terminal-state gap: only an accepted dispute can move a failed submission.
-        if not await quiz_complete(db, submission):
-            return
-        event = "dispute_regrade_passed_teacher" if to_teacher else "dispute_regrade_passed"
-    elif status == SubmissionStatus.COMPLETED:
-        # Already passed on some attempt; the quiz component may still have risen.
-        await finalize_grade(db, submission)
-        return
-    elif status == SubmissionStatus.AWAITING_TEACHER_REVIEW:
-        # The teacher's approval will call finalize_grade; writing a grade now pre-empts it.
-        return
-    else:
-        logger.warning(
-            "dispute_regrade_unexpected_status",
-            submission_id=submission.id,
-            status=str(status),
-        )
-        return
-
-    transition(submission, event)
-    if to_teacher:
-        await enqueue_teacher_review_notification(db, submission.id)
-    else:
-        await finalize_grade(db, submission)
+    sa = await db.get(StudentAssignment, submission.students_assignment_id)
+    if sa is not None:
+        await settle.settle(db, sa)
 
 
 async def resolve_dispute(

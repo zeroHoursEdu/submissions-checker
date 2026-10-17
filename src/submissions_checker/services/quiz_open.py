@@ -1,18 +1,20 @@
-"""Open a quiz with nothing uploaded (``review_mode: quiz_and_teacher_scores``).
+"""Open a quiz for an assignment whose plan has a ``quiz`` requirement.
 
-The quiz machinery hangs off a Submission; in this mode the student never uploads, so the
-first time they open the quiz an upload-less QUIZ_ONLY submission is created and moved
-straight to QUIZ_SENT. An existing submission (an old ZIP on prod, a squad-mate's) is
-reused. Also the two questions the quiz-outcome paths ask about a scored submission.
+The quiz machinery hangs off a Submission. Requirements are independent, so the quiz opens
+whenever its item is pending — before any upload, or with nothing ever uploaded. The
+submission the student's attempts already hang off (an upload, a squad-mate's) is reused;
+with none, an upload-less QUIZ_ONLY submission is created and moved to QUIZ_SENT. settle
+decides the status from there.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import (
+    QuizAttempt,
     StudentAssignment,
     Subject,
     SubjectsAssignment,
@@ -20,10 +22,11 @@ from submissions_checker.db.models import (
 )
 from submissions_checker.db.models.enums import SubmissionSourceType, SubmissionStatus
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import squads, teacher_scores
+from submissions_checker.services import settle, squads
 
-# A legacy upload that never reached the quiz (failed archive or checks) must not trap the
-# student: in this mode the quiz needs no file, so such a dead end opens a fresh submission.
+# An upload that never got through its checks (failed archive or tests) must not trap the
+# student: the quiz needs no file, so such a dead end opens a fresh submission — unless the
+# student already has attempts on it, which a fresh submission would silently reset.
 # An exhausted quiz (FAILED) is NOT reopened — that is the gate; the teacher grants attempts.
 REOPENABLE = frozenset({SubmissionStatus.VALIDATION_FAILED, SubmissionStatus.TEST_FAILED})
 
@@ -35,20 +38,26 @@ class QuizOpenError(Exception):
 async def open_quiz_submission(
     db: AsyncSession, sa: StudentAssignment, student_id: int
 ) -> Submission:
-    """The submission the student's quiz hangs off, creating a QUIZ_ONLY one if none exists.
+    """The submission the student's quiz hangs off, creating a QUIZ_ONLY one if none fits.
 
-    Locks the student's assignment row first so a double click cannot create two. Does not
-    commit — the caller's attempt creation commits both together.
+    Locks the student's assignment row first so a double click cannot create two (NO KEY
+    UPDATE, the same lock settle takes: inserting the submission or attempt takes KEY SHARE
+    on this row). Does not commit — the caller's attempt creation commits both together.
     """
     await db.execute(
-        select(StudentAssignment.id).where(StudentAssignment.id == sa.id).with_for_update()
+        select(StudentAssignment.id)
+        .where(StudentAssignment.id == sa.id)
+        .with_for_update(key_share=True)
     )
-    existing = await squads.latest_submission(db, sa)
-    if existing is not None and existing.status not in REOPENABLE:
-        return existing
     asg = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
-    if asg is None or not teacher_scores.is_scored_mode(asg.config):
+    if asg is None or not settle.plan_for(asg).has("quiz"):
         raise QuizOpenError("Quiz not available for this submission")
+    subs, _scope = await settle.scope_submissions(db, sa, asg)
+    existing = await settle.quiz_host(db, subs)
+    if existing is not None and (
+        existing.status not in REOPENABLE or await _has_attempts(db, existing)
+    ):
+        return existing
     subject = await db.get(Subject, asg.subject_id)
     squad = None
     if subject is not None and subject.squad_max_size is not None:
@@ -72,37 +81,18 @@ async def open_quiz_submission(
         status=SubmissionStatus.PENDING,
         plugin_config_id=config_id,
         squad_id=squad.id if squad else None,
-        test_results={"skipped": True, "reason": teacher_scores.MODE},
+        test_results={"skipped": True, "reason": "requirements"},
     )
     db.add(sub)
     await db.flush()
     if squad:
         squads.lock_on_submit(squad)
-    transition(sub, "quiz_opened")
+    transition(sub, "awaiting_quiz")  # PENDING -> QUIZ_SENT; settle refines it later
     return sub
 
 
-async def _assignment_of(
-    db: AsyncSession, submission: Submission
-) -> tuple[StudentAssignment, SubjectsAssignment] | None:
-    sa = await db.get(StudentAssignment, submission.students_assignment_id)
-    asg = await db.get(SubjectsAssignment, sa.subjects_assignment_id) if sa else None
-    if sa is None or asg is None:
-        return None
-    return sa, asg
-
-
-async def is_scored_submission(db: AsyncSession, submission: Submission) -> bool:
-    """True when the submission's assignment is *currently* quiz_and_teacher_scores."""
-    pair = await _assignment_of(db, submission)
-    return pair is not None and teacher_scores.is_scored_mode(pair[1].config)
-
-
-async def scores_complete_for(db: AsyncSession, submission: Submission) -> bool:
-    """True when the teacher has entered every required criterion for this submission."""
-    pair = await _assignment_of(db, submission)
-    if pair is None:
-        return False
-    sa, asg = pair
-    crits = teacher_scores.criteria((asg.config or {}).get("grading"))
-    return teacher_scores.is_complete(crits, sa.teacher_scores)
+async def _has_attempts(db: AsyncSession, submission: Submission) -> bool:
+    count = await db.scalar(
+        select(func.count(QuizAttempt.id)).where(QuizAttempt.submission_id == submission.id)
+    )
+    return bool(count)

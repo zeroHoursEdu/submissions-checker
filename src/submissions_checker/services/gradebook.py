@@ -525,8 +525,12 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
             if status is None:
                 status = share.submission.status
                 breakdown = share.submission.grade_breakdown or {}
+            # Settle parks a squad with the teacher while a partner's half is still open
+            # (when teacher items are owed too), so the status alone cannot say "waiting".
             waiting = (
-                status == SubmissionStatus.QUIZ_SENT and row.student_id in share.passed_student_ids
+                status in (SubmissionStatus.QUIZ_SENT, SubmissionStatus.AWAITING_TEACHER_REVIEW)
+                and row.student_id in share.passed_student_ids
+                and any(m.student_id not in share.passed_student_ids for m in share.squad.members)
             )
         quiz_score = breakdown.get("quiz_score")
         review_score = breakdown.get("quality_score")

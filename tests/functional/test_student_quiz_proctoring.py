@@ -87,7 +87,14 @@ async def _arrange_quiz(
     await db.commit()
     await db.refresh(cfg)
 
-    sub_a = SubjectsAssignment(subject_id=subject.id, title="HW1", code=assignment_code, config={})
+    # A quiz assignment: settle reads the plan from the assignment's config, and an empty
+    # config is tests_only (no quiz item at all).
+    sub_a = SubjectsAssignment(
+        subject_id=subject.id,
+        title="HW1",
+        code=assignment_code,
+        config={"review_mode": "quiz_only"},
+    )
     db.add(sub_a)
     await db.commit()
     await db.refresh(sub_a)

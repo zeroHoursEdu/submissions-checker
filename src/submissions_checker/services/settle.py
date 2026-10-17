@@ -148,14 +148,18 @@ async def _scope(db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignmen
     return await squads.scope_sa_ids(db, sa.student_id, asg.subject_id, asg.id) or [sa.id]
 
 
-async def gather_facts(
-    db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment, *, fresh: bool = False
-) -> tuple[requirements.Facts, list[Submission], Squad | None, list[int]]:
-    """(facts, scope submissions newest first, squad, scope SA ids).
-
-    ``fresh`` reloads submissions already in the session from the database (settle uses it
-    after taking its lock, having flushed first, so nothing pending is lost)."""
-    scope = await _scope(db, sa, asg)
+async def scope_submissions(
+    db: AsyncSession,
+    sa: StudentAssignment,
+    asg: SubjectsAssignment,
+    *,
+    scope: list[int] | None = None,
+    fresh: bool = False,
+) -> tuple[list[Submission], list[int]]:
+    """(the scope's submissions newest first, the scope's SA ids). ``scope`` reuses ids the
+    caller already resolved (and locked) instead of looking them up again."""
+    if scope is None:
+        scope = await _scope(db, sa, asg)
     subs = list(
         (
             await db.execute(
@@ -168,6 +172,23 @@ async def gather_facts(
         .scalars()
         .all()
     )
+    return subs, scope
+
+
+async def gather_facts(
+    db: AsyncSession,
+    sa: StudentAssignment,
+    asg: SubjectsAssignment,
+    *,
+    fresh: bool = False,
+    scope: list[int] | None = None,
+) -> tuple[requirements.Facts, list[Submission], Squad | None, list[int]]:
+    """(facts, scope submissions newest first, squad, scope SA ids).
+
+    ``fresh`` reloads submissions already in the session from the database (settle uses it
+    after taking its lock, having flushed first, so nothing pending is lost). ``scope``:
+    the SA ids settle already locked, so the scope is not recomputed under the lock."""
+    subs, scope = await scope_submissions(db, sa, asg, scope=scope, fresh=fresh)
     squad = await squads.active_squad(db, asg.subject_id, sa.student_id)
     tests, ai = _code_facts(subs)
     facts = requirements.Facts(
@@ -226,20 +247,27 @@ async def _write_grade(
     await db.flush()
 
 
-async def _lock_scope(db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment) -> None:
+async def _lock_scope(
+    db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssignment
+) -> list[int]:
     """Row-lock every StudentAssignment in the scope (ordered by id, so squad members never
     deadlock each other) and reload them. Two members finishing their last attempts at once
     then settle one after the other, and the second reads the facts only after the first
-    committed — under READ COMMITTED it sees the first one's pass."""
+    committed — under READ COMMITTED it sees the first one's pass.
+
+    NO KEY UPDATE, not UPDATE: inserting a submission or quiz attempt takes KEY SHARE on the
+    referenced row, which plain FOR UPDATE would wait on — two squad members could then each
+    hold what the other needs. Returns the locked scope's SA ids."""
     await db.flush()  # the reload below must not discard the caller's pending changes
     scope = await _scope(db, sa, asg)
     await db.execute(
         select(StudentAssignment)
         .where(StudentAssignment.id.in_(scope))
         .order_by(StudentAssignment.id)
-        .with_for_update()
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     )
+    return scope
 
 
 async def settle(
@@ -255,8 +283,8 @@ async def settle(
     if asg is None:
         raise ValueError(f"students_assignment {sa.id} has no assignment")
     plan = plan_for(asg)
-    await _lock_scope(db, sa, asg)
-    facts, subs, squad, scope = await gather_facts(db, sa, asg, fresh=True)
+    locked = await _lock_scope(db, sa, asg)
+    facts, subs, squad, scope = await gather_facts(db, sa, asg, fresh=True, scope=locked)
     evaluation = requirements.evaluate(
         plan, facts, asg.min_grade, asg.max_grade, round_up=squad is not None
     )

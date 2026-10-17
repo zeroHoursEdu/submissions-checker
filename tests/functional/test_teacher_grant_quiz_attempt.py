@@ -85,7 +85,8 @@ async def _arrange(db, teacher, make_student, *, quiz=QUIZ, status=SubmissionSta
         source_metadata={},
         status=status,
         plugin_config_id=cfg.id,
-        test_results={"tests": []},
+        # tests_then_quiz only reaches the quiz with scored tests; settle needs that score.
+        test_results={"tests": [], "score": 1, "max_score": 1},
     )
     db.add(sub)
     await db.commit()

@@ -97,7 +97,14 @@ async def _arrange_quiz(
     await db.commit()
     await db.refresh(cfg)
 
-    sub_a = SubjectsAssignment(subject_id=subject.id, title="HW1", code=assignment_code, config={})
+    # A quiz assignment: settle reads the plan from the assignment's config, and an empty
+    # config is tests_only (no quiz item at all).
+    sub_a = SubjectsAssignment(
+        subject_id=subject.id,
+        title="HW1",
+        code=assignment_code,
+        config={"review_mode": "quiz_only"},
+    )
     db.add(sub_a)
     await db.commit()
     await db.refresh(sub_a)
@@ -244,28 +251,50 @@ async def test_start_quiz_resumes_existing_in_progress(
     assert len(attempts) == 1
 
 
-async def test_start_quiz_redirects_passed_attempt_to_result(
+async def test_start_quiz_refused_once_passed(
     student_client: AsyncClient, db, student_user
 ) -> None:
+    # The gate reads the quiz item's state, not the submission status: a passed quiz is done
+    # and does not open again (no new attempt), whatever status the submission shows.
     await _consent(db, student_user.student_id)
     subject, sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
-    passed = await _make_attempt(
-        db, sub.id, cfg, status=QuizAttemptStatus.COMPLETED, is_passed=True
-    )
+    await _make_attempt(db, sub.id, cfg, status=QuizAttemptStatus.COMPLETED, is_passed=True)
     resp = await student_client.get(
         f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz",
         follow_redirects=False,
     )
-    assert resp.status_code == 303
-    assert resp.headers["location"] == f"/portal/quiz/{passed.id}/result"
+    assert resp.status_code == 403
+    attempts = (
+        (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))
+        .scalars()
+        .all()
+    )
+    assert len(attempts) == 1
 
 
-async def test_start_quiz_requires_quiz_sent_status(
+async def test_start_quiz_opens_while_upload_is_pending(
+    student_client: AsyncClient, db, student_user
+) -> None:
+    # The quiz is an independent requirement: it opens while the upload is still waiting
+    # for its checks (the old gate demanded QUIZ_SENT). The attempt hangs off that upload.
+    await _consent(db, student_user.student_id)
+    subject, sa, sub, _cfg = await _arrange_quiz(
+        db, student_user.student_id, submission_status=SubmissionStatus.PENDING
+    )
+    resp = await student_client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert resp.status_code == 303 and "/portal/quiz/" in resp.headers["location"]
+    attempt = await db.get(QuizAttempt, int(resp.headers["location"].rsplit("/", 1)[-1]))
+    assert attempt.submission_id == sub.id
+
+
+async def test_start_quiz_refused_on_completed_submission(
     student_client: AsyncClient, db, student_user
 ) -> None:
     await _consent(db, student_user.student_id)
     subject, sa, _sub, _cfg = await _arrange_quiz(
-        db, student_user.student_id, submission_status=SubmissionStatus.PENDING
+        db, student_user.student_id, submission_status=SubmissionStatus.COMPLETED
     )
     resp = await student_client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz")
     assert resp.status_code == 403
@@ -274,9 +303,10 @@ async def test_start_quiz_requires_quiz_sent_status(
 # ── Multi-attempt limit ──────────────────────────────────────────────────────
 
 
-async def test_start_quiz_max_attempts_redirects_to_last_result(
+async def test_start_quiz_refused_when_attempts_exhausted(
     student_client: AsyncClient, db, student_user
 ) -> None:
+    # An exhausted quiz is a failed item; the gate refuses before anything is created.
     await _consent(db, student_user.student_id)
     cfg_with_max = {**QUIZ_CONFIG, "max_quiz_attempts": 2}
     subject, sa, sub, cfg = await _arrange_quiz(db, student_user.student_id, quiz_cfg=cfg_with_max)
@@ -287,8 +317,8 @@ async def test_start_quiz_max_attempts_redirects_to_last_result(
         f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz",
         follow_redirects=False,
     )
-    assert resp.status_code == 303
-    assert resp.headers["location"] == f"/portal/quiz/{last.id}/result"
+    assert resp.status_code == 403
+    assert last.id  # the finished attempts stay; the result page is reached from them
     # No new attempt created.
     attempts = (
         (await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id)))
@@ -402,7 +432,11 @@ async def test_submit_last_attempt_failure_marks_submission_failed(
     student_client: AsyncClient, db, student_user
 ) -> None:
     await _consent(db, student_user.student_id)
-    _subject, _sa, sub, cfg = await _arrange_quiz(db, student_user.student_id)
+    # settle reads the cap from the pinned config (as the grant logic does), so the
+    # config carries it, not only the attempt's snapshot.
+    _subject, _sa, sub, cfg = await _arrange_quiz(
+        db, student_user.student_id, quiz_cfg={**QUIZ_CONFIG, "max_quiz_attempts": 1}
+    )
     attempt = await _make_attempt(
         db, sub.id, cfg, config_snapshot={"pass_threshold_pct": 0.6, "max_quiz_attempts": 1}
     )

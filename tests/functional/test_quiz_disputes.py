@@ -98,8 +98,11 @@ async def _arrange_quiz(
     owner_id: int | None = None,
     quiz_cfg: dict | None = None,
     submission_status: SubmissionStatus = SubmissionStatus.QUIZ_SENT,
+    review_mode: str = "quiz_only",
 ) -> tuple[Subject, StudentAssignment, Submission, SubjectPluginConfig]:
-    """Build a fully-pinned submission ready for a quiz attempt."""
+    """Build a fully-pinned submission ready for a quiz attempt. The assignment's current
+    ``review_mode`` decides where a regraded pass lands (settle reads the plan, not the
+    attempt's snapshot)."""
     subject = Subject(name=f"Quizland-{student_id}-{owner_id}", owner_id=owner_id)
     db.add(subject)
     await db.commit()
@@ -118,7 +121,9 @@ async def _arrange_quiz(
     await db.commit()
     await db.refresh(cfg)
 
-    sub_a = SubjectsAssignment(subject_id=subject.id, title="HW1", code="hw1", config={})
+    sub_a = SubjectsAssignment(
+        subject_id=subject.id, title="HW1", code="hw1", config={"review_mode": review_mode}
+    )
     db.add(sub_a)
     await db.commit()
     await db.refresh(sub_a)
@@ -885,6 +890,7 @@ async def test_accept_routes_quiz_then_teacher_back_to_review(
         student_user.student_id,
         owner_id=owner.id,
         submission_status=SubmissionStatus.FAILED,
+        review_mode="quiz_then_teacher",
     )
     attempt = await _make_attempt(
         db,

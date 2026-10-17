@@ -63,7 +63,7 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.group import Group
-from submissions_checker.services import quiz_grants, squads, teacher_scores
+from submissions_checker.services import quiz_grants, settle, squads, teacher_scores
 from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
@@ -1900,6 +1900,12 @@ async def teacher_grant_quiz_attempt(
         raise HTTPException(
             status_code=409, detail="Submission is not in a state that allows this action"
         ) from exc
+    # Read before settle: its locking reload of the assignment rows drops loaded relations.
+    assignment = submission.students_assignment.subjects_assignment
+    board_url = _board_url(submission)
+    # The grant reopened the quiz item; settle places the status from everything else (it
+    # waits on the teacher when their items are still open — the student can start anyway).
+    await settle.settle(db, submission.students_assignment)
 
     await audit(
         db,
@@ -1912,7 +1918,6 @@ async def teacher_grant_quiz_attempt(
         extra_attempts=total,
     )
 
-    assignment = submission.students_assignment.subjects_assignment
     user_id = await db.scalar(select(User.id).where(User.student_id == target))
     if user_id is not None:
         # A squad member's own students_assignments row, not the uploader's.
@@ -1931,7 +1936,7 @@ async def teacher_grant_quiz_attempt(
             f"/portal/subjects/{assignment.subject_id}/assignments/{own_sa_id}",
         )
     await db.commit()
-    return RedirectResponse(url=_board_url(submission), status_code=303)
+    return RedirectResponse(url=board_url, status_code=303)
 
 
 @router.post("/subjects/{subject_id}/assignments/{sa_id}/scores")

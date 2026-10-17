@@ -225,3 +225,21 @@ async def submissions_of(db, sa: StudentAssignment) -> list[Submission]:
         select(Submission).where(Submission.students_assignment_id == sa.id).order_by(Submission.id)
     )
     return list(rows.scalars().all())
+
+
+async def start_and_answer_correctly(client, subject_id: int, sa_id: int) -> int:
+    """Open the quiz over HTTP as the authenticated student and submit every question with
+    the right option (``quiz_with``'s single question: option 1). Returns the attempt id.
+
+    The bulk ``/submit`` re-reads every answer from its form, so answering and submitting
+    are one post."""
+    r = await client.get(
+        f"/portal/subjects/{subject_id}/assignments/{sa_id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 303 and "/portal/quiz/" in r.headers["location"], r.text
+    attempt_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    r = await client.post(
+        f"/portal/quiz/{attempt_id}/submit", data={"answer_0": "1"}, follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    return attempt_id

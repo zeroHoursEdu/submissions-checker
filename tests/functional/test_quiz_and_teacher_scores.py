@@ -296,13 +296,28 @@ async def test_second_open_reuses_the_submission(
 async def test_open_refused_for_other_modes(
     client: AsyncClient, db, teacher, make_user, make_student
 ) -> None:
+    # Any plan with a quiz item opens it without an upload now (quiz_then_teacher included);
+    # a plan without one still refuses.
     subject, _asg, student, sa = await _arrange_scored_no_sub(
-        db, teacher, make_student, mode="quiz_then_teacher"
+        db, teacher, make_student, mode="tests_only"
     )
     await _as_student(client, db, make_user, student)
     r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
     assert r.status_code == 403
     assert await _subs_of(db, sa) == []
+
+
+async def test_quiz_then_teacher_opens_without_upload(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _asg, student, sa = await _arrange_scored_no_sub(
+        db, teacher, make_student, mode="quiz_then_teacher"
+    )
+    await _as_student(client, db, make_user, student)
+    r = await client.get(_quiz_url(subject, sa), follow_redirects=False)
+    assert r.status_code == 303 and "/portal/quiz/" in r.headers["location"]
+    (sub,) = await _subs_of(db, sa)
+    assert sub.source_type == SubmissionSourceType.QUIZ_ONLY
 
 
 async def test_pass_without_points_goes_to_teacher(
@@ -335,10 +350,15 @@ async def test_fail_with_attempts_left_stays_open(
     client: AsyncClient, db, teacher, make_user, make_student
 ) -> None:
     subject, _asg, student, sa = await _arrange_scored_no_sub(db, teacher, make_student)
+    url = _quiz_url(subject, sa)  # before _subs_of expires the instances
     await _as_student(client, db, make_user, student)
     await _open_and_answer(client, db, subject, sa, "0")
     (sub,) = await _subs_of(db, sa)
-    assert sub.status == SubmissionStatus.QUIZ_SENT
+    # The teacher's points are still owed too, so settle parks it with the teacher; the quiz
+    # item stays pending and the student can retry from there.
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    r = await client.get(url, follow_redirects=False)
+    assert r.status_code == 303 and "/portal/quiz/" in r.headers["location"]
 
 
 async def test_legacy_quiz_then_teacher_attempt_routes_by_current_mode(

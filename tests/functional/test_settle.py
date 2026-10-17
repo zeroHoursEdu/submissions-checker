@@ -8,10 +8,18 @@ import pytest
 from sqlalchemy import func, select
 
 from submissions_checker.db.models import StudentAssignment, Submission
-from submissions_checker.db.models.enums import SubmissionStatus
+from submissions_checker.db.models.enums import SubmissionStatus, UserRole
 from submissions_checker.db.models.teacher_notification_queue import TeacherNotificationQueue
 from submissions_checker.services import settle
-from tests.functional._scored_helpers import CFG, arrange, attempt, squad_of_two, submissions_of
+from tests.functional._scored_helpers import (
+    CFG,
+    arrange,
+    attempt,
+    squad_of_two,
+    start_and_answer_correctly,
+    submissions_of,
+)
+from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio
 
@@ -200,3 +208,44 @@ async def test_previous_status_drives_the_teacher_notification(db, teacher, make
     res = await settle.settle(db, sa, previous_status=SubmissionStatus.TESTING)
     assert res.new_status == SubmissionStatus.AWAITING_TEACHER_REVIEW
     assert await queued() == 1
+
+
+async def test_quiz_before_upload_on_upload_source(db, client, teacher, make_user, make_student):
+    """source: upload with tests + quiz: the quiz opens before any ZIP exists."""
+    cfg = {
+        "max_grade": 16,
+        "requirements": [
+            {"type": "tests", "key": "tests", "points": 8},
+            {"type": "quiz", "key": "quiz", "points": 8},
+        ],
+    }
+    subject, asg, student, sa = await arrange(
+        db, teacher, make_student, config=cfg, with_submission=False
+    )
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 303 and "/portal/quiz/" in r.headers["location"], r.text
+
+
+async def test_quiz_pass_runs_settle(db, client, teacher, make_user, make_student):
+    """Passing the last required item over HTTP completes the work."""
+    subject, asg, student, sa, sub = await arrange(
+        db, teacher, make_student, config=CFG, scores={"report": 4, "accepted": 1}
+    )
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    attempt_id = await start_and_answer_correctly(client, subject.id, sa.id)
+    r = await client.post(f"/portal/quiz/{attempt_id}/submit", follow_redirects=False)
+    assert r.status_code in (200, 303)  # already terminal: straight to the result
+    await db.refresh(sa)
+    assert sa.grade == 12  # 8 + 4 + 0
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.COMPLETED
+    # Once the quiz item is done it does not open again.
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 403

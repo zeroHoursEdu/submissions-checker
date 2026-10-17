@@ -26,7 +26,6 @@ from submissions_checker.core import metrics
 from submissions_checker.core.i18n import get_vocab
 from submissions_checker.core.logging import get_logger
 from submissions_checker.core.rate_limit import client_ip
-from submissions_checker.core.state_machine import transition
 from submissions_checker.core.templates import render
 from submissions_checker.db.models import (
     OutboxMessage,
@@ -50,11 +49,10 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.quiz_dispute import QuizQuestionDispute
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import quiz_open, squads, teacher_scores
+from submissions_checker.services import quiz_open, settle, squads
 from submissions_checker.services.air_raid.base import AirRaidProviderError
 from submissions_checker.services.air_raid.geo import resolve_region
 from submissions_checker.services.audit import audit
-from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.quiz_events import (
     INFORMATIONAL_EVENT_TYPES,
@@ -70,7 +68,6 @@ from submissions_checker.services.quiz_scoring import (
 from submissions_checker.services.quiz_split import split_draw
 from submissions_checker.services.storage import StorageService
 from submissions_checker.workers.tasks.notification_tasks import (
-    enqueue_teacher_review_notification,
     push_dispute_notifications,
 )
 
@@ -636,45 +633,13 @@ async def _grade_and_finalize(
 
     attempts_left: int | None = None
     submission = attempt.submission
-    # Only a submission still sitting at QUIZ_SENT can be moved by a quiz outcome. Anything
-    # else (already completed, already handed to a teacher) means a stale attempt finishing
-    # late; record the attempt but leave the submission where it is rather than 500-ing the
-    # student with an InvalidTransitionError.
-    if submission and submission.status == SubmissionStatus.QUIZ_SENT:
-        if is_passed:
-            # The submission may be shared by a squad, so a passing attempt is not enough on
-            # its own — `flush` first so `quiz_complete` sees this attempt's `is_passed` write.
-            await db.flush()
-            # Serialise finalisation on the submission row: two squad-mates passing at the
-            # same instant must not both observe QUIZ_SENT and both transition. Whichever
-            # gets the lock first finishes; the loser's refreshed status is authoritative,
-            # not the (possibly stale) status read at the top of this function.
-            await db.refresh(submission, attribute_names=["status"], with_for_update=True)
-            if submission.status == SubmissionStatus.QUIZ_SENT and await squads.quiz_complete(
-                db, submission
-            ):
-                # quiz_and_teacher_scores (decided by the assignment's *current* mode, so an
-                # attempt started under an older config lands the same way): the quiz is one
-                # half; complete only if the teacher's points are already in.
-                if await quiz_open.is_scored_submission(db, submission):
-                    if await quiz_open.scores_complete_for(db, submission):
-                        transition(submission, "quiz_passed")
-                        await finalize_grade(db, submission)
-                    else:
-                        transition(submission, "quiz_passed_teacher")
-                        await enqueue_teacher_review_notification(db, submission.id)
-                # `quiz_then_teacher` hands the attached work to the teacher instead of
-                # completing here; the grade is still computed from the quiz, but only once
-                # they approve.
-                elif attempt.config_snapshot.get("review_mode") == "quiz_then_teacher":
-                    transition(submission, "quiz_passed_teacher")
-                    await enqueue_teacher_review_notification(db, submission.id)
-                else:
-                    transition(submission, "quiz_passed")
-                    await finalize_grade(db, submission)
-            elif submission.squad_id is not None:
-                await _notify_partners_passed(db, submission, attempt.student_id)
-        else:
+    # The quiz is one requirement among others; settle decides what this outcome means for
+    # the grade and status (complete, wait for the teacher, exhausted). It serialises on the
+    # scope's assignment rows, so two squad-mates finishing at once settle one after the
+    # other — no lock on the submission here (settle's lock order is assignments first).
+    if submission is not None:
+        await db.flush()  # settle must see this attempt's is_passed / status
+        if not is_passed:
             max_attempts = effective_max_attempts(
                 attempt.config_snapshot.get("max_quiz_attempts"), submission, attempt.student_id
             )
@@ -682,12 +647,12 @@ async def _grade_and_finalize(
                 prior = await _count_used_attempts(
                     db, attempt.submission_id, attempt.id, attempt.student_id
                 )
-                if prior + 1 >= max_attempts:
-                    transition(submission, "quiz_failed")
-                    attempts_left = 0
-                else:
-                    attempts_left = max_attempts - (prior + 1)
-            # else: leave at QUIZ_SENT so student can retry
+                attempts_left = max(max_attempts - (prior + 1), 0)
+        owner_sa = await db.get(StudentAssignment, submission.students_assignment_id)
+        if owner_sa is not None:
+            result = await settle.settle(db, owner_sa)
+            if is_passed and submission.squad_id is not None and not result.evaluation.complete:
+                await _notify_partners_passed(db, submission, attempt.student_id)
 
     db.add(
         OutboxMessage(
@@ -761,22 +726,29 @@ async def start_or_resume_quiz(
     if sa is None:
         raise HTTPException(status_code=404)
 
-    latest_sub = await squads.latest_submission(db, sa)
-    if (
-        latest_sub is None or latest_sub.status in quiz_open.REOPENABLE
-    ) and teacher_scores.is_scored_mode(sa.subjects_assignment.config):
-        # quiz_and_teacher_scores: nothing is uploaded, the quiz opens on its own.
-        try:
-            latest_sub = await quiz_open.open_quiz_submission(db, sa, student_id)
-        except quiz_open.QuizOpenError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # The quiz is its own requirement: it opens whenever that item is pending, before or
+    # after any upload, whatever else is still outstanding.
+    asg = sa.subjects_assignment
+    if not settle.plan_for(asg).has("quiz"):
+        raise HTTPException(status_code=403, detail="Quiz not available for this submission")
+    facts, known_subs, _squad, _scope = await settle.gather_facts(db, sa, asg)
+    if facts.quiz[0] in ("done", "failed"):
+        # Passed (for a squad: every member passed) or exhausted. A member who passed while
+        # a mate has not is sent to their result by the per-student check further down.
+        raise HTTPException(status_code=403, detail="Quiz not available for this submission")
+    try:
+        latest_sub = await quiz_open.open_quiz_submission(db, sa, student_id)
+    except quiz_open.QuizOpenError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if latest_sub.id not in {s.id for s in known_subs}:
         logger.info(
             "quiz_submission_opened",
             submission_id=latest_sub.id,
             student_id=student_id,
             assignment_id=sa.subjects_assignment_id,
         )
-    if latest_sub is None or latest_sub.status != SubmissionStatus.QUIZ_SENT:
+    # COMPLETED is final; FAILED with the quiz still pending is a teacher's rejection.
+    if latest_sub.status in (SubmissionStatus.COMPLETED, SubmissionStatus.FAILED):
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
 
     attempts_result = await db.execute(

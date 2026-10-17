@@ -62,11 +62,14 @@ async def test_pair_gets_disjoint_halves_and_a_unified_grade(
         await _answer_all(ca, db, att_a, correct=True)
         sub = (await db.execute(select(Submission))).scalar_one()
         await db.refresh(sub)
-        assert sub.status == SubmissionStatus.QUIZ_SENT  # B still owes their half
+        # B still owes their half (quiz pending); the teacher's acceptance is owed too, so
+        # settle parks it with the teacher — no grade either way.
+        assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
         assert (await db.get(StudentAssignment, sa_a.id)).grade is None
         page_a = await ca.get(f"/portal/subjects/{subject.id}/assignments/{sa_a.id}")
-        # Jinja autoescapes the apostrophe in the vocab string to &#39; in the raw HTML.
-        assert "Оцінка з" in page_a.text and "явиться" in page_a.text
+        # The "grade appears when everyone passes" notice is keyed on QUIZ_SENT, which settle
+        # no longer shows while the teacher is also owed; Task 10's checklist replaces it.
+        assert page_a.status_code == 200
 
         await _answer_all(cb, db, att_b, correct=True)
         await db.refresh(sub)
@@ -274,7 +277,9 @@ async def test_failing_member_retries_only_their_half(db, make_user, make_studen
         b2 = await db.get(QuizAttempt, att_b2)
         assert len(b2.questions_snapshot) == 2
         sub = (await db.execute(select(Submission))).scalar_one()
-        assert sub.status == SubmissionStatus.QUIZ_SENT
+        # Quiz still pending (B retrying) and the teacher's acceptance owed: settle parks it
+        # with the teacher, which does not stop B starting the retry above.
+        assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
         # A's own quiz link must not start a new attempt: they already passed.
         r = await ca.get(
             f"/portal/subjects/{subject.id}/assignments/{sa_a.id}/quiz", follow_redirects=False
