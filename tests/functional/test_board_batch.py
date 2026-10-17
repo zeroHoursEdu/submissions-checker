@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import pytest
 
+from submissions_checker.db.models import SubjectsAssignment
 from submissions_checker.db.models.enums import SubmissionStatus
+from submissions_checker.services import board_scores
 from submissions_checker.services import requirements as rq
 from submissions_checker.services.board_scores import board_values
-from tests.functional._scored_helpers import CFG, arrange, arrange_second_student, attempt
+from tests.functional._scored_helpers import (
+    CFG,
+    arrange,
+    arrange_second_student,
+    attempt,
+    squad_of_two,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -169,3 +177,55 @@ async def test_bulk_reject_works_on_quiz_sent(db, teacher_client, teacher, make_
     assert r.headers["location"].endswith("?bulk=1,0")
     await db.refresh(sub)
     assert sub.status == SubmissionStatus.FAILED
+
+
+async def test_unexpected_row_error_is_reported_and_others_save(
+    db, teacher_client, teacher, make_student, monkeypatch
+):
+    subject, asg, s1, sa1, _ = await arrange(db, teacher, make_student, config=CFG)
+    s2, sa2 = await arrange_second_student(db, subject, asg, make_student)
+    real = board_scores.save_row
+
+    async def flaky(db_, assignment, student_id, *a, **kw):
+        if student_id == s1.id:
+            raise RuntimeError("boom")
+        return await real(db_, assignment, student_id, *a, **kw)
+
+    monkeypatch.setattr(board_scores, "save_row", flaky)
+    form = {
+        f"orig__{s1.id}": _orig({}),
+        f"s{s1.id}__report": "1",
+        f"orig__{s2.id}": _orig({}),
+        f"s{s2.id}__report": "2",
+    }
+    r = await teacher_client.post(_batch(subject, asg), data=form, follow_redirects=False)
+    loc = r.headers["location"]
+    assert r.status_code == 303 and "saved=1" in loc and f"{s1.id}:error" in loc
+    await db.refresh(sa2)
+    assert sa2.teacher_scores == {"report": 2}
+
+
+async def test_second_changed_row_of_a_squad_is_skipped(db, teacher_client, teacher, make_student):
+    sa_a, sa_b, _sub = await squad_of_two(db, teacher, make_student, config=CFG)
+    asg = await db.get(SubjectsAssignment, sa_a.subjects_assignment_id)
+    a, b = sa_a.student_id, sa_b.student_id
+    form = {
+        f"orig__{a}": _orig({}),
+        f"s{a}__report": "4",
+        f"orig__{b}": _orig({}),
+        f"s{b}__report": "1",
+    }
+    r = await teacher_client.post(
+        f"/teacher/subjects/{asg.subject_id}/assignments/{asg.id}/scores/batch",
+        data=form,
+        follow_redirects=False,
+    )
+    loc = r.headers["location"]
+    assert "saved=1" in loc and "squad_duplicate" in loc
+    await db.refresh(sa_a)
+    await db.refresh(sa_b)
+    assert sa_a.teacher_scores == sa_b.teacher_scores
+    page = await teacher_client.get(
+        f"/teacher/subjects/{asg.subject_id}/assignments/{asg.id}?{loc.split('?', 1)[1]}"
+    )
+    assert "вже збережено з іншого рядка" in page.text

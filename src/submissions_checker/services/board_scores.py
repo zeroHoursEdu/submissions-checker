@@ -39,6 +39,8 @@ from submissions_checker.services.llm_grading.board import llm_board_state
 ROW_ERROR_CODES = frozenset(
     {"not_enrolled", "confirm_student", "draft_changed", "invalid", "completed_required"}
 )
+# Batch-only outcomes: an unexpected failure, a second changed row of one squad.
+BATCH_CODES = ROW_ERROR_CODES | {"error", "squad_duplicate"}
 
 
 class RowError(Exception):
@@ -175,7 +177,10 @@ async def save_row(
             row.teacher_scores = dict(new_scores)
 
     approval: dict[str, Any] = {}
-    if shown is not None and shown["draft_grading_id"] is not None:
+    llm_keys = {c.key for c in llm_config.llm_criteria(assignment.config)}
+    # Approve only a draft the teacher adopted: saving just the other items (a check, a
+    # non-LLM score) leaves it pending, and its hints stay on the board.
+    if shown is not None and shown["draft_grading_id"] is not None and llm_keys & new_scores.keys():
         grading = await db.get(LLMGrading, shown["draft_grading_id"])
         if grading is not None:
             grading.approved_by = actor.user_id

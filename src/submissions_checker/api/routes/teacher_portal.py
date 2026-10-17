@@ -717,7 +717,7 @@ def _batch_result(request: Request, rows: list[dict[str, Any]]) -> dict[str, Any
     skipped: list[tuple[str, str]] = []
     for part in (request.query_params.get("skipped") or "").split(","):
         sid, _, code = part.partition(":")
-        if not (sid.isascii() and sid.isdecimal()) or code not in board_scores.ROW_ERROR_CODES:
+        if not (sid.isascii() and sid.isdecimal()) or code not in board_scores.BATCH_CODES:
             continue
         skipped.append((names.get(int(sid), sid), str(reasons.get(f"batch_reason_{code}", code))))
     return {"saved": int(saved), "skipped": skipped}
@@ -1975,6 +1975,9 @@ async def teacher_save_scores_batch(
     plan = settle.plan_for(assignment)
     form = {k: str(v) for k, v in (await request.form()).items()}
     saved, skipped = 0, []
+    # One changed row per squad: each row fans its whole item set out to every member, so a
+    # second row of the same squad would silently overwrite the first.
+    squads_done: set[int] = set()
     for name, orig in form.items():
         if not name.startswith("orig__") or not (name[6:].isascii() and name[6:].isdecimal()):
             continue
@@ -1990,6 +1993,11 @@ async def teacher_save_scores_batch(
         posted = board_scores.posted_values(plan, row, stored or {})
         if requirements.row_signature(posted) == orig:
             continue
+        squad = await squads.squad_of(db, subject_id, sid)
+        if squad is not None and squad.id in squads_done:
+            skipped.append(f"{sid}:squad_duplicate")
+            continue
+        squad_id = squad.id if squad is not None else None
         # A rolled-back savepoint expires what it touched: reload rather than lazy-load.
         assignment = await db.get(SubjectsAssignment, sa_id)
         assert assignment is not None
@@ -2005,8 +2013,15 @@ async def teacher_save_scores_batch(
                     actor=current_user,
                 )
             saved += 1
+            if squad_id is not None:
+                squads_done.add(squad_id)
         except board_scores.RowError as exc:
             skipped.append(f"{sid}:{exc.code}")
+        except Exception:
+            # Anything else (a refused transition, a concurrent insert) costs only this row;
+            # the savepoint rolled it back and the rows already saved still commit.
+            logger.exception("board_batch_row_failed", student_id=sid, sa_id=sa_id)
+            skipped.append(f"{sid}:error")
     await db.commit()
     query = f"saved={saved}" + (f"&skipped={','.join(skipped)}" if skipped else "")
     return RedirectResponse(

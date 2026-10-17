@@ -100,17 +100,16 @@ async def llm_board_state(
                 )
             ).scalars()
         }
-    scored_ids: set[int] = set()
+    saved: dict[int, dict[str, Any]] = {}
     if student_ids:
-        scored_ids = {
-            sid
+        saved = {
+            sid: dict(scores or {})
             for sid, scores in await db.execute(
                 select(StudentAssignment.student_id, StudentAssignment.teacher_scores).where(
                     StudentAssignment.subjects_assignment_id == assignment.id,
                     StudentAssignment.student_id.in_(student_ids),
                 )
             )
-            if scores
         }
     keys = [c.key for c in llm_criteria(assignment.config)]
 
@@ -158,7 +157,12 @@ async def llm_board_state(
             "needs_review": bool(draft_id and approved_id is not None and draft_id != approved_id),
             "needs_link_confirm": confirm_link is not None,
             "confirm_link": confirm_link,
-            "prefill": {} if sid in scored_ids else _prefill(done.draft if done else None, keys),
+            # Per key: a hint only where the teacher has not saved that item yet.
+            "prefill": {
+                k: v
+                for k, v in _prefill(done.draft if done else None, keys).items()
+                if k not in saved.get(sid, {})
+            },
         }
     return state
 

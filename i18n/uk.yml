@@ -281,7 +281,7 @@ teacher:
   events: подій
   no_students_in_subject: Студентів не записано до цього предмету
   review_submission_title: Перевірка здачі
-  review_subtitle: "Схвалити або відхилити цю здачу для"
+  review_subtitle: "Переглянути та за потреби відхилити здачу для"
   student_card_label: Студент
   submitted_file_label: Надісланий файл
   download_submission: 'завантажити'
@@ -408,6 +408,8 @@ teacher:
   batch_reason_draft_changed: чернетка змінилась — оновіть сторінку
   batch_reason_invalid: некоректний бал
   batch_reason_completed_required: не можна прибрати обов'язковий бал у зарахованій роботі
+  batch_reason_error: непередбачена помилка — спробуйте ще раз
+  batch_reason_squad_duplicate: зміни для бригади вже збережено з іншого рядка — перевірте й збережіть ще раз
   filter_not_done: Не виконано
   filter_all: Усі
   check_done: Прийнято

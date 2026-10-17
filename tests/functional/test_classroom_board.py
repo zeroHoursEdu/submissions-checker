@@ -793,3 +793,40 @@ async def test_batch_skips_row_whose_draft_changed_and_saves_the_other(
     await db.refresh(o1)
     await db.refresh(v2)
     assert o1.approved_at is not None and v2.approved_at is None
+
+
+async def test_partial_save_without_llm_score_keeps_draft_unapproved_and_hinted(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    _, grading = await _work(db, asg, await _link(db, subject, st))
+
+    # Only the non-LLM item: the draft was not adopted, so it must not be approved.
+    r = await teacher_client.post(
+        _scores_url(subject, asg),
+        data={"student_id": str(st.id), "score_star": "2", "llm_grading_id": str(grading.id)},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    await db.refresh(grading)
+    assert grading.approved_at is None
+    page = await teacher_client.get(_board(subject, asg))
+    inp = _input(page.text, st.id, "report")
+    assert 'placeholder="4"' in inp and 'data-ai-draft="4"' in inp
+    assert 'placeholder=""' in _input(page.text, st.id, "star")
+
+    r = await teacher_client.post(
+        _scores_url(subject, asg),
+        data={
+            "student_id": str(st.id),
+            "score_star": "2",
+            "score_report": "4",
+            "llm_grading_id": str(grading.id),
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    await db.refresh(grading)
+    assert grading.approved_at is not None
+    page = await teacher_client.get(_board(subject, asg))
+    assert 'placeholder=""' in _input(page.text, st.id, "report")
