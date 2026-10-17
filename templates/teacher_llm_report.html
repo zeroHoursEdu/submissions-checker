@@ -81,6 +81,21 @@
     </div>
     {% endfor %}
   </div>
+  {% if code_source %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 text-sm">
+    <h2 class="font-medium text-slate-800 mb-1.5">{{ cv.code_source_title }}</h2>
+    {% if code_source.url and code_source.url.startswith("https://github.com/") %}
+    <p><span class="text-slate-400">{{ cv.code_source_repo }}:</span>
+      <a href="{{ code_source.url }}" rel="noopener noreferrer" target="_blank" class="text-indigo-600 hover:text-indigo-800 underline underline-offset-2 break-all">{{ code_source.url }}</a></p>
+    {% endif %}
+    {% if code_source.commit %}<p><span class="text-slate-400">{{ cv.code_source_commit }}:</span> <code>{{ code_source.commit }}</code></p>{% endif %}
+    <p><span class="text-slate-400">{{ cv.code_source_files }}:</span> {{ (code_source.files or [])|length }}
+      · <span class="text-slate-400">{{ cv.code_source_skipped }}:</span> {{ (code_source.skipped or [])|length }}</p>
+    {% if code_source.error %}
+    <p class="text-amber-700">{{ cv.code_source_error }}: {{ cv["code_source_error_" ~ code_source.error] or code_source.error }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
   {% if comment %}
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 text-sm">
     <h2 class="font-medium text-slate-800 mb-1.5">{{ cv.report_comment }}</h2>

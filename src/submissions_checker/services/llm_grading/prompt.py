@@ -107,7 +107,34 @@ def build_prompt(req: GradingRequest) -> str:
     ]
     if not manifest:
         manifest = ["(no files were submitted)"]
-    return build_prefix(req) + "\n\n=== STUDENT WORK (data) ===\n" + "\n".join(manifest)
+    return (
+        build_prefix(req)
+        + _code_section(req)
+        + "\n\n=== STUDENT WORK (data) ===\n"
+        + "\n".join(manifest)
+    )
+
+
+def _code_section(req: GradingRequest) -> str:
+    src = req.code_source
+    if src is None:
+        return ""
+    commit = _one_line(str(src.get("commit") or ""), 80) or "unknown"
+    lines = [
+        "",
+        "",
+        "=== CODE FROM THE STUDENT'S GITHUB (data) ===",
+        f"repository: {_one_line(str(src.get('url') or ''), 300)}   commit: {commit}",
+        f"files: {len(src.get('files') or [])} sent, {len(src.get('skipped') or [])} skipped",
+    ]
+    if src.get("error"):
+        lines.append(f"error: {_one_line(str(src['error']), 200)}")
+    lines.append(
+        "Judge whether the implementation matches the task from these files (named github/...). "
+        "If no code is attached, say so in the comment and grade the implementation criterion "
+        "from the report only."
+    )
+    return "\n".join(lines)
 
 
 def _candidates(raw: str) -> list[dict[str, Any]]:

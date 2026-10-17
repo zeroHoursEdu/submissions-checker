@@ -7,7 +7,7 @@ crash mid-run loses at most one job, which the next run's ``reap_stale`` turns F
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo
@@ -32,6 +32,11 @@ from submissions_checker.db.models.enums import (
 from submissions_checker.db.models.subject import Subject
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.services.llm_grading.config import is_llm_graded, llm_criteria
+from submissions_checker.services.llm_grading.github_code import (
+    CodeBundle,
+    RepoRef,
+    find_repo_link,
+)
 from submissions_checker.services.llm_grading.judge import (
     GradingRequest,
     JudgeCriterion,
@@ -49,6 +54,8 @@ MAX_ERROR_CHARS = 2000
 # Consecutive JudgeErrors after which the judge is presumed down (sidecar dead, quota gone)
 # and the rest of tonight's work is left untouched instead of burning attempts.
 JUDGE_ERROR_STREAK = 3
+
+CodeFetcher = Callable[[RepoRef], Awaitable[CodeBundle]]
 
 Outcome = Literal["done", "failed", "judge_error", "no_files"]
 
@@ -98,9 +105,14 @@ async def _work(db: AsyncSession, grading: LLMGrading) -> ClassroomWork:
 
 
 async def build_request(
-    db: AsyncSession, grading: LLMGrading, storage: BlobReader
+    db: AsyncSession,
+    grading: LLMGrading,
+    storage: BlobReader,
+    *,
+    fetch: CodeFetcher | None = None,
 ) -> GradingRequest:
-    """The judge request for this grading: assignment config + the work's stored files."""
+    """The judge request for this grading: assignment config + the work's stored files,
+    plus the code from the GitHub repository the report links to (when ``fetch`` is given)."""
     work = await _work(db, grading)
     assignment = await db.get(SubjectsAssignment, work.subjects_assignment_id)
     if assignment is None:
@@ -116,11 +128,20 @@ async def build_request(
         )
         for e in _gradable(work.manifest)
     ]
+    ref = find_repo_link((f.name, f.content) for f in files)
+    if ref is None:
+        bundle = CodeBundle(None, error="no_link")
+    elif fetch is None:
+        bundle = CodeBundle(ref, error="disabled")
+    else:
+        bundle = await fetch(ref)
+    code = [WorkFile(f"github/{c.path}", c.content, "text/plain") for c in bundle.files]
     return GradingRequest(
         task=str(block.get("task") or ""),
         instructions=str(block.get("instructions") or ""),
         criteria=criteria,
-        files=files,
+        files=[*files, *code],
+        code_source=bundle.manifest(),
     )
 
 
@@ -131,6 +152,7 @@ async def grade_one(
     storage: BlobReader,
     *,
     now_fn: Callable[[], datetime] = _utcnow,
+    fetch: CodeFetcher | None = None,
 ) -> Outcome:
     """Run the judge on one grading and record DONE (with the draft) or FAILED.
 
@@ -159,7 +181,7 @@ async def grade_one(
     log.info("llm_grading_started", attempt=grading.attempts + 1)
     started = time.monotonic()
     try:
-        req = await build_request(db, grading, storage)
+        req = await build_request(db, grading, storage, fetch=fetch)
         result = await judge.grade(req)
     except Exception as exc:  # noqa: BLE001 — any failure is retried next night, bounded
         await db.rollback()
@@ -191,6 +213,7 @@ async def grade_one(
         },
         "comment": result.comment,
         "usage": result.usage,
+        "code_source": req.code_source,
     }
     grading.provider = result.provider
     grading.model = result.model
@@ -303,6 +326,7 @@ async def grading_loop(
     deadline: datetime,
     cap: int,
     night_start: datetime,
+    fetch: CodeFetcher | None = None,
 ) -> int:
     """Grade eligible works, grouped by assignment, until ``deadline`` or tonight's budget.
 
@@ -343,7 +367,7 @@ async def grading_loop(
                 if row is None or not is_llm_graded(row[1]):
                     continue
                 grading = row[0]
-                outcome = await grade_one(db, grading, judge, storage, now_fn=now_fn)
+                outcome = await grade_one(db, grading, judge, storage, now_fn=now_fn, fetch=fetch)
                 done += 1
                 judge_errors = judge_errors + 1 if outcome == "judge_error" else 0
         except Exception:  # noqa: BLE001 — a DB hiccup on one job must not end the night

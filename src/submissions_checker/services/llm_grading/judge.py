@@ -33,6 +33,8 @@ class GradingRequest:
     instructions: str
     criteria: list[JudgeCriterion]
     files: list[WorkFile]
+    # Teacher-only record of the GitHub code attached (github_code.CodeBundle.manifest()).
+    code_source: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

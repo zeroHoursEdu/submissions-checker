@@ -26,6 +26,7 @@ from submissions_checker.services.google.client import ClassroomClient
 from submissions_checker.services.google.crypto import decrypt_token
 from submissions_checker.services.google.ingest import classroom_lock, ingest_subject
 from submissions_checker.services.google.oauth import GoogleAuthError
+from submissions_checker.services.llm_grading import github_code
 from submissions_checker.services.llm_grading.judge import get_judge
 from submissions_checker.services.llm_grading.runner import (
     grading_loop,
@@ -138,15 +139,17 @@ async def _run() -> None:
 
         judge = get_judge(settings)
         try:
-            graded = await grading_loop(
-                db_factory,
-                judge,
-                storage,
-                now_fn=_now,
-                deadline=deadline,
-                cap=cap,
-                night_start=night_start,
-            )
+            async with httpx.AsyncClient() as http:
+                graded = await grading_loop(
+                    db_factory,
+                    judge,
+                    storage,
+                    now_fn=_now,
+                    deadline=deadline,
+                    cap=cap,
+                    night_start=night_start,
+                    fetch=lambda ref: github_code.fetch_code(http, ref),
+                )
         finally:
             await judge.aclose()
         logger.info("classroom_nightly_done", graded=graded, cap=cap)

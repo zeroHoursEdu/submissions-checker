@@ -111,3 +111,46 @@ async def test_board_links_to_the_report(teacher_client: AsyncClient, db, teache
     _, grading = await _work(db, asg, await _link(db, subject, st))
     page = await teacher_client.get(_board(subject, asg))
     assert _report(subject, grading) in page.text
+
+
+async def test_report_shows_code_source(teacher_client: AsyncClient, db, teacher, make_student):
+    subject, asg, st = await _world(db, teacher, make_student)
+    _, grading = await _work(db, asg, await _link(db, subject, st))
+    grading.draft = {
+        **(grading.draft or {}),
+        "code_source": {
+            "url": "https://github.com/a/lab",
+            "commit": "abc123",
+            "files": [{"path": "main.cpp", "size": 3}],
+            "skipped": ["big.cpp"],
+            "error": "not_found",
+        },
+    }
+    await db.commit()
+
+    text = (await teacher_client.get(_report(subject, grading))).text
+
+    assert "https://github.com/a/lab" in text and "abc123" in text
+    assert "репозиторій не знайдено або він приватний" in text
+
+
+async def test_report_unknown_code_error_falls_back_to_raw(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    _, grading = await _work(db, asg, await _link(db, subject, st))
+    grading.draft = {
+        **(grading.draft or {}),
+        "code_source": {
+            "url": None,
+            "commit": None,
+            "files": [],
+            "skipped": [],
+            "error": "http_500",
+        },
+    }
+    await db.commit()
+
+    text = (await teacher_client.get(_report(subject, grading))).text
+
+    assert "http_500" in text

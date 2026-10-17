@@ -270,8 +270,101 @@ async def test_grade_one_done_stores_draft(db, world):
         },
         "comment": "Good work",
         "usage": {"input_tokens": 1200, "output_tokens": 300},
+        "code_source": {
+            "url": None,
+            "commit": None,
+            "files": [],
+            "skipped": [],
+            "error": "no_link",
+        },
     }
     assert len(judge.calls) == 1
+
+
+def _docx_with_link(url: str) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(
+            "word/document.xml",
+            f'<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>{url}</w:t></w:r></w:p></w:body></w:document>',
+        )
+    return buf.getvalue()
+
+
+async def _grading_with_link(db, world):
+    g = await _grading(db, world)
+    work = await db.get(ClassroomWork, g.classroom_work_id)
+    key = f"classroom/link{g.id}/report.docx"
+    world["storage"].objects[key] = _docx_with_link("https://github.com/a/lab")
+    work.manifest = [
+        {
+            "drive_id": "dl",
+            "name": "report.docx",
+            "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "size": 10,
+            "modified": "",
+            "sha256": None,
+            "storage_key": key,
+            "skipped": None,
+        }
+    ]
+    await db.commit()
+    return g
+
+
+async def test_grade_one_attaches_github_code_and_records_source(db, world):
+    from submissions_checker.services.llm_grading.github_code import CodeBundle, CodeFile
+
+    seen = []
+
+    async def fetch(ref):
+        seen.append(ref)
+        return CodeBundle(ref, commit="abc", files=(CodeFile("main.cpp", b"int main(){}"),))
+
+    g = await _grading_with_link(db, world)
+    judge = FakeJudge()
+    await runner.grade_one(db, g, judge, world["storage"], fetch=fetch)
+    g = await _reload(db, g.id)
+    assert g.status == "DONE"
+    assert [(f.name, f.mime) for f in judge.calls[0].files] == [
+        ("report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("github/main.cpp", "text/plain"),
+    ]
+    assert g.draft["code_source"]["commit"] == "abc"
+    assert g.draft["code_source"]["url"] == "https://github.com/a/lab"
+    assert g.draft["comment"] == "Good work" and "criteria" in g.draft
+    assert len(seen) == 1
+
+
+async def test_grade_one_fetch_error_still_done(db, world):
+    from submissions_checker.services.llm_grading.github_code import CodeBundle
+
+    async def fetch(ref):
+        return CodeBundle(ref, error="not_found")
+
+    g = await _grading_with_link(db, world)
+    judge = FakeJudge()
+    await runner.grade_one(db, g, judge, world["storage"], fetch=fetch)
+    g = await _reload(db, g.id)
+    assert g.status == "DONE"
+    assert g.draft["code_source"]["error"] == "not_found"
+    assert [f.name for f in judge.calls[0].files] == ["report.docx"]
+
+
+async def test_grade_one_without_fetcher_records_disabled_or_no_link(db, world):
+    g = await _grading_with_link(db, world)
+    g2 = await _grading(db, world)
+    g_id, g2_id = g.id, g2.id
+    await runner.grade_one(db, g, FakeJudge(), world["storage"])
+    g = await _reload(db, g_id)
+    assert g.draft["code_source"]["error"] == "disabled"
+    g2 = await _reload(db, g2_id)
+    await runner.grade_one(db, g2, FakeJudge(), world["storage"])
+    g2 = await _reload(db, g2_id)
+    assert g2.draft["code_source"]["error"] == "no_link"
 
 
 async def test_invalid_twice_marks_failed(db, world):

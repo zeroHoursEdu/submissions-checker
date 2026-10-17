@@ -699,3 +699,16 @@ classroom:
   report_comment: Загальний коментар AI
   report_not_graded: Ще не оцінено — робота чекає на нічну перевірку.
   report_back: До дошки завдання
+  code_source_title: Код зі GitHub студента
+  code_source_repo: Репозиторій
+  code_source_commit: Коміт
+  code_source_files: Передано файлів
+  code_source_skipped: Пропущено
+  code_source_error: Код не передано або передано не повністю
+  code_source_error_no_link: у звіті немає посилання на GitHub
+  code_source_error_disabled: завантаження коду вимкнено
+  code_source_error_not_found: репозиторій не знайдено або він приватний
+  code_source_error_forbidden_or_rate_limited: GitHub відмовив у доступі або ліміт запитів вичерпано
+  code_source_error_too_large: репозиторій завеликий
+  code_source_error_bad_redirect: GitHub повернув неочікуване перенаправлення
+  code_source_error_timeout: GitHub не відповів вчасно

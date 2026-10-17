@@ -836,6 +836,7 @@ async def grading_report(
             "student": student,
             "criteria": rows,
             "comment": (grading.draft or {}).get("comment"),
+            "code_source": (grading.draft or {}).get("code_source"),
             "approver": approver,
         },
     )
