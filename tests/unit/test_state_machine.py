@@ -124,7 +124,7 @@ def test_error_message_includes_event_and_status() -> None:
 
 
 def test_status_with_no_outgoing_edges_raises():
-    # COMPLETED is terminal: it exists in the enum but has no row in the transition table.
+    # COMPLETED is terminal for the pipeline: only settle's requirement events leave it.
     sub = _Sub(S.COMPLETED)
     with pytest.raises(InvalidTransitionError):
         transition(sub, "start_validation")
@@ -151,3 +151,37 @@ def test_completed_cannot_be_requeued() -> None:
     sub = _Sub(S.COMPLETED)
     with pytest.raises(InvalidTransitionError):
         transition(sub, "requeue_checks")
+
+
+# ── Requirements model (settle) ──────────────────────────────────────────────
+
+SETTLED = [S.PENDING, S.QUIZ_SENT, S.AWAITING_TEACHER_REVIEW, S.COMPLETED, S.FAILED]
+
+
+@pytest.mark.parametrize("start", SETTLED)
+@pytest.mark.parametrize(
+    ("event", "end"),
+    [
+        ("requirements_met", S.COMPLETED),
+        ("requirement_failed", S.FAILED),
+        ("awaiting_teacher", S.AWAITING_TEACHER_REVIEW),
+        ("awaiting_quiz", S.QUIZ_SENT),
+    ],
+)
+def test_settle_events_from_every_settled_state(start: S, event: str, end: S) -> None:
+    sub = _Sub(start)
+    transition(sub, event)
+    assert sub.status == end
+
+
+@pytest.mark.parametrize("start", [S.TESTING, S.AI_REVIEWING])
+def test_processing_done(start: S) -> None:
+    sub = _Sub(start)
+    transition(sub, "processing_done")
+    assert sub.status == S.AWAITING_TEACHER_REVIEW
+
+
+@pytest.mark.parametrize("start", [S.VALIDATING, S.AWAITING_AI_REVIEW, S.TEST_FAILED])
+def test_settle_events_not_allowed_mid_pipeline(start: S) -> None:
+    with pytest.raises(InvalidTransitionError):
+        transition(_Sub(start), "requirements_met")

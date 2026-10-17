@@ -68,6 +68,28 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
 }
 
 
+# Requirements model: `settle` decides the status from what is done, so its four events are
+# allowed from every settled state (and are idempotent self-loops where the status is
+# unchanged). `processing_done` ends the upload pipeline; settle runs right after it.
+for _status in (
+    SubmissionStatus.PENDING,
+    SubmissionStatus.QUIZ_SENT,
+    SubmissionStatus.AWAITING_TEACHER_REVIEW,
+    SubmissionStatus.COMPLETED,
+    SubmissionStatus.FAILED,
+):
+    _TRANSITIONS.setdefault(_status, {}).update(
+        {
+            "requirements_met": SubmissionStatus.COMPLETED,
+            "requirement_failed": SubmissionStatus.FAILED,
+            "awaiting_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
+            "awaiting_quiz": SubmissionStatus.QUIZ_SENT,
+        }
+    )
+for _status in (SubmissionStatus.TESTING, SubmissionStatus.AI_REVIEWING):
+    _TRANSITIONS[_status]["processing_done"] = SubmissionStatus.AWAITING_TEACHER_REVIEW
+
+
 # A teacher may send a stuck or failed submission back through the checks. Every
 # state that can be reached by the pipeline (or by a worker dying mid-flight) gets
 # the same exit; terminal COMPLETED is deliberately excluded.

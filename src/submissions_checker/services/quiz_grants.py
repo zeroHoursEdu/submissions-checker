@@ -88,7 +88,7 @@ async def base_max_attempts(db: AsyncSession, submission: Submission) -> int | N
     return int(value) if value is not None else None
 
 
-async def _students_on(db: AsyncSession, submission: Submission) -> list[int]:
+async def students_on(db: AsyncSession, submission: Submission) -> list[int]:
     """Solo: the owner. Squad: every currently enrolled member (unenrolled ones no longer
     block completion, so they cannot be granted anything either)."""
     squad = await squads.squad_for_submission(db, submission)
@@ -138,7 +138,7 @@ async def grantable_students(db: AsyncSession, submission: Submission) -> list[i
     if base is None:
         return []
     out: list[int] = []
-    for sid in await _students_on(db, submission):
+    for sid in await students_on(db, submission):
         if await _is_grantable(db, submission, sid, base):
             out.append(sid)
     return out
@@ -151,7 +151,7 @@ async def grant_extra_attempt(db: AsyncSession, submission: Submission, student_
     transaction, as with the other teacher unstick controls.
     """
     base = await base_max_attempts(db, submission)
-    if student_id not in await _students_on(db, submission) or not await _is_grantable(
+    if student_id not in await students_on(db, submission) or not await _is_grantable(
         db, submission, student_id, base
     ):
         raise GrantError("student is not stuck on an exhausted quiz for this submission")
