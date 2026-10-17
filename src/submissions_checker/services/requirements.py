@@ -8,6 +8,7 @@ settle, the board and the student page share it.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections.abc import Mapping
@@ -312,3 +313,40 @@ def evaluate(
         ],
     }
     return Evaluation(items, True, False, grade, breakdown)
+
+
+class ScoreError(ValueError):
+    """Teacher input that cannot be stored as points."""
+
+
+def parse_scores_form(
+    plan: Plan,
+    form: Mapping[str, str],
+    *,
+    prefix: str = "score_",
+    locked: Mapping[str, int] | None = None,
+) -> dict[str, int]:
+    """Teacher items from a board form. A saved check stays saved: it cannot be unticked."""
+    out: dict[str, int] = {}
+    for item in plan.teacher_items():
+        raw = str(form.get(f"{prefix}{item.key}") or "").strip()
+        if item.type == "check":
+            if raw in ("1", "on") or (locked or {}).get(item.key) == 1:
+                out[item.key] = 1
+            continue
+        if raw == "":
+            continue
+        # isascii+isdecimal, not isdigit: "²".isdigit() is True and int() would raise.
+        if not (raw.isascii() and raw.isdecimal()):
+            raise ScoreError(f"{item.title}: '{raw}' is not a whole number")
+        value = int(raw)
+        if value > item.points:
+            raise ScoreError(f"{item.title}: {value} is above the maximum {item.points:g}")
+        out[item.key] = value
+    return out
+
+
+def row_signature(values: Mapping[str, str]) -> str:
+    """Fingerprint of a board row as rendered, so a batch save can skip untouched rows."""
+    blob = "\n".join(f"{k}={v}" for k, v in sorted(values.items()))
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
