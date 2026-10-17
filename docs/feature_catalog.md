@@ -66,7 +66,7 @@ detail.
 | Resolve Classroom roster entries to platform students (email and exact name matches confirm themselves): confirm, change, ignore, bulk-confirm name matches ≥ 95% | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/links/{link_id}`, `POST /teacher/subjects/{id}/classroom/links/confirm-all` |
 | Retry a failed AI grading (graded again on the next night) | Owner / ADMIN | `POST /teacher/subjects/{id}/classroom/gradings/{grading_id}/retry` |
 | Download a fetched student file | Owner / ADMIN | `GET /teacher/subjects/{id}/classroom/works/{work_id}/files/{idx}` |
-| AI draft rows on the assignment board; saving points approves the shown draft (409 if its student match is unconfirmed or a newer draft appeared) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/scores` (existing route, now gated for `llm_grading` assignments) |
+| AI draft rows on the assignment board; saving an LLM-graded score approves the shown draft (409 if its student match is unconfirmed or a newer draft appeared) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/scores` (existing route, now gated for `llm_grading` assignments) |
 | «Роботу отримано з Google Classroom: <дата>» on the assignment page (date only, never the draft) | STUDENT | `GET /portal/subjects/{id}/assignments/{sa_id}` |
 | Nightly job: ingest every linked subject, then grade pending works (03:00 Europe/Kyiv, capped; `workers/scheduled/classroom_nightly.py`) | system | scheduler cron |
 
@@ -109,57 +109,50 @@ See [`docs/features/squads.md`](features/squads.md) for the full squad feature.
 | Watch checking progress (refresh the assignment page) | STUDENT (owner) | `GET /portal/subjects/{subject}/assignments/{sa_id}` |
 | Assignment review board (per-student latest submission, grade, integrity flags) | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}` |
 | Review one submission (test results, AI verdict when the mode ran one, proctoring evidence, submitted archive) | Owner / ADMIN | `GET /teacher/submissions/{id}/review` |
-| Approve / reject a submission (emails the student) — audited `teacher_approve_submission` / `teacher_reject_submission` | Owner / ADMIN | `POST /teacher/submissions/{id}/review` |
-| Bulk approve / reject / re-run for selected rows on the board (ineligible rows skipped; audited `bulk_review`) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/bulk` |
+| Reject a submission (emails the student; there is no approve — acceptance is a `check` requirement on the board) — audited `teacher_reject_submission` | Owner / ADMIN | `POST /teacher/submissions/{id}/review` |
+| Bulk reject / re-run for selected rows on the board (ineligible rows skipped; audited `bulk_review`) | Owner / ADMIN | `POST /teacher/subjects/{id}/assignments/{sa_id}/bulk` |
 | Re-run checks (any non-terminal or failed status → PENDING, config pin dropped; audited `rerun_checks`) | Owner / ADMIN | `POST /teacher/submissions/{id}/rerun-checks` |
-| Retry a failed AI review / hand it to manual review (from `AI_REVIEW_FAILED`; audited) | Owner / ADMIN | `POST /teacher/submissions/{id}/retry-ai-review`, `POST /teacher/submissions/{id}/send-to-teacher` |
+| Retry a failed AI review (from `AI_REVIEW_FAILED`; audited) | Owner / ADMIN | `POST /teacher/submissions/{id}/retry-ai-review` |
 | Grant one more quiz attempt to a student who exhausted `max_quiz_attempts` (from `FAILED`, or `QUIZ_SENT` for a second squad member; attempt history kept; student notified in-app; audited `grant_quiz_attempt`) | Owner / ADMIN | `POST /teacher/submissions/{id}/grant-quiz-attempt` (form `student_id`) |
-| Enter a student's per-criterion work points for a `quiz_and_teacher_scores` assignment (form `student_id`, `score_<key>`; empty = not entered; ints `0..max` else 422; squad points shared; completes an AWAITING_TEACHER_REVIEW submission whose quiz is passed, re-grades a COMPLETED one; audited `teacher_scores_set`) | Owner / ADMIN | `POST /teacher/subjects/{subject_id}/assignments/{sa_id}/scores` |
+| Save one student's board row: `score` values and `check` ticks (form `student_id`, `s<id>__<key>`; empty = not entered; ints `0..max` else 422; a saved `check` cannot be unticked; squad items shared; settle then completes or re-grades the work; audited `teacher_scores_set`) | Owner / ADMIN | `POST /teacher/subjects/{subject_id}/assignments/{sa_id}/scores` |
+| Batch-save every changed board row (rows whose values differ from the rendered `orig__<sid>` signature; a failing row is reported, the rest save) | Owner / ADMIN | `POST /teacher/subjects/{subject_id}/assignments/{sa_id}/scores/batch` |
 | Similarity report: pairwise token similarity of the latest ZIP per student, threshold `?min=` | Owner / ADMIN | `GET /teacher/subjects/{id}/assignments/{sa_id}/similarity` |
 | Export grades CSV (Операції tab) | Owner / ADMIN | `GET /teacher/subjects/{id}/export.csv` |
 
 ### The submission state machine
 
 Submissions move through statuses via the events defined in `core/state_machine.py`.
-The current ("precise") flow:
+Upload pipeline edges, then `settle` decides the rest:
 
 ```
 PENDING ──start_validation──▶ VALIDATING
-        ──quiz_opened──▶ QUIZ_SENT          (quiz_and_teacher_scores: quiz opened, nothing uploaded)
 VALIDATING ──validation_passed──▶ TESTING
            ──validation_failed──▶ VALIDATION_FAILED
 TESTING ──test_failed──▶ TEST_FAILED
-        ──test_passed_tests_only──▶ COMPLETED
         ──test_passed_ai──▶ AWAITING_AI_REVIEW
-        ──test_passed_teacher──▶ AWAITING_TEACHER_REVIEW
-        ──test_passed_quiz──▶ QUIZ_SENT
+        ──processing_done──▶ AWAITING_TEACHER_REVIEW   (then settle runs)
 AWAITING_AI_REVIEW ──start_ai_review──▶ AI_REVIEWING
-AI_REVIEWING ──ai_review_done_teacher──▶ AWAITING_TEACHER_REVIEW
-             ──ai_review_done_completed──▶ COMPLETED
-             ──ai_review_failed──▶ AI_REVIEW_FAILED
+AI_REVIEWING ──ai_review_failed──▶ AI_REVIEW_FAILED
+             ──processing_done──▶ AWAITING_TEACHER_REVIEW   (then settle runs)
 AI_REVIEW_FAILED ──retry_ai_review──▶ AI_REVIEWING
-AWAITING_TEACHER_REVIEW ──teacher_approve──▶ COMPLETED
-                        ──teacher_reject──▶ FAILED
-                        ──teacher_send_quiz──▶ QUIZ_SENT
-QUIZ_SENT ──quiz_passed──▶ COMPLETED
-          ──quiz_passed_teacher──▶ AWAITING_TEACHER_REVIEW
-          ──quiz_failed──▶ FAILED
-          ──quiz_attempt_granted──▶ QUIZ_SENT   (squad: a second exhausted member)
+AWAITING_TEACHER_REVIEW ──teacher_reject──▶ FAILED
 FAILED ──quiz_attempt_granted──▶ QUIZ_SENT      (teacher grants one more attempt)
-       ──dispute_regrade_passed──▶ COMPLETED
-       ──dispute_regrade_passed_teacher──▶ AWAITING_TEACHER_REVIEW
+QUIZ_SENT ──quiz_attempt_granted──▶ QUIZ_SENT   (squad: a second exhausted member)
+
+settle events, from PENDING / QUIZ_SENT / AWAITING_TEACHER_REVIEW / COMPLETED / FAILED
+(emitted only by services/settle.py):
+  requirements_met ──▶ COMPLETED      requirement_failed ──▶ FAILED
+  awaiting_teacher ──▶ AWAITING_TEACHER_REVIEW      awaiting_quiz ──▶ QUIZ_SENT
+
+requeue_checks (teacher re-run) ──▶ PENDING, from every non-COMPLETED pipeline state
 ```
 
-### Review modes (set per assignment in the config)
+### Requirements (set per assignment in the config)
 
-| `review_mode` | Path after tests pass | Manual grading? |
-|---|---|---|
-| `tests_only` | → COMPLETED | No |
-| `tests_then_ai` | AI review → COMPLETED | No |
-| `tests_then_teacher` | → AWAITING_TEACHER_REVIEW | Yes |
-| `tests_then_ai_then_teacher` | AI review → AWAITING_TEACHER_REVIEW | Yes |
-| `tests_then_quiz` | → QUIZ_SENT (student takes a quiz) | No |
-| `quiz_and_teacher_scores` | no upload; quiz opens any time; teacher types per-criterion points on the board; grade = quiz points + points | Yes (points) |
+An assignment lists `requirements:` (`quiz`, `score`, `check`, `tests`, `ai_review`); the work
+completes when every required item is done, and the grade is the sum of the items' points.
+Legacy `review_mode` values are still read and translated by `requirements.from_config`.
+See `docs/PLUGIN_AUTHORING.md` › Requirements and source.
 
 AI verdicts (cheating / AI-generated flags with confidence and reason, a code mark, a
 student-facing comment) are shown to the teacher on the review page and as a red badge on the
@@ -221,10 +214,8 @@ that config version**:
 - re-uploading the subject config bumps the version, so a repaired question stops being
   credited rather than crediting whatever moved into its index.
 
-Where that flips an attempt to passing, the submission follows — including out of a terminal
-`FAILED`, via the `dispute_regrade_passed` / `dispute_regrade_passed_teacher` transitions
-added for exactly this (named distinctly so an ordinary late-finishing attempt can never
-resurrect a failed submission). `finalize_grade` then rewrites the grade. Every affected
+Where that flips an attempt to passing, `settle` re-evaluates the requirements and the
+submission follows (including out of `FAILED`) and the grade is rewritten. Every affected
 student is notified, including classmates who never reported anything. Accepting also closes
 every other open report on the same question, since reports are unlimited.
 

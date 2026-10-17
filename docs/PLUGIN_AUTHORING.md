@@ -66,7 +66,7 @@ assignments:
     deadline: "2026-06-15T23:59:00"   # ISO 8601, treated as UTC
     min_grade: 0
     max_grade: 100
-    review_mode: tests_only     # see Review Modes below
+    review_mode: tests_only     # legacy; see Requirements and source below
     late_policy: block          # block | allow
     max_submissions: 3          # optional; omit for unlimited
     variants_required: false    # if true, student must have a variant assigned before submission
@@ -103,51 +103,65 @@ member. `maxAllowedSize` must be an integer between 2 and 6; omit the block enti
 to keep the subject solo-only. See [`docs/features/squads.md`](features/squads.md)
 for the full rules, teacher/student usage, and the tables involved.
 
-### Review Modes
+### Requirements and source
 
-| `review_mode`               | After tests pass, the submission goes to…              |
-|-----------------------------|--------------------------------------------------------|
-| `tests_only`                | COMPLETED immediately                                  |
-| `tests_then_ai`             | AI review → COMPLETED                                  |
-| `tests_then_teacher`        | AWAITING_TEACHER_REVIEW → teacher grades               |
-| `tests_then_ai_then_teacher`| AI review → AWAITING_TEACHER_REVIEW → teacher grades   |
-| `tests_then_quiz`           | Quiz sent to student                                   |
-
-**Check-free modes** — for coursework that cannot be auto-checked at all (Windows-only GUI
-programs, hardware labs, written reports). These run **no sandbox**, so the assignment needs
-**no `sandbox` block and no `check_command`**; the uploaded ZIP is only validated as a safe
-archive and the student goes straight to the quiz:
-
-| `review_mode`        | What happens                                                          |
-|----------------------|-----------------------------------------------------------------------|
-| `quiz_only`          | Upload accepted → quiz → COMPLETED on a pass                          |
-| `quiz_then_teacher`  | Upload accepted → quiz → AWAITING_TEACHER_REVIEW → teacher approves    |
-| `quiz_and_teacher_scores` | **No upload** → quiz any time; teacher enters per-criterion points; grade = quiz points + points (see below) |
-
-Under `tests_then_teacher` and `tests_then_ai_then_teacher` a configured `quiz:` block is sent
-automatically when the teacher approves the submission — there is no separate
-`tests_then_teacher_then_quiz` mode, because approval already is the hand-off.
-
-A `quiz:` block is rejected at upload unless the review mode can send it: the `*_then_quiz`
-modes, `quiz_only`, `quiz_then_teacher`, or a teacher-gated mode (the teacher's approval sends
-it). Under `tests_only` / `tests_then_ai` it would never fire.
-
-Both require a `quiz` block with questions. Since there is no test score, weight the grade
-onto the quiz, otherwise the assignment grades as zero:
+An assignment declares **what must be done for the work to count**, not a pipeline. Each
+item is independent and may be done in any order (the quiz can be passed before anything is
+handed in). The grade appears once every required item is done and is
+`min_grade + Σ earned points`, rounded once at the end (squads round up), clamped to
+`[min_grade, max_grade]`.
 
 ```yaml
-grading:
-  code_weight: 0
-  quiz_weight: 1
+lab4:
+  min_grade: 0
+  max_grade: 16
+  source: classroom            # upload | classroom
+  requirements:
+    - {type: quiz,  key: quiz,     points: 8}
+    - {type: score, key: report,   title: "Звіт", max: 5, llm: "rubric text"}
+    - {type: score, key: star,     title: "Зірочка", max: 3, optional: true}
+    - {type: check, key: accepted, title: "Прийнято викладачем", points: 0}
+    # subjects with code:
+    - {type: tests,     key: tests, points: 10}
+    - {type: ai_review, key: ai,    points: 2}
+  quiz: { ... }                # required iff there is a quiz item
 ```
 
-#### `quiz_and_teacher_scores` — quiz any time, teacher grades the work
+| `type` | Done when | Points earned |
+|---|---|---|
+| `quiz` | a passed attempt exists | `points × pct/100` (squad: mean over members) |
+| `score` | the teacher saved a value on the board | `0..max` |
+| `check` | the teacher ticked it and saved; cannot be unticked | `points` (0 allowed) |
+| `tests` | the sandbox check of the latest version finished | `points × score/max_score` |
+| `ai_review` | the AI review of the latest version finished | `points × code_mark/100` |
 
-For courses where the platform examines only the *defence* and the teacher grades the work
-itself outside the platform (on paper, in class). The student **uploads nothing**: the
-assignment page shows «Почати тест» from the start, and the first open creates an
-upload-less submission (`source_type = QUIZ_ONLY`). The teacher types per-criterion points
-in the assignment board's row for each student, before or after the quiz.
+- `optional: true` (any type): not needed for the grade, only adds points.
+- `source`: `upload` = the student uploads a ZIP on the portal; `classroom` = the work comes
+  from the Classroom sync and the portal shows no upload. Default: `upload` when the list has
+  `tests` or `ai_review`, otherwise no hand-in at all.
+- `llm:` (on a `score` only) makes the criterion LLM-drafted; the value is the rubric text.
+
+**Validation on apply-config**: `Σ points/max == max_grade - min_grade`; keys match
+`[a-z0-9_]+` and are unique; `title` required for `score`/`check`; `check` takes `points`, not
+`max`; at most one `quiz` item; a `quiz` item needs a `quiz:` block with questions and a
+`quiz:` block needs a `quiz` item; `tests`/`ai_review` with `source: classroom` is refused
+("not supported yet"); `review_mode` together with `requirements` is refused.
+
+Rejecting work that has no upload (a Classroom source) is final until a new Classroom version
+of the work arrives; the board cannot reopen it.
+
+**Legacy.** `review_mode` is still read and translated into a requirements list by
+`requirements.from_config`; do not mix it with `requirements`. Translation: `tests_only`,
+`tests_then_ai`, `tests_then_teacher` (adds a `check`), `tests_then_quiz`, `quiz_only`,
+`quiz_then_teacher` and the `*_ai_*` variants become `tests` / `ai_review` / `quiz` / `check`
+items weighted as the old `grading` block weighted them; `quiz_and_teacher_scores` becomes a
+`quiz` (`quiz_points`) plus one `score` per `teacher_criteria` entry, with `source: classroom`
+when `llm_grading` is enabled. Grades are identical to the old formulas. Check-free modes need
+no `sandbox` block and no `check_command`. New configs should use `requirements`.
+
+#### Legacy `quiz_and_teacher_scores`
+
+The old form of "quiz any time, teacher grades the work" (translated as above):
 
 ```yaml
 lab3:
@@ -155,29 +169,16 @@ lab3:
   max_grade: 16
   review_mode: quiz_and_teacher_scores
   grading:
-    quiz_points: 8                    # the quiz is worth up to 8 points
-    teacher_criteria:                 # one input per criterion on the board
+    quiz_points: 8
+    teacher_criteria:
       - { key: report, title: "Звіт", max: 5 }
       - { key: star,   title: "Завдання з зірочкою", max: 3, optional: true }
-  quiz: { ... }                       # required
+  quiz: { ... }
 ```
 
-- **Grade** = `quiz_pct × quiz_points` (rounded half up; squads round up) + the sum of the
-  criteria. An `optional` criterion left empty counts as 0; a required one left empty
-  means no grade yet.
-- **The quiz is a gate**: without a passed attempt there is no grade. A student who uses
-  every attempt goes to FAILED; the board's «Додаткова спроба тесту» reopens it.
-- **Flow**: a pass with every required point already entered → COMPLETED; otherwise →
-  AWAITING_TEACHER_REVIEW until the teacher saves the points. Editing the points of a
-  COMPLETED submission re-grades it; clearing a required criterion of a graded one is refused.
-  «Підтвердити» on the review page is refused until the points exist.
-- **Breakdown** ("Тест 6/8 · Звіт 4/5 · …") is always shown to the student, on the board,
-  and as the gradebook cell's tooltip.
-- **Apply config rejects** the assignment unless: it has quiz questions; `quiz_points` is an
-  integer ≥ 0; `teacher_criteria` is non-empty; keys match `[a-z0-9_]+` and are unique; each
-  `max` is an integer > 0; and `quiz_points + Σ max == max_grade − min_grade`.
-- Uploads are refused in this mode, and "re-run checks" is refused for a `QUIZ_ONLY`
-  submission (there is no archive).
+Rules: `quiz_points` an integer >= 0, `teacher_criteria` non-empty, keys `[a-z0-9_]+` and
+unique, each `max` an integer > 0, and `quiz_points + Σ max == max_grade - min_grade`. There
+is no upload; the first quiz open creates an upload-less `QUIZ_ONLY` submission.
 
 ##### `llm_grading` — nightly AI draft of the criteria points (optional)
 

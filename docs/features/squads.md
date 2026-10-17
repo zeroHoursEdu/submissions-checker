@@ -33,10 +33,10 @@ tested), one unified grade — without changing anything for subjects that don't
   subject's `pass_threshold_pct` and `max_quiz_attempts`, independently of their partner.
 - **Exhausted member fails the squad.** If any member uses up their attempts without
   passing their slice, the whole submission goes `FAILED` — not just that member.
-- **Grade = mean of slices, rounded up, written to all.** `finalize_grade` averages each
+- **Grade = mean of slices, rounded up, written to all.** `settle` averages each
   passed member's slice percentage, rounds the final grade **up** (`math.ceil`, not
   nearest), and writes the same `grade` to every member's `students_assignments` row.
-- **No grade until all pass.** `finalize_grade` only runs once `quiz_complete` is true for
+- **No grade until all pass.** `settle` only runs once `quiz_complete` is true for
   every currently-enrolled member, so "nobody has a grade yet" falls straight out of the
   normal flow — there's no separate check for it.
 
@@ -122,7 +122,7 @@ then quiz, then teacher approval), squad of two (A, B):
 6. B passes their slice. `quiz_complete` is now true for both — the submission
    transitions to `AWAITING_TEACHER_REVIEW`.
 7. The teacher opens the review page (sees the `👥` badge and both names), approves the
-   submission → `COMPLETED`. `finalize_grade` averages A's and B's slice percentages,
+   submission → `COMPLETED`. `settle` averages A's and B's slice percentages,
    rounds up, and writes the same grade to both A's and B's `students_assignments` rows,
    with `grade_breakdown["squad"]` recording each member's slice percentage.
 
@@ -138,7 +138,7 @@ then quiz, then teacher approval), squad of two (A, B):
 | `submissions.source_metadata.squad_quiz_draw` | `{question_ids, slices, member_order}` — the one shared draw, written once by whichever member opens the quiz first. |
 | `quiz_attempts.student_id` | Which member took the attempt; solo attempts pre-migration have `NULL` here. |
 | `quiz_attempts.config_snapshot.squad` | `{member_index, member_count, total_questions}` for the "your part" banner. |
-| `students_assignments.grade` fan-out | `finalize_grade` writes the same rounded-up grade to every member's row for the assignment. |
+| `students_assignments.grade` fan-out | `settle` writes the same rounded-up grade to every member's row for the assignment. |
 | `submissions.grade_breakdown.squad` | `{unified: true, squad_id, members: [{student_id, quiz_pct}, ...]}`. |
 
 ## Edge cases

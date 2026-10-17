@@ -61,7 +61,7 @@ def test_weighted_modes_translate_to_items(mode: str | None, types: list[str]) -
     assert plan.rounding == "bankers"
 
 
-# Expected grades captured once from the retired compute_grade / teacher_scores.compute.
+# Expected grades captured once from the retired weighted-blend and scored-mode formulas.
 _G = {
     "code_weight": 0.6,
     "quiz_weight": 0.4,
