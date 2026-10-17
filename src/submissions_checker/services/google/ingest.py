@@ -35,6 +35,7 @@ from submissions_checker.db.models.group import Group
 from submissions_checker.db.models.student import Student
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
+from submissions_checker.services import settle
 from submissions_checker.services.google.client import (
     EXPORTS,
     DownloadedFile,
@@ -403,6 +404,10 @@ async def _ingest_submission(
     status = _fresh_status(link)
     db.add(LLMGrading(classroom_work_id=work.id, status=status.value))
     await _supersede_others(db, sub.id, work.id)
+    if link.student_id is not None and link.confirmed:
+        # Same transaction as the new version: a teacher's rejection of the old one ends
+        # with it. An error rolls the version back too and is counted by the caller.
+        await settle.reopen_after_new_version(db, assignment_id, link.student_id)
     await db.commit()
     report.new_versions += 1
     logger.info(

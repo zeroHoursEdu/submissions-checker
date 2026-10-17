@@ -357,3 +357,31 @@ async def settle(
         grade=evaluation.grade,
     )
     return SettleResult(latest.id, old, new, evaluation)
+
+
+async def reopen_after_new_version(
+    db: AsyncSession, subjects_assignment_id: int, student_id: int
+) -> None:
+    """A new Classroom version of the work: a teacher's rejection of the old one no longer
+    applies, so drop it and settle again. No-op for a student with no row for the
+    assignment. Does not commit."""
+    sa = await db.scalar(
+        select(StudentAssignment).where(
+            StudentAssignment.student_id == student_id,
+            StudentAssignment.subjects_assignment_id == subjects_assignment_id,
+        )
+    )
+    if sa is None:
+        return
+    asg = await db.get(SubjectsAssignment, subjects_assignment_id)
+    if asg is None:
+        return
+    # Scope lock first (scope -> submission), as everywhere else.
+    scope = await lock_scope(db, sa, asg)
+    subs, _ = await scope_submissions(db, sa, asg, scope=scope, fresh=True)
+    if subs and (subs[0].source_metadata or {}).get(REJECTED_KEY):
+        subs[0].source_metadata = {
+            k: v for k, v in (subs[0].source_metadata or {}).items() if k != REJECTED_KEY
+        }
+        await db.flush()
+    await settle(db, sa)

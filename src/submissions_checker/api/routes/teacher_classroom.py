@@ -40,7 +40,7 @@ from submissions_checker.db.models.student_assignment import StudentAssignment
 from submissions_checker.db.models.subject import Subject, SubjectsStudents
 from submissions_checker.db.models.subjects_assignment import SubjectsAssignment
 from submissions_checker.db.models.user import User
-from submissions_checker.services import teacher_scores
+from submissions_checker.services import settle
 from submissions_checker.services.audit import audit
 from submissions_checker.services.google import oauth, sync_runs
 from submissions_checker.services.google.client import ClassroomClient, GoogleApiError
@@ -802,17 +802,16 @@ async def grading_report(
                 StudentAssignment.subjects_assignment_id == assignment.id,
             )
         )
-    grading_cfg = (assignment.config or {}).get("grading")
     llm_keys = {c.key for c in llm_criteria(assignment.config)}
     draft = (grading.draft or {}).get("criteria") or {}
     rows = []
-    for c in teacher_scores.criteria(grading_cfg):
+    for c in settle.plan_for(assignment).of("score"):
         verdict = draft.get(c.key) or {}
         saved_points = (saved or {}).get(c.key) if grading.approved_at else None
         rows.append(
             {
                 "title": c.title,
-                "max": c.max,
+                "max": c.points,
                 "by_llm": c.key in llm_keys,
                 "points": verdict.get("points"),
                 "justification": verdict.get("justification"),

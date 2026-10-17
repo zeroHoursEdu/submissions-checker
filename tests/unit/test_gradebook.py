@@ -310,3 +310,44 @@ def test_breakdown_line_for_scored_mode() -> None:
 def test_breakdown_line_none_for_other_modes() -> None:
     assert breakdown_line({"quiz_score": 50.0}) is None
     assert breakdown_line(None) is None
+
+
+def test_breakdown_line_new_shape() -> None:
+    b = {
+        "mode": "requirements",
+        "items": [
+            {
+                "key": "quiz",
+                "type": "quiz",
+                "title": "Тест",
+                "state": "done",
+                "points": 6,
+                "max": 8,
+            },
+            {
+                "key": "report",
+                "type": "score",
+                "title": "Звіт",
+                "state": "done",
+                "points": 4,
+                "max": 5,
+            },
+            {
+                "key": "star",
+                "type": "score",
+                "title": "Зірочка",
+                "state": "pending",
+                "points": 0,
+                "max": 3,
+            },
+            {
+                "key": "accepted",
+                "type": "check",
+                "title": "Прийнято",
+                "state": "done",
+                "points": 0,
+                "max": 0,
+            },
+        ],
+    }
+    assert breakdown_line(b) == "Тест 6/8 · Звіт 4/5 · Прийнято ✓"

@@ -359,9 +359,28 @@ class GridSourceRow:
     detail: str | None = None
 
 
+def _fmt(n: Any) -> str:
+    f = float(n or 0)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
 def breakdown_line(breakdown: dict[str, Any] | None, quiz_label: str = "Тест") -> str | None:
-    """ "Тест 6/8 · Звіт 4/5 · …" for a quiz_and_teacher_scores grade; None for other modes."""
-    if not breakdown or breakdown.get("mode") != teacher_scores.MODE:
+    """ "Тест 6/8 · Звіт 4/5 · Прийнято ✓" for a requirements or quiz_and_teacher_scores
+    grade; None for other modes."""
+    if not breakdown:
+        return None
+    if breakdown.get("mode") == "requirements":
+        parts = []
+        for i in breakdown.get("items") or []:
+            if i.get("state") != "done":
+                continue  # an optional item the student skipped
+            title = i.get("title") or i.get("key")
+            if i.get("type") == "check" and not i.get("max"):
+                parts.append(f"{title} ✓")
+            else:
+                parts.append(f"{title} {_fmt(i.get('points'))}/{_fmt(i.get('max'))}")
+        return " · ".join(parts) or None
+    if breakdown.get("mode") != teacher_scores.MODE:
         return None
     quiz = breakdown.get("quiz") or {}
     parts = [f"{quiz_label} {quiz.get('points', 0)}/{quiz.get('max', 0)}"]
@@ -551,6 +570,12 @@ async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceR
         if breakdown.get("mode") == teacher_scores.MODE:
             # The "review" half of a scored lab is the teacher's points, not an AI mark.
             review_score = sum(int(c.get("points", 0)) for c in breakdown.get("criteria") or [])
+        elif breakdown.get("mode") == "requirements":
+            review_score = sum(
+                float(i.get("points", 0))
+                for i in breakdown.get("items") or []
+                if i.get("type") in ("score", "check")
+            )
         for m in (breakdown.get("squad") or {}).get("members") or []:
             if m.get("student_id") == row.student_id:
                 quiz_score = m.get("quiz_pct")

@@ -651,3 +651,69 @@ async def test_unconfirmed_link_to_another_student_stays_unconfirmed(db, setup):
     await ingest_subject(db, s["subject"], s["client"], s["storage"])
     link = (await _links(db, s["subject_id"]))["u2"]
     assert (link.student_id, link.confirmed) == (s["komin_id"], False)
+
+
+async def _rejected_work(db, s):
+    """Komin has a passed quiz and a teacher-rejected (FAILED) upload-less submission."""
+    from submissions_checker.db.models import StudentAssignment, Submission
+    from submissions_checker.db.models.enums import SubmissionSourceType, SubmissionStatus
+    from tests.functional._scored_helpers import CFG, attempt
+
+    s["asg"].config = {
+        **CFG,
+        "llm_grading": {"enabled": True},
+        "requirements": [
+            *CFG["requirements"][:1],
+            {**CFG["requirements"][1], "llm": "judge the report"},
+            *CFG["requirements"][2:],
+        ],
+    }
+    sa = StudentAssignment(student_id=s["komin_id"], subjects_assignment_id=s["asg_id"])
+    db.add(sa)
+    await db.commit()
+    sub = Submission(
+        students_assignment_id=sa.id,
+        source_type=SubmissionSourceType.QUIZ_ONLY,
+        source_metadata={"rejected": {"reason": "no"}},
+        status=SubmissionStatus.FAILED,
+        test_results={"skipped": True, "reason": "requirements"},
+    )
+    db.add(sub)
+    await db.commit()
+    await attempt(db, sub, s["komin_id"], score=3, max_score=4, passed=True)
+    return sub.id
+
+
+async def test_new_version_reopens_a_rejected_work(db, setup):
+    from submissions_checker.db.models import Submission
+    from submissions_checker.db.models.enums import SubmissionStatus
+
+    s = setup
+    c = s["client"]
+    c.submit("s1", "u1", [c.add_file("d1", b"v1")])
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    sub_id = await _rejected_work(db, s)
+    c.files["d1"].update(content=b"v2", modified=T1)
+
+    report = await ingest_subject(db, s["subject"], c, s["storage"])
+
+    assert report.new_versions == 1 and report.errors == 0
+    db.expire_all()
+    sub = await db.get(Submission, sub_id)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    assert "rejected" not in (sub.source_metadata or {})
+
+
+async def test_settle_error_on_reopen_counts_as_error_not_abort(db, setup, monkeypatch):
+    s = setup
+    c = s["client"]
+    c.submit("s1", "u1", [c.add_file("d1", b"v1")])
+    c.submit("s3", "u3", [c.add_file("d3", b"t")])
+
+    async def boom(*_a, **_k):
+        raise RuntimeError("settle exploded")
+
+    monkeypatch.setattr(ingest_mod.settle, "reopen_after_new_version", boom)
+    report = await ingest_subject(db, s["subject"], c, s["storage"])
+    assert report.errors == 1  # komin's; the unlinked student's work still ingested
+    assert report.new_versions == 1
