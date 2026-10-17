@@ -5,8 +5,6 @@ from __future__ import annotations
 import pytest
 
 from submissions_checker.services import requirements as rq
-from submissions_checker.services import teacher_scores
-from submissions_checker.services.grading import compute_grade
 
 SCORED = {
     "review_mode": "quiz_and_teacher_scores",
@@ -63,24 +61,31 @@ def test_weighted_modes_translate_to_items(mode: str | None, types: list[str]) -
     assert plan.rounding == "bankers"
 
 
-def _oracle_cases() -> list[tuple[str, dict, float | None, float | None, float | None]]:
-    g = {
-        "code_weight": 0.6,
-        "quiz_weight": 0.4,
-        "code": {"works_weight": 0.7, "quality_weight": 0.3},
-    }
-    return [
-        ("tests_only", {}, 73.0, None, None),
-        ("tests_then_ai", g, 55.0, 81.0, None),
-        ("tests_then_quiz", g, 100.0, None, 62.5),
-        ("tests_then_ai_then_quiz", g, 40.0, 90.0, 75.0),
-        ("quiz_only", {"quiz_weight": 1.0}, None, None, 87.5),
-    ]
+# Expected grades captured once from the retired compute_grade / teacher_scores.compute.
+_G = {
+    "code_weight": 0.6,
+    "quiz_weight": 0.4,
+    "code": {"works_weight": 0.7, "quality_weight": 0.3},
+}
+_WEIGHTED = [
+    # mode, grading, works, ai, quiz, {(lo, hi): expected}
+    ("tests_only", {}, 73.0, None, None, {(0, 100): 73, (1, 5): 4, (60, 100): 89}),
+    ("tests_then_ai", _G, 55.0, 81.0, None, {(0, 100): 63, (1, 5): 4, (60, 100): 85}),
+    ("tests_then_quiz", _G, 100.0, None, 62.5, {(0, 100): 85, (1, 5): 4, (60, 100): 94}),
+    ("tests_then_ai_then_quiz", _G, 40.0, 90.0, 75.0, {(0, 100): 63, (1, 5): 4, (60, 100): 85}),
+    ("quiz_only", {"quiz_weight": 1.0}, None, None, 87.5, {(0, 100): 88, (1, 5): 4, (60, 100): 95}),
+]
+_WEIGHTED_CASES = [
+    (mode, g, w, a, q, lo, hi, exp)
+    for mode, g, w, a, q, table in _WEIGHTED
+    for (lo, hi), exp in table.items()
+]
 
 
-@pytest.mark.parametrize(("mode", "grading", "works", "ai", "quiz"), _oracle_cases())
-@pytest.mark.parametrize(("lo", "hi"), [(0, 100), (1, 5), (60, 100)])
-def test_translated_weighted_grade_equals_old_compute_grade(
+@pytest.mark.parametrize(
+    ("mode", "grading", "works", "ai", "quiz", "lo", "hi", "expected"), _WEIGHTED_CASES
+)
+def test_translated_weighted_grade_matches_frozen_oracle(
     mode: str,
     grading: dict,
     works: float | None,
@@ -88,26 +93,26 @@ def test_translated_weighted_grade_equals_old_compute_grade(
     quiz: float | None,
     lo: int,
     hi: int,
+    expected: int,
 ) -> None:
     cfg = {"review_mode": mode, "grading": grading}
-    old = compute_grade(grading, lo, hi, works_pct=works, ai_mark=ai, quiz_pct=quiz).grade
     facts = rq.Facts(
         quiz=("done", quiz) if quiz is not None else ("pending", None),
         tests=("done", works) if works is not None else ("pending", None),
         ai_review=("done", ai) if ai is not None else ("pending", None),
         checks_done=frozenset({"accepted"}),
     )
-    assert (
-        rq.evaluate(rq.from_config(cfg, span=hi - lo), facts, lo, hi, round_up=False).grade == old
-    )
+    got = rq.evaluate(rq.from_config(cfg, span=hi - lo), facts, lo, hi, round_up=False).grade
+    assert got == expected
 
 
-@pytest.mark.parametrize("quiz_pct", [0.0, 31.25, 56.25, 68.75, 100.0])
+@pytest.mark.parametrize(
+    ("quiz_pct", "expected"),
+    [(0.0, 6), (31.25, 9), (56.25, 11), (68.75, 12), (100.0, 14)],
+)
 @pytest.mark.parametrize("round_up", [False, True])
-def test_translated_scored_grade_equals_old_compute(quiz_pct: float, round_up: bool) -> None:
-    scores = {"report": 4, "star": 2}
-    old = teacher_scores.compute(
-        SCORED["grading"], 0, 16, quiz_pct=quiz_pct, scores=scores, round_up=round_up
-    )["grade"]
-    facts = rq.Facts(quiz=("done", quiz_pct), scores=scores)
-    assert rq.evaluate(rq.from_config(SCORED), facts, 0, 16, round_up=round_up).grade == old
+def test_translated_scored_grade_matches_frozen_oracle(
+    quiz_pct: float, expected: int, round_up: bool
+) -> None:
+    facts = rq.Facts(quiz=("done", quiz_pct), scores={"report": 4, "star": 2})
+    assert rq.evaluate(rq.from_config(SCORED), facts, 0, 16, round_up=round_up).grade == expected
