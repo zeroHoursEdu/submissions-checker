@@ -210,7 +210,7 @@ async def test_second_grant_after_refail_counts_to_two(db, teacher, make_student
     # The finalizer moves it to FAILED (covered further down); emulate via the state machine.
     from submissions_checker.core.state_machine import transition
 
-    transition(sub, "quiz_failed")
+    transition(sub, "requirement_failed")
     await db.commit()
     assert await quiz_grants.grant_extra_attempt(db, sub, student.id) == 2
 

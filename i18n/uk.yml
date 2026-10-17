@@ -413,7 +413,6 @@ teacher:
   filter_not_done: Не виконано
   filter_all: Усі
   check_done: Прийнято
-  send_to_teacher: На ручну перевірку
   data_title: Дані
   data_hint: Вивантажити всі оцінки предмета у CSV.
   export_grades_csv: Експорт оцінок (CSV)

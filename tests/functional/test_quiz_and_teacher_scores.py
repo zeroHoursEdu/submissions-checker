@@ -31,8 +31,7 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import quiz_regrade
-from submissions_checker.services.grading import finalize_grade
+from submissions_checker.services import quiz_regrade, settle
 from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio
@@ -191,10 +190,10 @@ async def test_quiz_only_submission_and_teacher_scores_round_trip(
     assert sa.teacher_scores == {"report": 4}
 
 
-# ── finalize_grade ───────────────────────────────────────────────────────────
+# ── settle: the grade ────────────────────────────────────────────────────────────
 
 
-async def test_finalize_scored_writes_sum_and_breakdown(db, teacher, make_student) -> None:
+async def test_settle_scored_writes_sum_and_breakdown(db, teacher, make_student) -> None:
     *_, sa, sub = await _arrange_scored(
         db,
         teacher,
@@ -203,37 +202,36 @@ async def test_finalize_scored_writes_sum_and_breakdown(db, teacher, make_studen
         scores={"report": 4, "star": 2},
     )
     await _attempt(db, sub, sa.student_id, is_passed=True, score=3, max_score=4)  # 75%
-    await finalize_grade(db, sub)
+    await settle.settle(db, sa)
     await db.commit()
     await db.refresh(sa)
     await db.refresh(sub)
     assert sa.grade == 12
-    assert sub.grade_breakdown["quiz"] == {"pct": 75.0, "points": 6, "max": 8}
-    assert sub.grade_breakdown["criteria"][0] == {
-        "key": "report",
-        "title": "Звіт",
-        "points": 4,
-        "max": 5,
-    }
+    assert sub.grade_breakdown["mode"] == "requirements"
+    assert sub.grade_breakdown["quiz_score"] == 75.0
+    by_key = {i["key"]: i for i in sub.grade_breakdown["items"]}
+    assert (by_key["quiz"]["points"], by_key["quiz"]["max"]) == (6, 8)
+    assert (by_key["report"]["points"], by_key["report"]["max"]) == (4, 5)
+    assert by_key["report"]["title"] == "Звіт"
 
 
-async def test_finalize_scored_noop_without_required_points(db, teacher, make_student) -> None:
+async def test_settle_scored_noop_without_required_points(db, teacher, make_student) -> None:
     *_, sa, sub = await _arrange_scored(
         db, teacher, make_student, status=SubmissionStatus.COMPLETED, scores={"star": 2}
     )
     await _attempt(db, sub, sa.student_id, is_passed=True)
-    assert await finalize_grade(db, sub) is None
+    await settle.settle(db, sa)
     await db.commit()
     await db.refresh(sa)
     assert sa.grade is None
 
 
-async def test_finalize_scored_noop_without_passed_quiz(db, teacher, make_student) -> None:
+async def test_settle_scored_noop_without_passed_quiz(db, teacher, make_student) -> None:
     *_, sa, sub = await _arrange_scored(
         db, teacher, make_student, status=SubmissionStatus.COMPLETED, scores={"report": 5}
     )
     await _attempt(db, sub, sa.student_id, is_passed=False)
-    assert await finalize_grade(db, sub) is None
+    await settle.settle(db, sa)
 
 
 # ── Student opens the quiz without an upload ─────────────────────────────────
@@ -650,7 +648,7 @@ async def _completed_12(db, teacher, make_student):
         scores={"report": 4, "star": 2},
     )
     await _attempt(db, sub, student.id, is_passed=True, score=3, max_score=4)
-    await finalize_grade(db, sub)
+    await settle.settle(db, sa)
     await db.commit()
     return subject, asg, student, sa, sub
 
@@ -823,7 +821,7 @@ async def test_save_waits_for_a_concurrent_quiz_pass(
         locked = (
             await other.execute(select(Submission).where(Submission.id == sub.id).with_for_update())
         ).scalar_one()
-        locked.status = SubmissionStatus.AWAITING_TEACHER_REVIEW  # as quiz_passed_teacher does
+        locked.status = SubmissionStatus.AWAITING_TEACHER_REVIEW  # as settle does
         await other.flush()
         save = asyncio.create_task(
             client.post(

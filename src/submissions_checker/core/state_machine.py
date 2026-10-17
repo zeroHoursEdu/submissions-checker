@@ -11,8 +11,6 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     # ── New precise flow ──────────────────────────────────────────────────────
     SubmissionStatus.PENDING: {
         "start_validation": SubmissionStatus.VALIDATING,
-        # quiz_and_teacher_scores: the student opened the quiz with nothing to check.
-        "quiz_opened": SubmissionStatus.QUIZ_SENT,
     },
     SubmissionStatus.VALIDATING: {
         "validation_passed": SubmissionStatus.TESTING,
@@ -20,49 +18,30 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
     },
     SubmissionStatus.TESTING: {
         "test_failed": SubmissionStatus.TEST_FAILED,
-        "test_passed_tests_only": SubmissionStatus.COMPLETED,
         "test_passed_ai": SubmissionStatus.AWAITING_AI_REVIEW,
-        "test_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
-        "test_passed_quiz": SubmissionStatus.QUIZ_SENT,
     },
     SubmissionStatus.AWAITING_AI_REVIEW: {
         "start_ai_review": SubmissionStatus.AI_REVIEWING,
     },
     SubmissionStatus.AI_REVIEWING: {
-        "ai_review_done_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
-        "ai_review_done_completed": SubmissionStatus.COMPLETED,
-        "ai_review_passed_quiz": SubmissionStatus.QUIZ_SENT,
         "ai_review_failed": SubmissionStatus.AI_REVIEW_FAILED,
     },
     SubmissionStatus.AI_REVIEW_FAILED: {
         "retry_ai_review": SubmissionStatus.AI_REVIEWING,
-        # Teacher gives up on the AI and reviews by hand.
-        "ai_review_skip_to_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
     },
     SubmissionStatus.QUIZ_SENT: {
-        "quiz_passed": SubmissionStatus.COMPLETED,
-        "quiz_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
-        "quiz_failed": SubmissionStatus.FAILED,
         # Squads only: member A exhausted (→ FAILED), was granted an attempt (→ QUIZ_SENT),
         # and member B — mid-attempt at the time — has since exhausted too. B's grant
         # lands while the submission is already QUIZ_SENT; the self-loop keeps one path.
         "quiz_attempt_granted": SubmissionStatus.QUIZ_SENT,
     },
     SubmissionStatus.AWAITING_TEACHER_REVIEW: {
-        "teacher_approve": SubmissionStatus.COMPLETED,
         "teacher_reject": SubmissionStatus.FAILED,
-        "teacher_send_quiz": SubmissionStatus.QUIZ_SENT,
     },
-    # FAILED is otherwise terminal. The exceptions are a teacher accepting a
-    # broken-question dispute (the attempt is re-scored, now clears the threshold, and the
-    # submission has to follow — a student must not stay failed on a question the teacher
-    # has agreed was wrong; named distinctly from `quiz_passed` on purpose, so that an
-    # ordinary late-finishing attempt can never resurrect a failed submission by accident)
-    # and a teacher granting one more quiz attempt to a student who exhausted
-    # max_quiz_attempts (services.quiz_grants checks that this is why it failed).
+    # FAILED is otherwise terminal; the exceptions are a teacher granting one more quiz
+    # attempt to a student who exhausted max_quiz_attempts (services.quiz_grants checks that
+    # this is why it failed) and the settle events below.
     SubmissionStatus.FAILED: {
-        "dispute_regrade_passed": SubmissionStatus.COMPLETED,
-        "dispute_regrade_passed_teacher": SubmissionStatus.AWAITING_TEACHER_REVIEW,
         "quiz_attempt_granted": SubmissionStatus.QUIZ_SENT,
     },
 }

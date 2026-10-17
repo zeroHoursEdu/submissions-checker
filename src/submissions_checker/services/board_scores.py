@@ -104,8 +104,9 @@ async def save_row(
 ) -> settle.SettleResult:
     """Store one student's teacher items and settle their work. Does not commit.
 
-    Squad points are shared like the grade. LLM-graded: saving approves the draft the row
-    showed, refused when the student's name match is unconfirmed or a newer draft landed.
+    Squad points are shared like the grade. LLM-graded: the draft the row showed is approved
+    only when an LLM-graded score is actually saved (adopted); the save is refused when the
+    student's name match is unconfirmed or a newer draft landed.
     """
     subject_id, sa_id = assignment.subject_id, assignment.id
     plan = settle.plan_for(assignment)

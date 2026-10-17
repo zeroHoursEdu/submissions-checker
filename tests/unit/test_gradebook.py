@@ -3,8 +3,7 @@
 No database: these are the classification rules a teacher-facing grid and an
 integrity table apply to already-fetched rows. DB-touching query functions
 (`fetch_roster_rows`, `fetch_integrity_rows`) are covered separately in
-tests/functional/test_gradebook.py, matching how services.grading splits
-`compute_grade` (unit) from `finalize_grade` (functional).
+tests/functional/test_gradebook.py.
 """
 
 from __future__ import annotations

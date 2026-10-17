@@ -66,7 +66,7 @@ class _FakeDB:
         return _Result(self._submission)
 
     async def get(self, model, pk):
-        # finalize_grade re-fetches the target StudentAssignment(s) by id rather than
+        # settle re-fetches the target StudentAssignment(s) by id rather than
         # writing straight to the already-loaded row (squad submissions fan the grade
         # out to every member's row) — route that lookup to the fake's own SA, and
         # everything else (the plugin config) to the config record as before.

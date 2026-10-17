@@ -1,18 +1,15 @@
-"""Grade rules for ``review_mode: quiz_and_teacher_scores``.
+"""Legacy ``review_mode: quiz_and_teacher_scores`` config: detection, criteria, validation.
 
-The platform examines only the defence (a quiz); the teacher grades the work outside it and
-types per-criterion points on the assignment board. The grade is quiz points plus teacher
-points. Pure and DB-free: config validation, form parsing and the formula live here so
-``config_apply``, ``grading`` and the teacher route share one definition.
+Grading itself lives in ``services.requirements`` / ``services.settle``; this module only
+reads and validates the old config shape, which ``requirements.from_config`` translates.
+Pure and DB-free.
 """
 
 from __future__ import annotations
 
-import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypeGuard
 
 MODE = "quiz_and_teacher_scores"
@@ -25,10 +22,6 @@ class Criterion:
     title: str
     max: int
     optional: bool
-
-
-class ScoreError(ValueError):
-    """Teacher input that cannot be stored as points."""
 
 
 def _is_int(value: Any) -> TypeGuard[int]:
@@ -83,68 +76,3 @@ def validate_assignment(code: str, a_cfg: Mapping[str, Any]) -> None:
             f"{where}: quiz_points + criteria max ({quiz_points} + {total}) must equal "
             f"max_grade - min_grade ({span})"
         )
-
-
-def parse_form(crits: list[Criterion], form: Mapping[str, str]) -> dict[str, int]:
-    """Read ``score_<key>`` fields; an empty field means "not entered" and is left out."""
-    out: dict[str, int] = {}
-    for c in crits:
-        raw = (form.get(f"score_{c.key}") or "").strip()
-        if raw == "":
-            continue
-        if not raw.isdigit():
-            raise ScoreError(f"{c.title}: '{raw}' is not a whole number")
-        value = int(raw)
-        if value > c.max:
-            raise ScoreError(f"{c.title}: {value} is above the maximum {c.max}")
-        out[c.key] = value
-    return out
-
-
-def is_complete(crits: list[Criterion], scores: Mapping[str, int] | None) -> bool:
-    """True when every required criterion has a value (optional ones may stay empty)."""
-    have = scores or {}
-    return all(c.optional or c.key in have for c in crits)
-
-
-def quiz_points_for(
-    grading_cfg: Mapping[str, Any] | None, quiz_pct: float, *, round_up: bool = False
-) -> int:
-    """The quiz half in points: ``quiz_pct`` of ``quiz_points``, half up (squads: ceil)."""
-    raw = round(quiz_pct / 100.0 * int((grading_cfg or {}).get("quiz_points", 0)), 6)
-    if round_up:
-        return math.ceil(raw)
-    return int(Decimal(str(raw)).quantize(Decimal(1), ROUND_HALF_UP))
-
-
-def compute(
-    grading_cfg: Mapping[str, Any] | None,
-    min_grade: int,
-    max_grade: int,
-    *,
-    quiz_pct: float,
-    scores: Mapping[str, int],
-    round_up: bool = False,
-) -> dict[str, Any]:
-    """The ``grade_breakdown`` dict: quiz share of ``quiz_points`` plus every criterion.
-
-    Rounds the quiz half up (a teacher reads 4.5 as 5, not banker's 4); squads round up,
-    as the blended path does for them.
-    """
-    cfg = grading_cfg or {}
-    quiz_max = int(cfg.get("quiz_points", 0))
-    quiz_awarded = quiz_points_for(cfg, quiz_pct, round_up=round_up)
-    crits = criteria(cfg)
-    points = [int(scores.get(c.key, 0)) for c in crits]
-    rows = [
-        {"key": c.key, "title": c.title, "points": p, "max": c.max}
-        for c, p in zip(crits, points, strict=True)
-    ]
-    total = min_grade + quiz_awarded + sum(points)
-    return {
-        "grade": max(min_grade, min(max_grade, total)),
-        "mode": MODE,
-        "quiz_score": quiz_pct,
-        "quiz": {"pct": quiz_pct, "points": quiz_awarded, "max": quiz_max},
-        "criteria": rows,
-    }

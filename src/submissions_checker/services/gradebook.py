@@ -3,8 +3,7 @@
 Everything here is computed once per page load in `teacher_portal.teacher_subject`
 and handed to the template pre-shaped — no per-row recomputation in Jinja or JS.
 
-Split the way `services.grading` splits `compute_grade` (pure) from
-`finalize_grade` (DB-touching): the classification rules below (`cell_status`,
+The classification rules below (`cell_status`,
 `severity_for`, `duration_anomalous`, `median_duration`) and the aggregations
 built on top of them (`compute_cached_stats`, `build_student_grid`) are pure
 and DB-free; `fetch_roster_rows`, `fetch_integrity_rows`, `fetch_grid_rows`
@@ -473,8 +472,7 @@ def build_student_grid(rows: list[GridSourceRow]) -> StudentGrid:
 async def fetch_grid_rows(db: AsyncSession, subject_id: int) -> list[GridSourceRow]:
     """One row per (enrolled real student, subject assignment) pair, with the
     student's group name and their latest submission's quiz/review component
-    scores (Submission.grade_breakdown's quiz_score/quality_score — see
-    services.grading.GradeBreakdown) for the Студенти tab's grid.
+    scores (Submission.grade_breakdown's quiz_score/quality_score) for the Студенти tab's grid.
 
     Same "latest submission per student_assignment" pattern as fetch_roster_rows,
     duplicated rather than shared because this query needs two extra joins

@@ -325,7 +325,7 @@ async def _accept_without_checks(db: AsyncSession, submission: Submission) -> No
     exactly as it would on the sandbox path rather than reaching the student's quiz.
 
     ``test_results`` deliberately carries no ``score``/``max_score``: ``grading._pct`` then
-    returns None for the works component and ``compute_grade`` renormalises onto the quiz.
+    returns None for the works component, so the grade rests on the quiz alone.
     """
     saved_as = (submission.source_metadata or {}).get("saved_as")
     if not saved_as:

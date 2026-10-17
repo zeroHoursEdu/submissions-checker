@@ -26,33 +26,21 @@ class _Sub:
 LEGAL = [
     # New precise flow
     (S.PENDING, "start_validation", S.VALIDATING),
-    (S.PENDING, "quiz_opened", S.QUIZ_SENT),
     (S.VALIDATING, "validation_passed", S.TESTING),
     (S.VALIDATING, "validation_failed", S.VALIDATION_FAILED),
     (S.TESTING, "test_failed", S.TEST_FAILED),
-    (S.TESTING, "test_passed_tests_only", S.COMPLETED),
     (S.TESTING, "test_passed_ai", S.AWAITING_AI_REVIEW),
-    (S.TESTING, "test_passed_teacher", S.AWAITING_TEACHER_REVIEW),
-    (S.TESTING, "test_passed_quiz", S.QUIZ_SENT),
     (S.AWAITING_AI_REVIEW, "start_ai_review", S.AI_REVIEWING),
-    (S.AI_REVIEWING, "ai_review_done_teacher", S.AWAITING_TEACHER_REVIEW),
-    (S.AI_REVIEWING, "ai_review_done_completed", S.COMPLETED),
-    (S.AI_REVIEWING, "ai_review_passed_quiz", S.QUIZ_SENT),
     (S.AI_REVIEWING, "ai_review_failed", S.AI_REVIEW_FAILED),
     (S.AI_REVIEW_FAILED, "retry_ai_review", S.AI_REVIEWING),
-    (S.AWAITING_TEACHER_REVIEW, "teacher_approve", S.COMPLETED),
     (S.AWAITING_TEACHER_REVIEW, "teacher_reject", S.FAILED),
-    (S.AWAITING_TEACHER_REVIEW, "teacher_send_quiz", S.QUIZ_SENT),
     # The one way out of a terminal FAILED: a teacher accepted a broken-question
     # dispute, the attempt was re-scored and now passes.
-    (S.FAILED, "dispute_regrade_passed", S.COMPLETED),
-    (S.FAILED, "dispute_regrade_passed_teacher", S.AWAITING_TEACHER_REVIEW),
     # A teacher grants one more quiz attempt to an exhausted student. The self-loop on
     # QUIZ_SENT is for a squad whose second member exhausted after the first was granted.
     (S.FAILED, "quiz_attempt_granted", S.QUIZ_SENT),
     (S.QUIZ_SENT, "quiz_attempt_granted", S.QUIZ_SENT),
     # Teacher unstick controls
-    (S.AI_REVIEW_FAILED, "ai_review_skip_to_teacher", S.AWAITING_TEACHER_REVIEW),
     (S.VALIDATING, "requeue_checks", S.PENDING),
     (S.TESTING, "requeue_checks", S.PENDING),
     (S.AWAITING_AI_REVIEW, "requeue_checks", S.PENDING),
@@ -76,19 +64,12 @@ def test_legal_transition_succeeds(start: S, event: str, expected: S) -> None:
 # unknown events and terminal states.
 ILLEGAL = [
     (S.PENDING, "validation_passed"),  # wrong event for PENDING
-    (S.PENDING, "teacher_approve"),
     (S.VALIDATING, "start_validation"),  # cannot re-start
     (S.VALIDATING, "test_passed_ai"),
     (S.TESTING, "validation_passed"),
-    (S.COMPLETED, "teacher_approve"),  # terminal
     (S.COMPLETED, "start_validation"),
     (S.FAILED, "teacher_reject"),  # still terminal for everything but a dispute regrade
-    (S.FAILED, "quiz_passed"),  # a plain quiz outcome must never resurrect a failure
-    (S.FAILED, "teacher_approve"),
     # The regrade edge is pinned to FAILED alone.
-    (S.COMPLETED, "dispute_regrade_passed"),
-    (S.QUIZ_SENT, "dispute_regrade_passed"),
-    (S.AWAITING_TEACHER_REVIEW, "dispute_regrade_passed"),
     # A grant only re-opens a quiz; it never un-completes or skips a teacher review.
     (S.COMPLETED, "quiz_attempt_granted"),
     (S.AWAITING_TEACHER_REVIEW, "quiz_attempt_granted"),
@@ -96,6 +77,8 @@ ILLEGAL = [
     (S.VALIDATION_FAILED, "validation_passed"),
     (S.TEST_FAILED, "test_passed_ai"),
     (S.AWAITING_TEACHER_REVIEW, "teacher_approve_done"),  # retired legacy event
+    (S.AWAITING_TEACHER_REVIEW, "teacher_approve"),  # settle decides completion now
+    (S.QUIZ_SENT, "quiz_passed"),
     (S.PENDING, "totally_unknown_event"),
 ]
 

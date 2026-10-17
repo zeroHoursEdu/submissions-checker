@@ -15,7 +15,6 @@ import pytest
 
 from submissions_checker.api.routes import student_quiz
 from submissions_checker.db.models.enums import SubmissionStatus
-from submissions_checker.services.grading import compute_grade
 from submissions_checker.workers.tasks import check_tasks
 
 # ── _build_questions_from_config: per-question seconds ───────────────────────
@@ -160,35 +159,6 @@ def test_seconds_remaining_never_goes_negative() -> None:
     assert student_quiz._question_seconds_remaining(attempt) == 1
     attempt.question_started_at = datetime.now(UTC) - timedelta(seconds=120)
     assert student_quiz._question_seconds_remaining(attempt) == 0
-
-
-# ── grading with no test component ───────────────────────────────────────────
-
-
-def test_grade_is_the_quiz_alone_when_nothing_ran() -> None:
-    breakdown = compute_grade(
-        {"code_weight": 0, "quiz_weight": 1},
-        0,
-        8,
-        works_pct=None,
-        ai_mark=None,
-        quiz_pct=75.0,
-    )
-    assert breakdown.works_score is None
-    assert breakdown.quiz_score == 75.0
-    assert breakdown.grade == 6  # 75% of an 8-point band
-
-
-def test_full_quiz_score_reaches_the_top_of_the_band() -> None:
-    breakdown = compute_grade(
-        {"code_weight": 0, "quiz_weight": 1},
-        0,
-        8,
-        works_pct=None,
-        ai_mark=None,
-        quiz_pct=100.0,
-    )
-    assert breakdown.grade == 8
 
 
 # ── check-free review modes ──────────────────────────────────────────────────
