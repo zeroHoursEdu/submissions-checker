@@ -1002,7 +1002,7 @@ async def test_rerun_checks_requeues_and_unpins_config(
     assert rows and rows[-1].payload["submission_id"] == sub.id
 
 
-async def test_send_failed_ai_review_to_teacher(
+async def test_send_to_teacher_route_is_gone(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
     _subject, _sa, sub = await _sub_with_config(
@@ -1010,12 +1010,12 @@ async def test_send_failed_ai_review_to_teacher(
     )
     authenticate(client, teacher)
     r = await client.post(f"/teacher/submissions/{sub.id}/send-to-teacher", follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code in (404, 405)
     await db.refresh(sub)
-    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    assert sub.status == SubmissionStatus.AI_REVIEW_FAILED
 
 
-async def test_retry_ai_review_enqueues_with_derived_next_step(
+async def test_retry_ai_review_enqueues_submission_id_only(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
     _subject, _sa, sub = await _sub_with_config(
@@ -1039,7 +1039,7 @@ async def test_retry_ai_review_enqueues_with_derived_next_step(
         .scalars()
         .all()
     )
-    assert rows[-1].payload == {"submission_id": sub.id, "next_step": "teacher"}
+    assert rows[-1].payload == {"submission_id": sub.id}
 
 
 async def test_unstick_routes_refuse_wrong_status(
@@ -1049,7 +1049,7 @@ async def test_unstick_routes_refuse_wrong_status(
         db, teacher, make_student, status=SubmissionStatus.COMPLETED
     )
     authenticate(client, teacher)
-    for path in ("rerun-checks", "retry-ai-review", "send-to-teacher"):
+    for path in ("rerun-checks", "retry-ai-review"):
         r = await client.post(f"/teacher/submissions/{sub.id}/{path}", follow_redirects=False)
         assert r.status_code == 409, path
 

@@ -229,7 +229,7 @@ def _quiz_first_config(review_mode: str) -> dict:
     }
 
 
-def _quiz_first_submission():
+def _quiz_first_submission(review_mode: str = "quiz_then_teacher"):
     subject = SimpleNamespace(id=5)
     subjects_assignment = SimpleNamespace(
         id=7,
@@ -237,7 +237,7 @@ def _quiz_first_submission():
         title="Lab 1",
         subject=subject,
         subject_id=5,
-        config={},
+        config={"review_mode": review_mode},
         min_grade=0,
         max_grade=8,
     )
@@ -266,18 +266,27 @@ async def test_quiz_first_mode_skips_the_sandbox(tmp_path, monkeypatch, review_m
     with zipfile.ZipFile(tmp_path / "s.zip", "w") as zf:
         zf.writestr("report.md", "# lab 1\n")
 
-    submission = _quiz_first_submission()
+    submission = _quiz_first_submission(review_mode)
     db = _FakeDB(
         submission, SimpleNamespace(id=99, version=2, config=_quiz_first_config(review_mode))
     )
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks.check_core, "run_check", _explode)
     monkeypatch.setattr(check_tasks.check_core, "resolve_check_plan", _explode)
+    settled: list = []
+
+    async def fake_settle(_db, sa, **_kw):
+        settled.append(sa)
+        return SimpleNamespace(completed_now=False)
+
+    monkeypatch.setattr(check_tasks.settle, "settle", fake_settle)
 
     await check_tasks.execute_check_task(db, {"submission_id": 1})
 
-    assert submission.status == SubmissionStatus.QUIZ_SENT
-    assert submission.test_results == {"skipped": True, "reason": review_mode}
+    # processing_done, then settle decides the final status (covered against a real DB).
+    assert submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    assert settled == [submission.students_assignment]
+    assert submission.test_results == {"skipped": True, "reason": "requirements"}
     # No score/max_score, so the works component drops out of the grade entirely.
     assert "score" not in submission.test_results
 

@@ -1,12 +1,9 @@
 """AI code-review task — provider-agnostic (Claude/OpenAI), structured verdict.
 
 Runs after tests pass. Produces a structured verdict (cheating, AI-generated,
-code-quality mark, comment) stored on ``submission.ai_review``, then routes:
-
-- ``next_step == "quiz"``: clean work → ``QUIZ_SENT``; flagged (cheating or
-  AI-generated at/above the configured confidence) → ``AWAITING_TEACHER_REVIEW``.
-- ``next_step == "teacher"``: always → ``AWAITING_TEACHER_REVIEW``.
-- otherwise: → ``COMPLETED`` (and grade is finalized).
+code-quality mark, comment) stored on ``submission.ai_review``, then hands over to
+``settle``, which decides the status and grade from the assignment's requirements. A
+flagged verdict is shown as a badge on the board, not rerouted; the teacher may Reject.
 """
 
 from __future__ import annotations
@@ -28,10 +25,8 @@ from submissions_checker.core.logging import get_logger
 from submissions_checker.core.state_machine import transition
 from submissions_checker.db.models import StudentAssignment, SubjectsAssignment, Submission
 from submissions_checker.db.models.enums import SubmissionStatus
+from submissions_checker.services import settle
 from submissions_checker.services.ai.provider import AIProviderError, get_ai_provider
-from submissions_checker.services.ai_verdict import is_flagged
-from submissions_checker.services.grading import finalize_grade
-from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
 logger = get_logger(__name__)
 
@@ -253,8 +248,7 @@ async def execute_ai_review_task(db: AsyncSession, payload: dict[str, Any]) -> N
 async def _execute_ai_review(
     db: AsyncSession, payload: dict[str, Any], submission_id: int | None
 ) -> None:
-    next_step = payload.get("next_step", "completed")
-    logger.info("execute_ai_review_task_started", submission_id=submission_id, next_step=next_step)
+    logger.info("execute_ai_review_task_started", submission_id=submission_id)
 
     result = await db.execute(
         select(Submission)
@@ -305,19 +299,7 @@ async def _execute_ai_review(
         duration_ms=round((time.perf_counter() - started) * 1000),
     )
 
-    if next_step == "quiz":
-        if is_flagged(verdict, ai_review_cfg):
-            transition(submission, "ai_review_done_teacher")
-            await enqueue_teacher_review_notification(db, submission.id)
-        else:
-            transition(submission, "ai_review_passed_quiz")
-    elif next_step == "teacher":
-        transition(submission, "ai_review_done_teacher")
-        await enqueue_teacher_review_notification(db, submission.id)
-    else:
-        transition(submission, "ai_review_done_completed")
-        await finalize_grade(db, submission)
+    transition(submission, "processing_done")
+    await settle.settle(db, sa)
 
-    logger.info(
-        "execute_ai_review_task_completed", submission_id=submission_id, next_step=next_step
-    )
+    logger.info("execute_ai_review_task_completed", submission_id=submission_id)

@@ -46,7 +46,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import squads, teacher_scores
+from submissions_checker.services import settle, squads, teacher_scores
 from submissions_checker.services.audit import audit
 from submissions_checker.services.gradebook import breakdown_line
 from submissions_checker.services.quiz_grants import effective_max_attempts
@@ -54,8 +54,8 @@ from submissions_checker.services.similarity import compare_zip_files
 from submissions_checker.services.storage import get_storage
 from submissions_checker.services.submission_files import read_submission_zip, store_submission_zip
 from submissions_checker.workers.tasks.check_tasks import (
+    accepts_without_checks,
     execute_check_task,
-    is_quiz_first_assignment,
 )
 
 router = APIRouter(prefix="/portal", tags=["student-portal"])
@@ -555,10 +555,8 @@ async def submit_assignment(
     subjects_assignment = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
     if subjects_assignment is None:
         raise HTTPException(status_code=404)
-    if teacher_scores.is_scored_mode(subjects_assignment.config):
-        raise HTTPException(
-            status_code=409, detail="This assignment takes no upload; open the quiz instead."
-        )
+    if settle.plan_for(subjects_assignment).source != "upload":
+        raise HTTPException(status_code=409, detail="This assignment takes no upload")
 
     # Late submission enforcement
     if subjects_assignment.deadline is not None:
@@ -675,7 +673,7 @@ async def submit_assignment(
     # Quiz-examined assignments have nothing to run — no sandbox, no container — so they are
     # accepted here, in the request, and the page this redirects to already carries the quiz
     # link. Everything else stays PENDING until the outbox processor picks it up.
-    if await is_quiz_first_assignment(db, subjects_assignment.subject_id, subjects_assignment.code):
+    if await accepts_without_checks(db, subjects_assignment.subject_id, subjects_assignment.code):
         await execute_check_task(db, {"submission_id": submission.id})
     else:
         db.add(

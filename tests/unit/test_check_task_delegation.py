@@ -143,6 +143,15 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         return check_core.CheckOutcome("passed", 100, 100, canned_tests)
 
     monkeypatch.setattr(check_tasks.check_core, "run_check", fake_run_check)
+    # Status and grade are settle's job (covered against a real DB); here only that the
+    # worker hands the student's assignment over once the tests have passed.
+    settled: list = []
+
+    async def fake_settle(_db, sa, **_kw):
+        settled.append(sa)
+        return SimpleNamespace(completed_now=False)
+
+    monkeypatch.setattr(check_tasks.settle, "settle", fake_settle)
     passed_before = metrics.checks_total.labels(outcome="passed")._value.get()
     observed_before = metrics.check_duration_seconds._sum.get()
 
@@ -164,15 +173,15 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         "tests": canned_tests,
         "plugin_config_version": 2,
     }
-    assert submission.status == SubmissionStatus.COMPLETED
-    # Tests-only completion finalizes the grade: works=100%, default weights → 100.
-    assert student_assignment.grade == 100
-    assert submission.grade_breakdown["grade"] == 100
+    assert submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW  # processing_done
+    assert settled == [student_assignment]
 
 
 async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None:
     subject = SimpleNamespace(id=5)
-    subjects_assignment = SimpleNamespace(code="missing", subject=subject)
+    subjects_assignment = SimpleNamespace(
+        code="missing", subject=subject, config={}, min_grade=0, max_grade=100
+    )
     student_assignment = SimpleNamespace(variant=None, subjects_assignment=subjects_assignment)
     submission = SimpleNamespace(
         id=1,
@@ -219,7 +228,9 @@ async def test_worker_check_execution_error_fails_validation_not_wedged(
         zf.writestr("solution.py", "print('hi')\n")
 
     subject = SimpleNamespace(id=5)
-    subjects_assignment = SimpleNamespace(code="lab1", subject=subject)
+    subjects_assignment = SimpleNamespace(
+        code="lab1", subject=subject, config={}, min_grade=0, max_grade=100
+    )
     student_assignment = SimpleNamespace(variant="3", subjects_assignment=subjects_assignment)
     submission = SimpleNamespace(
         id=1,

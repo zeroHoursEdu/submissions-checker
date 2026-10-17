@@ -39,16 +39,14 @@ from submissions_checker.db.models.enums import (
     OutboxMessageState,
     SubmissionStatus,
 )
-from submissions_checker.services import check_core
+from submissions_checker.services import check_core, settle
 from submissions_checker.services.docker_sandbox import DockerSandbox
-from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.notification_service import push_notification
 from submissions_checker.services.plugin_cache import materialize_plugin_tree
 from submissions_checker.services.storage import get_storage
 from submissions_checker.services.subject_config import validate_subject_code
 from submissions_checker.services.submission_files import read_submission_zip
 from submissions_checker.utils.safe_zip import UnsafeArchiveError, safe_extract
-from submissions_checker.workers.tasks.notification_tasks import enqueue_teacher_review_notification
 
 logger = get_logger(__name__)
 
@@ -57,34 +55,28 @@ _SANDBOX = DockerSandbox()
 
 MISSING_ARCHIVE_REASON = "Subject config has no stored archive — re-apply the subject config."
 
-# Review modes that examine the student by quiz instead of by automated tests. Assignments in
-# these modes need no `sandbox`/`check_command` block at all: the upload is accepted after an
-# archive-safety check and the submission goes straight to the quiz.
-# quiz_and_teacher_scores is normally opened with no upload at all (services.quiz_open); a
-# legacy ZIP that reaches the worker is accepted the same check-free way.
-_QUIZ_FIRST_MODES = frozenset({"quiz_only", "quiz_then_teacher", "quiz_and_teacher_scores"})
 
-
-async def is_quiz_first_assignment(
+async def accepts_without_checks(
     db: AsyncSession, subject_id: int, assignment_code: str | None
 ) -> bool:
-    """True when this assignment is examined by quiz and runs no checker at all.
+    """True when the assignment takes an upload but runs no checker (no tests/ai items).
 
     Asked at upload time so the submit handler can accept the submission inline instead of
-    handing it to the outbox: there is no sandbox to start for these modes, and the 10-second
-    poll was the only thing standing between the student and their quiz. Unknown subjects,
-    unmapped assignments and missing configs all answer False — those need the worker's
-    error handling, not a shortcut through it.
+    handing it to the outbox: there is no sandbox to start, and the 10-second poll would
+    be the only thing between the student and their next step. Unknown assignments answer
+    False — those need the worker's error handling, not a shortcut through it.
     """
     if not assignment_code:
         return False
-    config_record = await _fetch_latest_config(db, subject_id)
-    if config_record is None:
-        return False
-    plugin_assignment: dict[str, Any] = config_record.config.get("assignments", {}).get(
-        assignment_code, {}
+    asg = await db.scalar(
+        select(SubjectsAssignment).where(
+            SubjectsAssignment.subject_id == subject_id, SubjectsAssignment.code == assignment_code
+        )
     )
-    return plugin_assignment.get("review_mode", "tests_only") in _QUIZ_FIRST_MODES
+    if asg is None:
+        return False
+    plan = settle.plan_for(asg)
+    return plan.source == "upload" and not (plan.has("tests") or plan.has("ai_review"))
 
 
 def _resolve_plugin_dir(
@@ -151,16 +143,12 @@ async def _execute_check(db: AsyncSession, submission_id: int) -> None:
 
     assignment_code = subjects_assignment.code
     variant = student_assignment.variant
-    plugin_assignment: dict[str, Any] = config_record.config.get("assignments", {}).get(
-        assignment_code, {}
-    )
 
-    review_mode: str = plugin_assignment.get("review_mode", "tests_only")
-
-    # Quiz-examined assignments never touch the sandbox — bail out before a check plan is even
-    # resolved, since these configs legitimately carry no check_command.
-    if review_mode in _QUIZ_FIRST_MODES:
-        await _accept_without_checks(submission, review_mode)
+    # Assignments with no tests/ai item never touch the sandbox — bail out before a check
+    # plan is even resolved, since these configs legitimately carry no check_command.
+    plan_reqs = settle.plan_for(subjects_assignment)
+    if not (plan_reqs.has("tests") or plan_reqs.has("ai_review")):
+        await _accept_without_checks(db, submission)
         return
 
     # An assignment with no plugin key cannot be matched to anything in config.yml.
@@ -280,6 +268,7 @@ async def _execute_check(db: AsyncSession, submission_id: int) -> None:
 
         if not outcome.passed:
             transition(submission, "test_failed")
+            await settle.settle(db, student_assignment)
             await _notify_student(
                 db,
                 student_assignment.student_id,
@@ -289,7 +278,7 @@ async def _execute_check(db: AsyncSession, submission_id: int) -> None:
             )
             return
 
-        await _advance_after_tests(db, submission, review_mode)
+        await _advance_after_tests(db, submission)
 
 
 async def _notify_student(
@@ -328,7 +317,7 @@ def _fail_validation(submission: Submission, reason: str) -> None:
     transition(submission, "validation_failed")
 
 
-async def _accept_without_checks(submission: Submission, review_mode: str) -> None:
+async def _accept_without_checks(db: AsyncSession, submission: Submission) -> None:
     """Accept a quiz-examined submission without running any check.
 
     No sandbox, no check plan — but the archive is still opened and safe-extracted to a
@@ -359,15 +348,18 @@ async def _accept_without_checks(submission: Submission, review_mode: str) -> No
             _fail_validation(submission, f"Submitted ZIP archive is unsafe: {exc}")
             return
 
-    submission.test_results = {"skipped": True, "reason": review_mode}
+    submission.test_results = {"skipped": True, "reason": "requirements"}
     transition(submission, "start_validation")
     transition(submission, "validation_passed")
-    transition(submission, "test_passed_quiz")
-    logger.info("check_task_skipped_for_quiz", submission_id=submission.id, review_mode=review_mode)
+    transition(submission, "processing_done")
+    await settle.settle(db, submission.students_assignment)
+    logger.info("check_task_skipped_no_checks", submission_id=submission.id)
 
 
-async def _advance_after_tests(db: AsyncSession, submission: Submission, review_mode: str) -> None:
-    if review_mode == "tests_then_ai":
+async def _advance_after_tests(db: AsyncSession, submission: Submission) -> None:
+    sa = submission.students_assignment
+    asg = sa.subjects_assignment
+    if settle.plan_for(asg).has("ai_review"):
         transition(submission, "test_passed_ai")
         db.add(
             OutboxMessage(
@@ -376,39 +368,16 @@ async def _advance_after_tests(db: AsyncSession, submission: Submission, review_
                 payload={"submission_id": submission.id},
             )
         )
-    elif review_mode == "tests_then_teacher":
-        transition(submission, "test_passed_teacher")
-        await enqueue_teacher_review_notification(db, submission.id)
-    elif review_mode in ("tests_then_ai_then_teacher", "tests_then_ai_teacher"):
-        transition(submission, "test_passed_ai")
-        db.add(
-            OutboxMessage(
-                event_type=OutboxEventType.RUN_AI_REVIEW,
-                state=OutboxMessageState.PENDING,
-                payload={"submission_id": submission.id, "next_step": "teacher"},
-            )
-        )
-    elif review_mode == "tests_then_ai_then_quiz":
-        transition(submission, "test_passed_ai")
-        db.add(
-            OutboxMessage(
-                event_type=OutboxEventType.RUN_AI_REVIEW,
-                state=OutboxMessageState.PENDING,
-                payload={"submission_id": submission.id, "next_step": "quiz"},
-            )
-        )
-    elif review_mode == "tests_then_quiz":
-        transition(submission, "test_passed_quiz")
-    else:
-        transition(submission, "test_passed_tests_only")
-        # Tests-only submissions complete here — compute their final grade now.
-        await finalize_grade(db, submission)
-        sa = submission.students_assignment
-        subjects_assignment = sa.subjects_assignment
+        return
+    # Read before settle: its reload of the rows drops loaded relationships.
+    student_id, title, subject_id, asg_id = sa.student_id, asg.title, asg.subject_id, asg.id
+    transition(submission, "processing_done")
+    result = await settle.settle(db, sa)
+    if result.completed_now:
         await _notify_student(
             db,
-            sa.student_id,
-            title=f"{subjects_assignment.title}: passed",
-            body=f'Your submission for "{subjects_assignment.title}" passed the automated checks.',
-            link=f"/portal/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}",
+            student_id,
+            title=f"{title}: passed",
+            body=f'Your submission for "{title}" passed the automated checks.',
+            link=f"/portal/subjects/{subject_id}/assignments/{asg_id}",
         )

@@ -207,7 +207,9 @@ async def test_late_finalize_does_not_clobber_a_squad_mates_committed_transition
     own request already transitioned and committed the submission elsewhere, that
     in-memory value is stale. Without a locked refresh right before acting on it, a
     late-finishing attempt's transition would silently clobber the committed state."""
-    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(
+        db, make_user, make_student, teacher, review_mode="quiz_only"
+    )
     await _lock_pair(db, subject, teacher, (ua, ub))
     async with _client(ua) as ca:
         await ca.post(

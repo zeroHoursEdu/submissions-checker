@@ -123,7 +123,11 @@ async def _lock_pair(db, subject, teacher, users) -> None:
 
 
 async def test_one_upload_unlocks_the_quiz_for_both(db, make_user, make_student, teacher) -> None:
-    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(db, make_user, make_student, teacher)
+    # quiz_only: with teacher items owed the status would be AWAITING_TEACHER_REVIEW and the
+    # page hides the quiz button until Task 10 derives it from facts.
+    subject, asg, (ua, ub), (sa_a, sa_b) = await _arrange(
+        db, make_user, make_student, teacher, review_mode="quiz_only"
+    )
     await _lock_pair(db, subject, teacher, (ua, ub))
     async with _client(ua) as ca, _client(ub) as cb:
         r = await ca.post(
@@ -203,7 +207,9 @@ async def test_pending_invite_blocks_upload(db, make_user, make_student, teacher
 async def test_solo_student_on_squad_subject_is_unchanged(
     db, make_user, make_student, teacher
 ) -> None:
-    subject, asg, (ua, _), (sa_a, _) = await _arrange(db, make_user, make_student, teacher)
+    subject, asg, (ua, _), (sa_a, _) = await _arrange(
+        db, make_user, make_student, teacher, review_mode="quiz_only"
+    )
     async with _client(ua) as ca:
         r = await ca.post(
             f"/portal/subjects/{subject.id}/assignments/{sa_a.id}/submit",

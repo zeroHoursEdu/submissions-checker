@@ -107,6 +107,7 @@ async def _seed_submission(
     repository_path: str | None = None,
     variant: str | None = None,
     source_metadata: dict | None = None,
+    asg_config: dict | None = None,
 ) -> tuple[Student, User, SubjectsAssignment, StudentAssignment, Submission, Subject]:
     """Create the full student -> assignment -> submission chain for a test."""
     group = Group(name=f"grp-{suffix}")
@@ -128,7 +129,12 @@ async def _seed_submission(
     db.add(subject)
     await db.flush()
 
-    sa_tmpl = SubjectsAssignment(subject_id=subject.id, title=f"Assignment {suffix}", code="lab1")
+    sa_tmpl = SubjectsAssignment(
+        subject_id=subject.id,
+        title=f"Assignment {suffix}",
+        code="lab1",
+        **({"config": asg_config} if asg_config is not None else {}),
+    )
     db.add(sa_tmpl)
     await db.flush()
 
@@ -216,17 +222,23 @@ def _patch_provider(monkeypatch, fake: _FakeProvider) -> None:
     monkeypatch.setattr(review_tasks, "get_ai_provider", lambda *a, **k: fake)
 
 
-async def _seed_ai_submission(db: AsyncSession, suffix: str):
+async def _seed_ai_submission(db: AsyncSession, suffix: str, review_mode: str = "tests_then_ai"):
     """Submission ready for AI review (status AWAITING_AI_REVIEW)."""
     student, teacher, sa, enr, sub, subject = await _seed_submission(
-        db, suffix, status=SubmissionStatus.AWAITING_AI_REVIEW
+        db,
+        suffix,
+        status=SubmissionStatus.AWAITING_AI_REVIEW,
+        asg_config={"review_mode": review_mode},
     )
+    # The tests already passed — that is what sent the work to the AI reviewer.
+    sub.test_results = {"passed": True, "score": 10, "max_score": 10}
+    await db.commit()
     return student, teacher, sa, enr, sub, subject
 
 
 @pytest.mark.asyncio
 async def test_ai_review_completed_path(db_session: AsyncSession, monkeypatch) -> None:
-    """RUN_AI_REVIEW with next_step=completed -> COMPLETED + ai_review stored."""
+    """RUN_AI_REVIEW (tests_then_ai) -> COMPLETED + ai_review stored."""
     _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-done")
 
     fake = _FakeProvider(verdict=_verdict())
@@ -234,7 +246,7 @@ async def test_ai_review_completed_path(db_session: AsyncSession, monkeypatch) -
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "completed"},
+        payload={"submission_id": sub.id},
     )
     message = await _process(db_session, monkeypatch, message)
 
@@ -264,7 +276,7 @@ async def test_ai_review_completed_path_logs_ai_review_finished(
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "completed"},
+        payload={"submission_id": sub.id},
     )
     with capture_logs() as logs:
         message = await _process(db_session, monkeypatch, message)
@@ -281,15 +293,17 @@ async def test_ai_review_completed_path_logs_ai_review_finished(
 async def test_ai_review_teacher_path_enqueues_review(
     db_session: AsyncSession, monkeypatch
 ) -> None:
-    """RUN_AI_REVIEW with next_step=teacher -> AWAITING_TEACHER_REVIEW + queue row."""
-    _, teacher, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-teach")
+    """RUN_AI_REVIEW (tests_then_ai_then_teacher) -> AWAITING_TEACHER_REVIEW + queue row."""
+    _, teacher, _, _, sub, _ = await _seed_ai_submission(
+        db_session, "ai-teach", review_mode="tests_then_ai_then_teacher"
+    )
 
     fake = _FakeProvider(verdict=_verdict(comment="needs a look"))
     _patch_provider(monkeypatch, fake)
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "teacher"},
+        payload={"submission_id": sub.id},
     )
     message = await _process(db_session, monkeypatch, message)
 
@@ -325,7 +339,7 @@ async def test_ai_review_unusable_output_marks_failed(
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "completed"},
+        payload={"submission_id": sub.id},
     )
     message = await _process(db_session, monkeypatch, message)
 
@@ -350,7 +364,7 @@ async def test_ai_review_failure_logs_ai_review_failed_with_traceback(
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "completed"},
+        payload={"submission_id": sub.id},
     )
     with capture_logs() as logs:
         message = await _process(db_session, monkeypatch, message)
@@ -374,7 +388,7 @@ async def test_ai_review_malformed_verdict_marks_failed(
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "completed"},
+        payload={"submission_id": sub.id},
     )
     message = await _process(db_session, monkeypatch, message)
 
@@ -394,7 +408,7 @@ async def test_ai_review_client_error_is_handled(db_session: AsyncSession, monke
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "completed"},
+        payload={"submission_id": sub.id},
     )
     message = await _process(db_session, monkeypatch, message)
 
@@ -428,7 +442,7 @@ async def test_ai_review_reads_repository_code(
 
     message = OutboxMessage(
         event_type=OutboxEventType.RUN_AI_REVIEW,
-        payload={"submission_id": sub.id, "next_step": "completed"},
+        payload={"submission_id": sub.id},
     )
     message = await _process(db_session, monkeypatch, message)
 
@@ -948,6 +962,7 @@ async def _seed_check_submission(
         suffix,
         status=SubmissionStatus.PENDING,
         source_metadata={"saved_as": saved_as},
+        asg_config={"review_mode": review_mode},
     )
     if with_config:
         cfg = SubjectPluginConfig(
@@ -1137,6 +1152,9 @@ async def test_check_passed_tests_only_completes(
     assert message.state == OutboxMessageState.FINISHED
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.COMPLETED
+    sa_row = await db_session.get(StudentAssignment, sub.students_assignment_id)
+    await db_session.refresh(sa_row)
+    assert sa_row.grade is not None
     assert sub.test_results["passed"] is True
 
 
@@ -1357,13 +1375,15 @@ async def test_check_passed_tests_then_teacher_awaits_review(
     assert message.state == OutboxMessageState.FINISHED
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    sa_row = await db_session.get(StudentAssignment, sub.students_assignment_id)
+    assert sa_row.grade is None  # the teacher still owes the acceptance
 
 
 @pytest.mark.asyncio
-async def test_check_passed_tests_then_ai_then_teacher_enqueues_ai_with_next_step(
+async def test_check_passed_tests_then_ai_then_teacher_enqueues_ai_review(
     db_session: AsyncSession, test_settings, monkeypatch, tmp_path
 ) -> None:
-    """tests_then_ai_then_teacher mode -> AWAITING_AI_REVIEW + RUN_AI_REVIEW carrying next_step=teacher."""
+    """tests_then_ai_then_teacher mode -> AWAITING_AI_REVIEW + RUN_AI_REVIEW with only the submission id."""
     zip_path = tmp_path / "att.zip"
     _write_zip(zip_path)
     sub = await _seed_check_submission(
@@ -1400,7 +1420,7 @@ async def test_check_passed_tests_then_ai_then_teacher_enqueues_ai_with_next_ste
         .all()
     )
     mine = [m for m in ai_msgs if m.payload.get("submission_id") == sub.id]
-    assert mine and mine[0].payload.get("next_step") == "teacher"
+    assert mine and mine[0].payload == {"submission_id": sub.id}
 
 
 @pytest.mark.asyncio

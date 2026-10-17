@@ -362,8 +362,10 @@ def test_validate_teacher_scores_ignores_other_modes(svc: ConfigApplyService) ->
 
 
 def test_scored_mode_is_quiz_reachable_and_quiz_first() -> None:
+    from submissions_checker.services import requirements
     from submissions_checker.services.config_apply import _QUIZ_REACHABLE_MODES
-    from submissions_checker.workers.tasks.check_tasks import _QUIZ_FIRST_MODES
 
     assert "quiz_and_teacher_scores" in _QUIZ_REACHABLE_MODES
-    assert "quiz_and_teacher_scores" in _QUIZ_FIRST_MODES
+    # Takes no upload and runs no checker: the plan has no tests/ai_review item.
+    plan = requirements.from_config({"review_mode": "quiz_and_teacher_scores"})
+    assert not (plan.has("tests") or plan.has("ai_review"))

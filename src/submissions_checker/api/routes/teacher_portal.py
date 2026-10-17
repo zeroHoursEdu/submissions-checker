@@ -81,9 +81,6 @@ from submissions_checker.services.squads import SquadError
 from submissions_checker.services.storage import StorageService, get_storage
 from submissions_checker.services.submission_files import read_submission_zip
 from submissions_checker.utils.csv_export import csv_safe
-from submissions_checker.workers.tasks.notification_tasks import (
-    enqueue_teacher_review_notification,
-)
 
 UPLOADS_DIR = Path("uploads")
 
@@ -1765,15 +1762,6 @@ def _board_url(submission: Submission) -> str:
     return f"/teacher/subjects/{sa.subject_id}/assignments/{sa.id}"
 
 
-def _next_step_for(review_mode: str) -> str:
-    """The RUN_AI_REVIEW payload's next_step, derived from the assignment's review mode."""
-    if review_mode.endswith("then_teacher") or review_mode.endswith("ai_teacher"):
-        return "teacher"
-    if review_mode.endswith("then_quiz"):
-        return "quiz"
-    return "completed"
-
-
 def _requeue_checks(db: DBSession, submission: Submission) -> None:
     """Send a submission back to PENDING and enqueue RUN_CHECKS.
 
@@ -1829,43 +1817,16 @@ async def teacher_retry_ai_review(
         raise HTTPException(
             status_code=409, detail="Submission is not in a state that allows this action"
         )
-    sa_cfg = submission.students_assignment.subjects_assignment.config or {}
     db.add(
         OutboxMessage(
             event_type=OutboxEventType.RUN_AI_REVIEW,
             state=OutboxMessageState.PENDING,
-            payload={
-                "submission_id": submission.id,
-                "next_step": _next_step_for(str(sa_cfg.get("review_mode", "tests_only"))),
-            },
+            payload={"submission_id": submission.id},
         )
     )
     await audit(
         db,
         action="retry_ai_review",
-        actor_id=current_user.user_id,
-        actor_username=current_user.username,
-        target_type="submission",
-        target_id=submission_id,
-    )
-    await db.commit()
-    return RedirectResponse(url=_board_url(submission), status_code=303)
-
-
-@router.post("/submissions/{submission_id}/send-to-teacher")
-async def teacher_skip_ai_review(
-    submission_id: int, db: DBSession, current_user: TeacherUser
-) -> RedirectResponse:
-    submission = await _load_submission_for_teacher(db, submission_id, current_user)
-    if submission.status != SubmissionStatus.AI_REVIEW_FAILED:
-        raise HTTPException(
-            status_code=409, detail="Submission is not in a state that allows this action"
-        )
-    transition(submission, "ai_review_skip_to_teacher")
-    await enqueue_teacher_review_notification(db, submission.id)
-    await audit(
-        db,
-        action="ai_review_skip_to_teacher",
         actor_id=current_user.user_id,
         actor_username=current_user.username,
         target_type="submission",

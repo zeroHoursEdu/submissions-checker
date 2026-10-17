@@ -599,7 +599,7 @@ async def test_quiz_first_submission_is_accepted_inline(
     the 10s outbox poll only means the assignment page renders with no quiz link on it.
     """
     subject, sa, _cfg = await _arrange_assignment(
-        db, student_user.student_id, teacher.id, quiz_cfg=FLAT_QUIZ
+        db, student_user.student_id, teacher.id, quiz_cfg=FLAT_QUIZ, review_mode="quiz_only"
     )
 
     resp = await student_client.post(
@@ -635,7 +635,7 @@ async def test_quiz_link_is_live_on_the_page_the_upload_redirects_to(
 ) -> None:
     """The redirect target of the upload already offers the quiz — no manual reload."""
     subject, sa, _cfg = await _arrange_assignment(
-        db, student_user.student_id, teacher.id, quiz_cfg=FLAT_QUIZ
+        db, student_user.student_id, teacher.id, quiz_cfg=FLAT_QUIZ, review_mode="quiz_only"
     )
 
     resp = await student_client.post(

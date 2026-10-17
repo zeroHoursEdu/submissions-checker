@@ -20,6 +20,7 @@ from submissions_checker.db.models import (
     SubmissionStatus,
 )
 from submissions_checker.services.ai.provider import AIProviderError
+from submissions_checker.services.ai_verdict import is_flagged
 from submissions_checker.workers.tasks import review_tasks
 
 CLEAN_VERDICT = {
@@ -104,11 +105,11 @@ async def test_clean_verdict_advances_to_quiz(
     sub, _, _ = await _arrange_submission(
         db,
         student_user.student_id,
-        config={"ai_review": {}},
+        config={"review_mode": "tests_then_ai_then_quiz", "ai_review": {}},
         status=SubmissionStatus.AWAITING_AI_REVIEW,
     )
     ok_before = metrics.ai_reviews_total.labels(outcome="ok")._value.get()
-    await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id, "next_step": "quiz"})
+    await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id})
     await db.commit()
     assert sub.status == SubmissionStatus.QUIZ_SENT
     assert metrics.ai_reviews_total.labels(outcome="ok")._value.get() == ok_before + 1
@@ -116,19 +117,24 @@ async def test_clean_verdict_advances_to_quiz(
     assert sub.ai_review["provider"] == "openai"
 
 
-async def test_flagged_verdict_escalates_to_teacher(
+async def test_flagged_verdict_still_advances_to_quiz(
     db, student_user, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_provider(monkeypatch, FLAGGED_VERDICT)
     sub, _, _ = await _arrange_submission(
         db,
         student_user.student_id,
-        config={"ai_review": {"cheating_threshold": 0.6}},
+        config={
+            "review_mode": "tests_then_ai_then_quiz",
+            "ai_review": {"cheating_threshold": 0.6},
+        },
         status=SubmissionStatus.AWAITING_AI_REVIEW,
     )
-    await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id, "next_step": "quiz"})
+    await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id})
     await db.commit()
-    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    # A flagged verdict is shown (badge on the board), not rerouted to the teacher.
+    assert sub.status == SubmissionStatus.QUIZ_SENT
+    assert is_flagged(sub.ai_review, {"cheating_threshold": 0.6})
     # code_mark still recorded on the flagged path
     assert sub.ai_review["code_mark"] == 40
 
@@ -145,9 +151,7 @@ async def test_malformed_verdict_fails_review(
     )
     err_before = metrics.ai_reviews_total.labels(outcome="error")._value.get()
     with pytest.raises(AIProviderError):
-        await review_tasks.execute_ai_review_task(
-            db, {"submission_id": sub.id, "next_step": "quiz"}
-        )
+        await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id})
     assert sub.status == SubmissionStatus.AI_REVIEW_FAILED
     assert metrics.ai_reviews_total.labels(outcome="error")._value.get() == err_before + 1
 
@@ -165,13 +169,11 @@ async def test_completed_path_finalizes_grade(
     sub, _, sa_id = await _arrange_submission(
         db,
         student_user.student_id,
-        config={"ai_review": {}, "grading": grading},
+        config={"review_mode": "tests_then_ai", "ai_review": {}, "grading": grading},
         status=SubmissionStatus.AWAITING_AI_REVIEW,
         test_results={"score": 10, "max_score": 10},  # works = 100
     )
-    await review_tasks.execute_ai_review_task(
-        db, {"submission_id": sub.id, "next_step": "completed"}
-    )
+    await review_tasks.execute_ai_review_task(db, {"submission_id": sub.id})
     await db.commit()
     assert sub.status == SubmissionStatus.COMPLETED
     sa = await db.get(StudentAssignment, sa_id)
