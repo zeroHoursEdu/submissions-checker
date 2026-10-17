@@ -575,7 +575,7 @@ async def test_scores_route_not_scored_mode_409(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
     subject, asg, student, _sa = await _arrange_scored_no_sub(
-        db, teacher, make_student, mode="quiz_then_teacher"
+        db, teacher, make_student, mode="quiz_only"
     )
     authenticate(client, teacher)
     r = await client.post(
@@ -596,9 +596,7 @@ async def test_scores_route_unenrolled_student_404(
     assert r.status_code == 404
 
 
-async def test_review_approve_refused_without_points(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
+async def test_review_approve_is_gone(client: AsyncClient, db, teacher, make_student) -> None:
     _s, _a, student, _sa, sub = await _arrange_scored(
         db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
     )
@@ -607,14 +605,12 @@ async def test_review_approve_refused_without_points(
     r = await client.post(
         f"/teacher/submissions/{sub.id}/review", data={"action": "approve"}, follow_redirects=False
     )
-    assert r.status_code == 409
+    assert r.status_code == 400
     await _reload(db, sub)
     assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
 
 
-async def test_bulk_approve_skips_without_points(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
+async def test_bulk_approve_is_gone(client: AsyncClient, db, teacher, make_student) -> None:
     subject, asg, student, _sa, sub = await _arrange_scored(
         db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
     )
@@ -625,8 +621,7 @@ async def test_bulk_approve_skips_without_points(
         data={"action": "approve", "submission_ids": [str(sub.id)]},
         follow_redirects=False,
     )
-    assert r.status_code == 303
-    assert r.headers["location"].endswith("?bulk=0,1")
+    assert r.status_code == 400
     await _reload(db, sub)
     assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
 
@@ -668,15 +663,15 @@ async def test_board_shows_criteria_inputs_and_total(
     page = await client.get(f"/teacher/subjects/{subject.id}/assignments/{asg.id}")
     assert page.status_code == 200
     html = page.text
-    assert 'name="score_report"' in html and 'name="score_star"' in html
-    assert f'form="scores-{student.id}"' in html
+    assert f'name="s{student.id}__report"' in html and f'name="s{student.id}__star"' in html
+    assert 'form="batch-form"' in html
     assert 'value="4"' in html and 'value="2"' in html
     assert "Звіт" in html and "/5" in html and "/3" in html
     assert "6/8" in html
-    assert _scores_url(subject, asg) in html
-    # The score forms must not be nested inside the bulk form (browsers drop nested forms).
+    assert f"{_scores_url(subject, asg)}/batch" in html
+    # The batch form must not be nested inside the bulk form (browsers drop nested forms).
     bulk_end = html.index("</form>", html.index('id="bulk-form"'))
-    assert html.index(f'id="scores-{student.id}"') > bulk_end
+    assert html.index('id="batch-form"') > bulk_end
 
 
 async def test_board_quiz_cell_for_not_passed_student(
@@ -762,10 +757,8 @@ async def test_student_page_exhausted_points_to_teacher(
 # ── Review fixes: dead ends and the save/submit race ─────────────────────────
 
 
-async def test_reject_refused_in_scored_mode(
-    client: AsyncClient, db, teacher, make_student
-) -> None:
-    # A rejected scored submission could never be reopened or graded: no upload, no quiz.
+async def test_reject_fails_scored_work(client: AsyncClient, db, teacher, make_student) -> None:
+    # Reject goes through settle: the work fails with the reason, whatever the points.
     _s, _a, student, _sa, sub = await _arrange_scored(
         db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
     )
@@ -776,9 +769,10 @@ async def test_reject_refused_in_scored_mode(
         data={"action": "reject", "reason": "no"},
         follow_redirects=False,
     )
-    assert r.status_code == 409
+    assert r.status_code == 303
     await _reload(db, sub)
-    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    assert sub.status == SubmissionStatus.FAILED
+    assert sub.source_metadata["rejected"]["reason"] == "no"
 
 
 @pytest.mark.parametrize(

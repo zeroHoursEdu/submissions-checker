@@ -53,6 +53,8 @@
 {% endif %}
 {% endmacro %}
 
+{% macro num(x) %}{{ '%g' % (x | round(1)) }}{% endmacro %}
+
 {% block content %}
 
 <div class="mb-6">
@@ -96,17 +98,45 @@
 </div>
 {% endif %}
 
+{% if batch_result %}
+<div data-batch-result class="mb-4 px-4 py-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 text-sm">
+  {{ vocab.teacher.batch_saved }}: <strong>{{ batch_result.saved }}</strong>
+  {% if batch_result.skipped %}
+  <div class="mt-1">{{ vocab.teacher.batch_skipped }}:</div>
+  <ul class="list-disc ml-5">
+    {% for name, reason in batch_result.skipped %}<li>{{ name }} — {{ reason }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if rows %}
 <form method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/bulk" id="bulk-form">
 <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
-  <button type="submit" name="action" value="approve"
-          class="px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 transition-colors">{{ vocab.teacher.bulk_approve_selected }}</button>
+  {% if teacher_items %}
+  {# Board items join #batch-form (after #bulk-form) through form=: nested forms are dropped. #}
+  <button type="submit" form="batch-form"
+          class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">{{ vocab.teacher.save_changes }}</button>
+  {% if llm_state %}
+  <button type="button" data-take-ai-draft
+          onclick="document.querySelectorAll('#bulk-form input.row-select:checked').forEach(c => c.closest('tr').querySelectorAll('input[data-ai-draft]').forEach(i => { if (i.dataset.aiDraft !== '') i.value = i.dataset.aiDraft; }))"
+          class="px-3 py-1.5 rounded-lg bg-white text-amber-700 border border-amber-300 text-xs font-medium hover:bg-amber-50 transition-colors">{{ vocab.teacher.take_ai_draft }}</button>
+  {% endif %}
+  {% endif %}
   <button type="submit" name="action" value="reject"
           class="px-3 py-1.5 rounded-lg bg-white text-red-600 border border-red-200 text-xs font-medium hover:bg-red-50 transition-colors">{{ vocab.teacher.bulk_reject_selected }}</button>
   <input type="text" name="reason" placeholder="{{ vocab.teacher.bulk_reason_placeholder }}"
          class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs w-56"/>
   <button type="submit" name="action" value="rerun"
           class="px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-300 text-xs font-medium hover:bg-slate-50 transition-colors">{{ vocab.teacher.bulk_rerun_selected }}</button>
+  {% if items | length > 1 %}
+  <select data-filter-not-done aria-label="{{ vocab.teacher.filter_not_done }}"
+          onchange="const k = this.value; document.querySelectorAll('tr[data-pending-keys]').forEach(tr => { tr.hidden = k !== '' && !tr.dataset.pendingKeys.split(' ').includes(k); })"
+          class="ml-auto rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+    <option value="">{{ vocab.teacher.filter_all }}</option>
+    {% for i in items %}<option value="{{ i.key }}">{{ vocab.teacher.filter_not_done }}: {{ i.title }}</option>{% endfor %}
+  </select>
+  {% endif %}
 </div>
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
   <table class="w-full text-sm">
@@ -114,18 +144,14 @@
       <tr class="bg-slate-50 border-b border-slate-200">
         <th class="px-3 py-3">
           <input type="checkbox" title="{{ vocab.teacher.bulk_select_all }}" class="rounded border-slate-300"
-                 onclick="document.querySelectorAll('#bulk-form input[name=submission_ids]').forEach(c => { if (!c.disabled) c.checked = this.checked; })">
+                 onclick="document.querySelectorAll('#bulk-form input.row-select').forEach(c => { c.checked = this.checked; })">
         </th>
         <th class="text-left px-5 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_student }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_status }}</th>
-        {% if scored %}
-        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ vocab.teacher.col_quiz }}</th>
-        {% for c in criteria %}
-        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ c.title }} <span class="normal-case text-slate-400">/{{ c.max }}</span></th>
+        {% for i in items %}
+        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{{ i.title }}{% if i.type != "check" %} <span class="normal-case text-slate-400">/{{ num(i.points) }}</span>{% endif %}{% if i.optional %} <span class="normal-case text-slate-400">*</span>{% endif %}</th>
         {% endfor %}
-        {% endif %}
-        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{% if scored %}{{ vocab.teacher.col_total }}{% else %}{{ vocab.teacher.col_grade }}{% endif %}</th>
-        {% if scored %}<th class="px-2 py-3"></th>{% endif %}
+        <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide">{% if teacher_items %}{{ vocab.teacher.col_total }}{% else %}{{ vocab.teacher.col_grade }}{% endif %}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden md:table-cell">{{ vocab.teacher.col_submitted }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden lg:table-cell">{{ vocab.teacher.col_similarity }}</th>
         <th class="text-left px-4 py-3 font-medium text-slate-500 text-xs uppercase tracking-wide hidden lg:table-cell">{{ vocab.teacher.col_flags }}</th>
@@ -133,15 +159,24 @@
     </thead>
     <tbody class="divide-y divide-slate-100">
       {% for row in rows %}
-      <tr class="hover:bg-slate-50 transition-colors">
+      {% set sid = row.student_id %}
+      <tr class="hover:bg-slate-50 transition-colors" data-pending-keys="{{ pending_keys.get(sid, []) | join(' ') }}">
         <td class="px-3 py-3.5">
-          <input type="checkbox" name="submission_ids" value="{{ row.submission_id or '' }}" class="rounded border-slate-300"
-                 {% if not row.submission_id %}disabled{% endif %}>
+          {# A row with no submission can still be picked (for the AI-draft copy); it posts nothing. #}
+          {% if row.submission_id %}
+          <input type="checkbox" name="submission_ids" value="{{ row.submission_id }}" class="row-select rounded border-slate-300">
+          {% else %}
+          <input type="checkbox" class="row-select rounded border-slate-300" aria-label="{{ row.full_name }}">
+          {% endif %}
         </td>
         <td class="px-5 py-3.5 font-medium text-slate-900">{{ row.full_name }}
           {% if row.squad_name %} {% with squad_name=row.squad_name, squad_members=[] %}{% include "_squad_badge.html" %}{% endwith %}{% endif %}
           {% set ls = llm_state.get(row.student_id) if llm_state is defined else none %}
           {% if ls %}{% include "_llm_draft_row.html" %}{% endif %}
+          {% if teacher_items %}
+          <input form="batch-form" type="hidden" name="orig__{{ row.student_id }}" value="{{ orig.get(row.student_id, '') }}">
+          {% if ls %}<input form="batch-form" type="hidden" name="llm_grading_id__{{ row.student_id }}" value="{{ ls.draft_grading_id or '' }}">{% endif %}
+          {% endif %}
         </td>
         <td class="px-4 py-3.5">
           {{ status_badge(row.submission_status) }}
@@ -165,30 +200,48 @@
                   name="student_id" value="{{ row.student_id }}" class="ml-1.5 text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">{{ vocab.teacher.grant_quiz_attempt }}</button>
           {% endif %}
         </td>
-        {% if scored %}
-        {% set qc = quiz_cells.get(row.student_id) %}
-        <td class="px-4 py-3.5 text-xs whitespace-nowrap" data-quiz-cell>
-          {% if qc and qc.passed %}
-            <span class="font-semibold text-green-700">{{ qc.points }}/{{ qc.max }}</span> <span class="text-green-600">✓</span>
-          {% elif qc %}
-            <span class="text-slate-500">{{ vocab.teacher.quiz_not_passed }}{% if qc.cap %} ({{ qc.used }}/{{ qc.cap }}){% endif %}</span>
+        {% set ev = evals.get(sid) %}
+        {% set row_llm = llm_state.get(sid) if llm_state is defined else none %}
+        {% set prefill = (row_llm.prefill if row_llm else none) or {} %}
+        {% for i in items %}
+        {% set it = ev.items[loop.index0] if ev else none %}
+        {% if i.type == "score" %}
+        {% set have = (row.teacher_scores or {}).get(i.key) %}
+        {% set ai = prefill.get(i.key) if have is none else none %}
+        <td class="px-2 py-3.5">
+          {# The AI draft is a hint, never a value: only «{{ vocab.teacher.take_ai_draft }}» copies it in. #}
+          <input form="batch-form" type="number" name="s{{ sid }}__{{ i.key }}" min="0" max="{{ i.points | int }}" step="1"
+                 value="{{ have if have is not none else '' }}" placeholder="{{ ai if ai is not none else '' }}"
+                 data-ai-draft="{{ ai if ai is not none else '' }}" aria-label="{{ i.title }}"
+                 {% if ai is not none %}title="{{ vocab.classroom.draft_badge }}"{% endif %}
+                 class="w-14 rounded-md border px-2 py-1 text-sm {% if ai is not none %}border-amber-400 ring-2 ring-amber-300 bg-amber-50 placeholder:text-amber-600{% else %}border-slate-300{% endif %}">
+        </td>
+        {% elif i.type == "check" %}
+        <td class="px-2 py-3.5 whitespace-nowrap">
+          {% if (row.teacher_scores or {}).get(i.key) == 1 %}
+          {# Saved: no input, so a stale tab cannot untick it. #}
+          <span data-check-done class="text-green-700 text-xs">✓ {{ i.title }}</span>
+          {% else %}
+          <input form="batch-form" type="checkbox" name="s{{ sid }}__{{ i.key }}" value="1" aria-label="{{ i.title }}"
+                 class="rounded border-slate-300">
+          {% endif %}
+        </td>
+        {% else %}
+        <td class="px-4 py-3.5 text-xs whitespace-nowrap" data-item-cell="{{ i.type }}">
+          {% if it and it.state == "done" %}
+            <span class="font-semibold text-green-700">{{ num(it.points) }}/{{ num(it.max) }}</span> <span class="text-green-600">✓</span>
+          {% elif it and it.state == "running" %}
+            <span class="text-amber-600">⏳</span>
+          {% elif it and it.state == "failed" %}
+            <span class="text-red-600">✗</span>
+          {% elif i.type == "quiz" and quiz_cells.get(sid) and quiz_cells.get(sid).cap %}
+            <span class="text-slate-500">{{ vocab.teacher.quiz_not_passed }} ({{ quiz_cells.get(sid).used }}/{{ quiz_cells.get(sid).cap }})</span>
           {% else %}
             <span class="text-slate-300">—</span>
           {% endif %}
         </td>
-        {% set row_llm = llm_state.get(row.student_id) if llm_state is defined else none %}
-        {% set prefill = (row_llm.prefill if row_llm else none) or {} %}
-        {% for c in criteria %}
-        {% set have = (row.teacher_scores or {}).get(c.key) %}
-        {% set ai = prefill.get(c.key) if have is none else none %}
-        <td class="px-2 py-3.5">
-          <input form="scores-{{ row.student_id }}" type="number" name="score_{{ c.key }}" min="0" max="{{ c.max }}" step="1"
-                 value="{{ have if have is not none else (ai if ai is not none else '') }}" aria-label="{{ c.title }}"
-                 {% if ai is not none %}title="{{ vocab.classroom.draft_badge }}" data-ai-draft{% endif %}
-                 class="w-14 rounded-md border px-2 py-1 text-sm {% if ai is not none %}border-amber-400 ring-2 ring-amber-300 bg-amber-50{% else %}border-slate-300{% endif %}">
-        </td>
-        {% endfor %}
         {% endif %}
+        {% endfor %}
         <td class="px-4 py-3.5">
           {% if row.grade is not none %}
             <span class="font-semibold text-slate-900">{{ row.grade }}</span>
@@ -197,13 +250,6 @@
             <span class="text-slate-300">—</span>
           {% endif %}
         </td>
-        {% if scored %}
-        <td class="px-2 py-3.5">
-          {% if row_llm %}<input form="scores-{{ row.student_id }}" type="hidden" name="llm_grading_id" value="{{ row_llm.draft_grading_id or '' }}">{% endif %}
-          <button form="scores-{{ row.student_id }}" type="submit"
-                  class="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium">{{ vocab.teacher.save_scores }}</button>
-        </td>
-        {% endif %}
         <td class="px-4 py-3.5 text-slate-400 text-xs hidden md:table-cell">
           {% if row.submitted_at %}
             {{ row.submitted_at.strftime("%b %d, %Y") }}
@@ -283,14 +329,10 @@
   </table>
 </div>
 </form>
-{% if scored %}
-{# One form per row, outside #bulk-form: a <form> nested in another is dropped by the HTML
-   parser. The row's inputs and button join it through their form= attribute. #}
-{% for row in rows %}
-<form id="scores-{{ row.student_id }}" method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/scores" class="hidden">
-  <input type="hidden" name="student_id" value="{{ row.student_id }}">
-</form>
-{% endfor %}
+{% if teacher_items %}
+{# Outside #bulk-form: a <form> nested in another is dropped by the HTML parser. The rows'
+   inputs join it through their form= attribute; only changed rows are saved. #}
+<form id="batch-form" method="POST" action="/teacher/subjects/{{ subject_id }}/assignments/{{ assignment.id }}/scores/batch" class="hidden"></form>
 {% endif %}
 {% if llm_state %}
 {# Per-link forms for the name-match controls (confirm / re-link); rows join them via form=. #}

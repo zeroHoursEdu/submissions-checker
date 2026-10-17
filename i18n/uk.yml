@@ -289,7 +289,6 @@ teacher:
   submitted_at: Надіслано
   check_output: Вивід перевірки
   decision_label: Рішення
-  approve: Схвалити
   reject: Відхилити
   rejection_reason: Причина відхилення
   rejection_reason_placeholder: "Поясніть, чому здача відхиляється…"
@@ -387,7 +386,6 @@ teacher:
   similarity_no_pairs: Пар вище порогу немає
   similarity_too_many: Забагато робіт для попарного порівняння (понад 300).
   bulk_select_all: Вибрати всі
-  bulk_approve_selected: Схвалити вибрані
   bulk_reject_selected: Відхилити вибрані
   bulk_rerun_selected: Перезапустити перевірку для вибраних
   bulk_reason_placeholder: Причина відхилення
@@ -400,8 +398,19 @@ teacher:
   grant_quiz_attempt: Додаткова спроба тесту
   col_quiz: Тест
   col_total: Разом
-  save_scores: Зберегти
   quiz_not_passed: не складено
+  save_changes: Зберегти зміни
+  take_ai_draft: Взяти бали з AI-чернетки
+  batch_saved: Збережено
+  batch_skipped: Пропущено
+  batch_reason_not_enrolled: студент не записаний
+  batch_reason_confirm_student: спершу підтвердьте студента
+  batch_reason_draft_changed: чернетка змінилась — оновіть сторінку
+  batch_reason_invalid: некоректний бал
+  batch_reason_completed_required: не можна прибрати обов'язковий бал у зарахованій роботі
+  filter_not_done: Не виконано
+  filter_all: Усі
+  check_done: Прийнято
   send_to_teacher: На ручну перевірку
   data_title: Дані
   data_hint: Вивантажити всі оцінки предмета у CSV.

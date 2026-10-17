@@ -52,7 +52,6 @@ from submissions_checker.db.models import (
     User,
     UserLogin,
 )
-from submissions_checker.db.models.classroom import LLMGrading
 from submissions_checker.db.models.enums import (
     OutboxEventType,
     OutboxMessageState,
@@ -63,7 +62,13 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.group import Group
-from submissions_checker.services import quiz_grants, settle, squads, teacher_scores
+from submissions_checker.services import (
+    board_scores,
+    quiz_grants,
+    requirements,
+    settle,
+    squads,
+)
 from submissions_checker.services.ai_verdict import VerdictSummary, summarize
 from submissions_checker.services.audit import audit
 from submissions_checker.services.config_apply import ConfigApplyService
@@ -71,7 +76,6 @@ from submissions_checker.services.gradebook import (
     build_student_grid,
     fetch_grid_rows,
 )
-from submissions_checker.services.grading import finalize_grade
 from submissions_checker.services.llm_grading import config as llm_config
 from submissions_checker.services.llm_grading.board import llm_board_state
 from submissions_checker.services.notification_service import push_notification
@@ -578,17 +582,36 @@ async def teacher_assignment(
             for sid in await quiz_grants.grantable_students(db, cand):
                 grantable.add((cand.id, sid))
 
-    # quiz_and_teacher_scores: per-criterion inputs and the quiz half of each row.
-    scored = teacher_scores.is_scored_mode(assignment.config)
-    grading_cfg = (assignment.config or {}).get("grading")
-    criteria = teacher_scores.criteria(grading_cfg) if scored else []
-    quiz_cells = await _scored_quiz_cells(db, rows, grading_cfg) if scored else {}
-    # LLM-graded (Classroom) assignments: draft pre-fill, badges and the per-row details.
+    # One column per requirement: an evaluation per row (what is done, for how much), the
+    # rendered signature the batch save compares against, and the quiz's attempts used.
+    plan = settle.plan_for(assignment)
+    teacher_items = plan.teacher_items()
+    evals: dict[int, requirements.Evaluation] = {}
+    orig: dict[int, str] = {}
+    pending_keys: dict[int, list[str]] = {}
+    for r in rows:
+        facts, in_squad = requirements.Facts(), False
+        if r["student_assignment_id"]:
+            sa_row = await db.get(StudentAssignment, r["student_assignment_id"])
+            if sa_row is not None:
+                facts, _subs, squad, _scope = await settle.gather_facts(db, sa_row, assignment)
+                in_squad = squad is not None
+        ev = requirements.evaluate(
+            plan, facts, assignment.min_grade, assignment.max_grade, round_up=in_squad
+        )
+        evals[r["student_id"]] = ev
+        orig[r["student_id"]] = requirements.row_signature(
+            board_scores.board_values(plan, r["teacher_scores"] or {})
+        )
+        pending_keys[r["student_id"]] = [i.key for i in ev.items if i.state != "done"]
+    quiz_cells = await _quiz_attempt_cells(db, rows) if plan.has("quiz") else {}
+    # LLM-graded (Classroom) assignments: draft hints, badges and the per-row details.
     llm_state = (
         await llm_board_state(db, assignment, [r["student_id"] for r in rows])
-        if scored and llm_config.is_llm_graded(assignment.config)
+        if llm_config.is_llm_graded(assignment.config)
         else {}
     )
+    batch_result = _batch_result(request, rows)
 
     # AI verdicts over the assignment's thresholds get a badge in the Flags column.
     ai_cfg = (assignment.config or {}).get("ai_review") or {}
@@ -672,19 +695,38 @@ async def teacher_assignment(
             "stuck_ids": stuck_ids,
             "grantable": grantable,
             "bulk_result": bulk_result,
-            "scored": scored,
-            "criteria": criteria,
+            "batch_result": batch_result,
+            "items": list(plan.items),
+            "teacher_items": teacher_items,
+            "evals": evals,
+            "orig": orig,
+            "pending_keys": pending_keys,
             "quiz_cells": quiz_cells,
             "llm_state": llm_state,
         },
     )
 
 
-async def _scored_quiz_cells(
-    db: DBSession, rows: list[dict[str, Any]], grading_cfg: dict[str, Any] | None
+def _batch_result(request: Request, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The flash of the batch save redirect: ``?saved=N&skipped=<sid>:<code>,...``."""
+    saved = request.query_params.get("saved")
+    if saved is None or not (saved.isascii() and saved.isdecimal()):
+        return None
+    names = {r["student_id"]: r["full_name"] for r in rows}
+    reasons = get_vocab(None).get("teacher", {})
+    skipped: list[tuple[str, str]] = []
+    for part in (request.query_params.get("skipped") or "").split(","):
+        sid, _, code = part.partition(":")
+        if not (sid.isascii() and sid.isdecimal()) or code not in board_scores.ROW_ERROR_CODES:
+            continue
+        skipped.append((names.get(int(sid), sid), str(reasons.get(f"batch_reason_{code}", code))))
+    return {"saved": int(saved), "skipped": skipped}
+
+
+async def _quiz_attempt_cells(
+    db: DBSession, rows: list[dict[str, Any]]
 ) -> dict[int, dict[str, Any]]:
-    """Quiz half of each board row, keyed by student_id: the passed attempt in points, or
-    attempts used against the (granted) cap."""
+    """Attempts used against the (granted) cap for a quiz not yet done, by student_id."""
     sub_ids = {r["submission_id"] for r in rows if r["submission_id"]}
     if not sub_ids:
         return {}
@@ -709,21 +751,11 @@ async def _scored_quiz_cells(
             for a in attempts
             if a.submission_id == sub.id and a.student_id in (r["student_id"], None)
         ]
-        passed = next((a for a in mine if a.is_passed and a.max_score), None)
-        if passed is not None:
-            pct = float(passed.score or 0) / float(passed.max_score or 1) * 100.0
-            cells[r["student_id"]] = {
-                "passed": True,
-                "points": teacher_scores.quiz_points_for(grading_cfg, pct),
-                "max": int((grading_cfg or {}).get("quiz_points", 0)),
-            }
-        else:
-            base = await quiz_grants.base_max_attempts(db, sub)
-            cells[r["student_id"]] = {
-                "passed": False,
-                "used": sum(1 for a in mine if a.status != QuizAttemptStatus.IN_PROGRESS),
-                "cap": quiz_grants.effective_max_attempts(base, sub, r["student_id"]),
-            }
+        base = await quiz_grants.base_max_attempts(db, sub)
+        cells[r["student_id"]] = {
+            "used": sum(1 for a in mine if a.status != QuizAttemptStatus.IN_PROGRESS),
+            "cap": quiz_grants.effective_max_attempts(base, sub, r["student_id"]),
+        }
     return cells
 
 
@@ -1525,20 +1557,8 @@ class ReviewNotAllowedError(Exception):
     """This review action is not available for the submission (message is the detail)."""
 
 
-class ScoresIncompleteError(ReviewNotAllowedError):
-    """A quiz_and_teacher_scores submission was approved before its work points exist."""
-
-    def __init__(self) -> None:
-        super().__init__("Enter the work points on the assignment board first")
-
-
-async def _quiz_passed(db: DBSession, submission: Submission) -> bool:
-    passed_id = await db.scalar(
-        select(QuizAttempt.id)
-        .where(QuizAttempt.submission_id == submission.id, QuizAttempt.is_passed.is_(True))
-        .limit(1)
-    )
-    return passed_id is not None
+# A teacher may reject work that is waiting on a quiz or on them; settle then fails it.
+REJECTABLE = frozenset({SubmissionStatus.QUIZ_SENT, SubmissionStatus.AWAITING_TEACHER_REVIEW})
 
 
 async def _apply_review_decision(
@@ -1547,61 +1567,44 @@ async def _apply_review_decision(
     action: str,
     reason: str,
     current_user: TeacherUser,
-) -> str:
-    """Approve or reject one AWAITING_TEACHER_REVIEW submission; returns the event applied.
+) -> None:
+    """Reject one submission through settle; shared by the review form and the board's bulk
+    action. There is no approve: acceptance is a requirement (a check on the board), and
+    the work completes once every requirement is done. Does not commit.
 
-    Shared by the single review form and the board's bulk action so both take the
-    same path: quiz routing, grade finalization, the SUBMISSION_REVIEWED email and
-    the audit row. Does not commit.
+    Lock order as in settle: the scope's StudentAssignment rows first, then the submission
+    (written here, then re-read under settle's lock).
     """
-    subjects_assignment = submission.students_assignment.subjects_assignment
-    clean_reason = reason.strip()
-    if action == "approve":
-        if teacher_scores.is_scored_mode(subjects_assignment.config):
-            # Approving here would grade the work from the quiz alone; the work points are
-            # entered on the board, which completes the submission itself.
-            crits = teacher_scores.criteria((subjects_assignment.config or {}).get("grading"))
-            if not teacher_scores.is_complete(crits, submission.students_assignment.teacher_scores):
-                raise ScoresIncompleteError
-        has_quiz = False
-        if submission.plugin_config and subjects_assignment.code:
-            asgn_cfg = submission.plugin_config.config.get("assignments", {}).get(
-                subjects_assignment.code, {}
-            )
-            has_quiz = bool(asgn_cfg.get("quiz", {}).get("questions"))
-        if has_quiz:
-            # Under `quiz_then_teacher` the quiz already happened and this review IS the last
-            # step — without this guard such a submission would be sent back into its quiz on
-            # every approval and could never complete.
-            if await _quiz_passed(db, submission):
-                has_quiz = False
-        event = "teacher_send_quiz" if has_quiz else "teacher_approve"
-        transition(submission, event)
-    elif action == "reject":
-        if teacher_scores.is_scored_mode(subjects_assignment.config):
-            # Nothing was uploaded, so a rejected scored submission could never be reopened
-            # or graded. Low work points are the way to mark weak work in this mode.
-            raise ReviewNotAllowedError("Rejecting is not available here; enter the points")
-        event = "teacher_reject"
-        submission.test_results = {"check_reason": clean_reason or "Rejected by teacher"}
-        transition(submission, event)
-    else:
+    if action != "reject":
         raise HTTPException(status_code=400, detail="Invalid action")
-
-    # A teacher approval that completes the submission (no quiz) finalizes the grade now;
-    # approvals that route to a quiz finalize on quiz completion instead.
-    if event == "teacher_approve":
-        await finalize_grade(db, submission)
+    clean_reason = reason.strip() or "Rejected by teacher"
+    sa = submission.students_assignment
+    asg = sa.subjects_assignment
+    submission_id = submission.id
+    await settle.lock_scope(db, sa, asg)
+    latest = await squads.latest_submission(db, sa)
+    if latest is None or latest.id != submission_id:
+        raise ReviewNotAllowedError("Only the latest submission can be rejected")
+    await db.refresh(submission, attribute_names=["status", "source_metadata", "test_results"])
+    if submission.status not in REJECTABLE:
+        raise ReviewNotAllowedError("This submission cannot be rejected now")
+    # Reassign, not mutate: JSONB columns track only assignment.
+    submission.source_metadata = {
+        **(submission.source_metadata or {}),
+        settle.REJECTED_KEY: {
+            "reason": clean_reason,
+            "by": current_user.user_id,
+            "at": datetime.now(UTC).isoformat(),
+        },
+    }
+    submission.test_results = {**(submission.test_results or {}), "check_reason": clean_reason}
+    await settle.settle(db, sa)
 
     db.add(
         OutboxMessage(
             event_type=OutboxEventType.SUBMISSION_REVIEWED,
             state=OutboxMessageState.PENDING,
-            payload={
-                "submission_id": submission.id,
-                "action": action,
-                "reason": clean_reason,
-            },
+            payload={"submission_id": submission_id, "action": action, "reason": clean_reason},
         )
     )
     await audit(
@@ -1610,10 +1613,9 @@ async def _apply_review_decision(
         actor_id=current_user.user_id,
         actor_username=current_user.username,
         target_type="submission",
-        target_id=submission.id,
+        target_id=submission_id,
         reason=clean_reason,
     )
-    return event
 
 
 @router.post("/submissions/{submission_id}/review")
@@ -1635,11 +1637,14 @@ async def teacher_review_submission_action(
         )
     )
     submission = result.scalar_one_or_none()
-    if submission is None or submission.status != SubmissionStatus.AWAITING_TEACHER_REVIEW:
+    if submission is None or submission.status not in REJECTABLE:
         raise HTTPException(status_code=404)
 
     subjects_assignment = submission.students_assignment.subjects_assignment
     await require_subject_access(db, subjects_assignment.subject_id, current_user)
+    board_url = (
+        f"/teacher/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}"
+    )
 
     try:
         await _apply_review_decision(db, submission, action, reason, current_user)
@@ -1647,10 +1652,7 @@ async def teacher_review_submission_action(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.commit()
 
-    return RedirectResponse(
-        url=f"/teacher/subjects/{subjects_assignment.subject_id}/assignments/{subjects_assignment.id}",
-        status_code=303,
-    )
+    return RedirectResponse(url=board_url, status_code=303)
 
 
 @router.post("/subjects/{subject_id}/assignments/{sa_id}/bulk")
@@ -1663,14 +1665,14 @@ async def teacher_bulk_board_action(
     submission_ids: list[int] = Form(default=[]),
     reason: str = Form(""),
 ) -> RedirectResponse:
-    """Apply approve / reject / rerun to every selected row that is eligible.
+    """Apply reject / rerun to every selected row that is eligible.
 
     Rows in the wrong status or belonging to another assignment are counted as
     skipped, never errors — a teacher selecting a whole page should not be stopped
     by one already-graded row.
     """
     await require_subject_access(db, subject_id, current_user)
-    if action not in ("approve", "reject", "rerun"):
+    if action not in ("reject", "rerun"):
         raise HTTPException(status_code=400, detail="Invalid action")
     if action == "reject" and not reason.strip():
         raise HTTPException(status_code=422, detail="A reason is required to reject")
@@ -1702,7 +1704,7 @@ async def teacher_bulk_board_action(
             except InvalidTransitionError:
                 skipped += 1
                 continue
-        elif sub.status != SubmissionStatus.AWAITING_TEACHER_REVIEW:
+        elif sub.status not in REJECTABLE:
             skipped += 1
             continue
         else:
@@ -1905,6 +1907,15 @@ async def teacher_grant_quiz_attempt(
     return RedirectResponse(url=board_url, status_code=303)
 
 
+_ROW_ERROR_STATUS = {
+    "not_enrolled": 404,
+    "confirm_student": 409,
+    "draft_changed": 409,
+    "invalid": 422,
+    "completed_required": 422,
+}
+
+
 @router.post("/subjects/{subject_id}/assignments/{sa_id}/scores")
 async def teacher_save_scores(
     request: Request,
@@ -1913,135 +1924,93 @@ async def teacher_save_scores(
     db: DBSession,
     current_user: TeacherUser,
 ) -> RedirectResponse:
-    """Store one student's per-criterion work points (quiz_and_teacher_scores).
+    """Store one student's teacher items (scores and checks) and settle their work.
 
-    Points may arrive before or after the quiz. When the quiz is already passed the
-    submission completes here; on a completed one the grade follows the edit. A squad's
-    points are shared, like its grade.
+    Items may arrive before or after the quiz; settle completes the work once every
+    required item is done, and on a completed one the grade follows the edit. A squad's
+    items are shared, like its grade.
     """
     await require_subject_access(db, subject_id, current_user)
     assignment = await db.get(SubjectsAssignment, sa_id)
     if assignment is None or assignment.subject_id != subject_id:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    if not teacher_scores.is_scored_mode(assignment.config):
+    if not settle.plan_for(assignment).teacher_items():
         raise HTTPException(status_code=409, detail="This assignment takes no teacher points")
-    form = await request.form()
+    form = {k: str(v) for k, v in (await request.form()).items()}
     try:
-        student_id = int(str(form.get("student_id", "")))
+        student_id = int(form.get("student_id", ""))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="student_id is required") from exc
-    enrolled = await db.scalar(
-        select(SubjectsStudents.student_id).where(
-            SubjectsStudents.subject_id == subject_id,
-            SubjectsStudents.student_id == student_id,
-        )
-    )
-    if enrolled is None:
-        raise HTTPException(status_code=404, detail="Student is not enrolled")
-    # LLM-graded: saving points approves the draft the row showed (squad-aware).
-    shown: dict[str, Any] | None = None
-    if llm_config.is_llm_graded(assignment.config):
-        shown = (await llm_board_state(db, assignment, [student_id]))[student_id]
-        vocab = get_vocab(None).get("classroom", {})
-        if shown["needs_link_confirm"]:
-            # A name match may be the wrong student: points must not land on them unchecked.
-            raise HTTPException(
-                status_code=409,
-                detail=str(vocab.get("confirm_student_first", "")) or "confirm student first",
-            )
-        posted = str(form.get("llm_grading_id", "")).strip()
-        # isascii+isdecimal, not isdigit: "²".isdigit() is True and int() would raise.
-        posted_id = int(posted) if posted.isascii() and posted.isdecimal() else None
-        if shown["draft_grading_id"] != posted_id:
-            # A newer draft landed after the page was rendered: never approve it unseen.
-            raise HTTPException(
-                status_code=409,
-                detail=str(vocab.get("draft_changed", "")) or "draft changed, reload",
-            )
-    crits = teacher_scores.criteria((assignment.config or {}).get("grading"))
     try:
-        new_scores = teacher_scores.parse_form(crits, {k: str(v) for k, v in form.items()})
-    except teacher_scores.ScoreError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    own = await db.scalar(
-        select(StudentAssignment)
-        .where(
-            StudentAssignment.student_id == student_id,
-            StudentAssignment.subjects_assignment_id == sa_id,
+        await board_scores.save_row(
+            db,
+            assignment,
+            student_id,
+            form,
+            prefix="score_",
+            llm_grading_id=form.get("llm_grading_id"),
+            actor=current_user,
         )
-        .with_for_update()
-    )
-    if own is None:
-        own = StudentAssignment(student_id=student_id, subjects_assignment_id=sa_id)
-        db.add(own)
-        await db.flush()
-    submission = await squads.latest_submission(db, own)
-    if submission is not None:
-        # The student's quiz pass routes the submission under this same row lock; take it
-        # so a pass landing right now is seen, not a stale QUIZ_SENT.
-        await db.refresh(submission, attribute_names=["status"], with_for_update=True)
-    complete = teacher_scores.is_complete(crits, new_scores)
-    if submission is not None and submission.status == SubmissionStatus.COMPLETED and not complete:
-        raise HTTPException(status_code=422, detail="A graded work cannot lose a required score")
-
-    squad = await squads.squad_of(db, subject_id, student_id)
-    target_ids = await squads.member_sa_ids(db, squad, sa_id) if squad else [own.id]
-    old = dict(own.teacher_scores or {})
-    for row_id in target_ids:
-        row = await db.get(StudentAssignment, row_id)
-        if row is not None:
-            row.teacher_scores = dict(new_scores)
-    approval: dict[str, Any] = {}
-    if shown is not None:
-        grading_id = shown["draft_grading_id"]
-        if grading_id is not None:
-            grading = await db.get(LLMGrading, grading_id)
-            if grading is not None:
-                grading.approved_by = current_user.user_id
-                grading.approved_at = datetime.now(UTC)
-                draft_points = {
-                    k: (v or {}).get("points")
-                    for k, v in ((shown["draft"] or {}).get("criteria") or {}).items()
-                }
-                approval = {
-                    "llm_grading_id": grading_id,
-                    "edited_from_draft": any(
-                        new_scores.get(k) != p for k, p in draft_points.items()
-                    ),
-                }
-    await audit(
-        db,
-        action="teacher_scores_set",
-        actor_id=current_user.user_id,
-        actor_username=current_user.username,
-        target_type="student_assignment",
-        target_id=own.id,
-        student_id=student_id,
-        old=old,
-        new=new_scores,
-        **approval,
-    )
-
-    if submission is not None and complete:
-        await db.flush()
-        if submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW and await _quiz_passed(
-            db, submission
-        ):
-            transition(submission, "teacher_approve")
-            await finalize_grade(db, submission)
-            db.add(
-                OutboxMessage(
-                    event_type=OutboxEventType.SUBMISSION_REVIEWED,
-                    state=OutboxMessageState.PENDING,
-                    payload={"submission_id": submission.id, "action": "approve", "reason": ""},
-                )
-            )
-        elif submission.status == SubmissionStatus.COMPLETED:
-            await finalize_grade(db, submission)
+    except board_scores.RowError as exc:
+        raise HTTPException(status_code=_ROW_ERROR_STATUS[exc.code], detail=exc.detail) from exc
     await db.commit()
     return RedirectResponse(
         url=f"/teacher/subjects/{subject_id}/assignments/{sa_id}", status_code=303
+    )
+
+
+@router.post("/subjects/{subject_id}/assignments/{sa_id}/scores/batch")
+async def teacher_save_scores_batch(
+    request: Request, subject_id: int, sa_id: int, db: DBSession, current_user: TeacherUser
+) -> RedirectResponse:
+    """Save every changed board row; a failing row is reported, the others still save.
+
+    A row is changed when its posted values differ from the signature the page rendered
+    (``orig__<sid>``), so untouched rows are never re-saved (no audit noise, no approval of
+    an LLM draft the teacher did not touch)."""
+    await require_subject_access(db, subject_id, current_user)
+    assignment = await db.get(SubjectsAssignment, sa_id)
+    if assignment is None or assignment.subject_id != subject_id:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    plan = settle.plan_for(assignment)
+    form = {k: str(v) for k, v in (await request.form()).items()}
+    saved, skipped = 0, []
+    for name, orig in form.items():
+        if not name.startswith("orig__") or not (name[6:].isascii() and name[6:].isdecimal()):
+            continue
+        sid = int(name[6:])
+        prefix = f"s{sid}__"
+        row = {k[len(prefix) :]: v for k, v in form.items() if k.startswith(prefix)}
+        stored = await db.scalar(
+            select(StudentAssignment.teacher_scores).where(
+                StudentAssignment.student_id == sid,
+                StudentAssignment.subjects_assignment_id == sa_id,
+            )
+        )
+        posted = board_scores.posted_values(plan, row, stored or {})
+        if requirements.row_signature(posted) == orig:
+            continue
+        # A rolled-back savepoint expires what it touched: reload rather than lazy-load.
+        assignment = await db.get(SubjectsAssignment, sa_id)
+        assert assignment is not None
+        try:
+            async with db.begin_nested():
+                await board_scores.save_row(
+                    db,
+                    assignment,
+                    sid,
+                    form,
+                    prefix=prefix,
+                    llm_grading_id=form.get(f"llm_grading_id__{sid}"),
+                    actor=current_user,
+                )
+            saved += 1
+        except board_scores.RowError as exc:
+            skipped.append(f"{sid}:{exc.code}")
+    await db.commit()
+    query = f"saved={saved}" + (f"&skipped={','.join(skipped)}" if skipped else "")
+    return RedirectResponse(
+        url=f"/teacher/subjects/{subject_id}/assignments/{sa_id}?{query}", status_code=303
     )
 
 

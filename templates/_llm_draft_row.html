@@ -1,5 +1,5 @@
 {# LLM-graded (Google Classroom) row extras, included in the board's name cell.
-   Expects: ls (llm_board_state entry), row, rows, criteria, subject_id. The retry button is
+   Expects: ls (llm_board_state entry), row, rows, teacher_items, subject_id. The retry button is
    part of #bulk-form with its own formaction; the link controls join a per-link form
    rendered after the table (form="link-<id>") — a nested <form> would be dropped. #}
 {% set cv = vocab.classroom %}
@@ -71,11 +71,11 @@
       {% if dw.manifest %}{{ file_list(dw) }}{% endif %}
     </div>
     {% endif %}
-    {% for c in criteria %}
+    {% for c in teacher_items if c.type == "score" %}
     {% set v = crit.get(c.key) %}
     {% if v %}
     <div>
-      <div class="font-medium text-slate-700">{{ c.title }}: {{ v.points }}/{{ c.max }}</div>
+      <div class="font-medium text-slate-700">{{ c.title }}: {{ v.points }}/{{ c.points | int }}</div>
       {% if v.justification %}<div><span class="text-slate-400">{{ cv.justification }}:</span> {{ v.justification }}</div>{% endif %}
       {% if v.evidence %}<div><span class="text-slate-400">{{ cv.evidence }}:</span> <q class="italic">{{ v.evidence }}</q></div>{% endif %}
     </div>

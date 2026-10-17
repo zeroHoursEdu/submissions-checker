@@ -29,7 +29,8 @@ from submissions_checker.db.models.enums import (
     LLMGradingStatus,
     UserRole,
 )
-from submissions_checker.services import squads
+from submissions_checker.services import board_scores, settle, squads
+from submissions_checker.services.requirements import row_signature
 from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio
@@ -148,7 +149,7 @@ def _board(subject, asg) -> str:
 
 
 def _input(html: str, student_id: int, key: str) -> str:
-    m = re.search(rf'<input form="scores-{student_id}"[^>]*name="score_{key}"[^>]*>', html)
+    m = re.search(rf'<input form="batch-form"[^>]*name="s{student_id}__{key}"[^>]*>', html)
     assert m, f"no input for {key}"
     return m.group(0)
 
@@ -166,8 +167,11 @@ async def test_board_prefills_draft_when_no_teacher_scores(
 
     assert page.status_code == 200
     inp = _input(page.text, st.id, "report")
-    assert 'value="4"' in inp
+    # The draft is a hint the teacher copies in, never a pre-filled value.
+    assert 'placeholder="4"' in inp and 'data-ai-draft="4"' in inp
+    assert 'value=""' in inp
     assert "AI-чернетка" in inp
+    assert "Взяти бали з AI-чернетки" in page.text
     # The non-LLM criterion has no draft value.
     assert 'value=""' in _input(page.text, st.id, "star")
     # Details: justification, evidence, comment, a link to the file.
@@ -270,7 +274,7 @@ async def test_squad_member_sees_mate_draft(teacher_client: AsyncClient, db, tea
 
     for sid in (st.id, mate.id):
         inp = _input(page.text, sid, "report")
-        assert 'value="4"' in inp and "AI-чернетка" in inp
+        assert 'placeholder="4"' in inp and "AI-чернетка" in inp
 
 
 async def test_name_match_badge_offers_confirm(
@@ -555,8 +559,8 @@ async def test_board_carries_shown_draft_id(teacher_client: AsyncClient, db, tea
     page = await teacher_client.get(_board(subject, asg))
 
     assert (
-        f'<input form="scores-{st.id}" type="hidden" name="llm_grading_id" value="{grading.id}">'
-        in page.text
+        f'<input form="batch-form" type="hidden" name="llm_grading_id__{st.id}"'
+        f' value="{grading.id}">' in page.text
     )
 
 
@@ -742,3 +746,50 @@ async def test_details_name_the_version_the_draft_belongs_to(
 
     assert "AI-чернетка стосується версії від 01.09.2026" in page.text
     assert "звіт.pdf" in page.text and "нова.pdf" in page.text
+
+
+# ── Batch save (Review Focus 3) ─────────────────────────────────────────────
+
+
+async def test_batch_skips_row_whose_draft_changed_and_saves_the_other(
+    teacher_client: AsyncClient, db, teacher, make_student
+):
+    subject, asg, st = await _world(db, teacher, make_student)
+    other = await make_student(full_name="Білик Олена")
+    db.add(SubjectsStudents(subject_id=subject.id, student_id=other.id))
+    await db.commit()
+    link = await _link(db, subject, st)
+    now = datetime.now(UTC)
+    _, v1 = await _work(db, asg, link, seen_at=now - timedelta(days=1))
+    _, v2 = await _work(db, asg, link, seen_at=now, content_hash="b")
+    _, o1 = await _work(db, asg, await _link(db, subject, other), content_hash="c")
+    blank = board_scores.board_values(settle.plan_for(asg), {})
+    r = await teacher_client.post(
+        f"{_board(subject, asg)}/scores/batch",
+        data={
+            f"orig__{st.id}": row_signature(blank),
+            f"s{st.id}__report": "4",
+            f"llm_grading_id__{st.id}": str(v1.id),  # the page showed v1; v2 landed since
+            f"orig__{other.id}": row_signature(blank),
+            f"s{other.id}__report": "3",
+            f"llm_grading_id__{other.id}": str(o1.id),
+        },
+        follow_redirects=False,
+    )
+
+    loc = r.headers["location"]
+    assert "saved=1" in loc and f"{st.id}:draft_changed" in loc
+    rows = {
+        sa.student_id: sa
+        for sa in (
+            await db.execute(
+                select(StudentAssignment).where(StudentAssignment.subjects_assignment_id == asg.id)
+            )
+        ).scalars()
+    }
+    assert st.id not in rows or not rows[st.id].teacher_scores
+    await db.refresh(rows[other.id])
+    assert rows[other.id].teacher_scores == {"report": 3}
+    await db.refresh(o1)
+    await db.refresh(v2)
+    assert o1.approved_at is not None and v2.approved_at is None

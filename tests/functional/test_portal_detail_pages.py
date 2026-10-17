@@ -6,8 +6,8 @@ Targets reachable branches that the existing portal suites only lightly touch:
   renders each enrolled student's latest submission, grade, violation/snapshot
   flags) — owner 200 with seeded data reflected, cross-teacher 403, missing 404.
 * ``teacher_portal.teacher_students`` (the registration overview list).
-* ``teacher_portal.teacher_review_submission`` GET render + the quiz-approve
-  branches of the POST action (``teacher_send_quiz`` / ``teacher_approve``).
+* ``teacher_portal.teacher_review_submission`` GET render + rejecting work that waits on
+  its quiz (the POST action has no approve any more).
 * ``student_portal.assignment_detail`` quiz-metadata branches (latest attempt
   present → ``quiz_attempt_id``; no attempt but plugin config → ``max_attempts``)
   and ``check_reason`` surfacing.
@@ -407,14 +407,13 @@ async def test_teacher_review_get_renders_for_owner(
     assert "Rev Iewer" in resp.text
 
 
-# ── quiz-approve branches of the review POST action  865-883 ─────────────────
+# ── reject from QUIZ_SENT via the review POST action ─────────────────────────
 
 
-async def test_review_approve_with_quiz_sends_quiz_from_awaiting(
+async def test_review_reject_fails_work_waiting_on_its_quiz(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
-    # AWAITING_TEACHER_REVIEW + approve + quiz configured → teacher_send_quiz →
-    # QUIZ_SENT (covers the has_quiz=True / send-quiz branch, lines 866-875).
+    # QUIZ_SENT is rejectable too: the reject marker makes settle fail the work.
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(db, subject.id, code="quizlab")
     student = await make_student(email="q1@example.com")
@@ -427,18 +426,18 @@ async def test_review_approve_with_quiz_sends_quiz_from_awaiting(
     sub = await _make_submission(
         db,
         student_sa.id,
-        status=SubmissionStatus.AWAITING_TEACHER_REVIEW,
+        status=SubmissionStatus.QUIZ_SENT,
         plugin_config_id=cfg.id,
     )
     authenticate(client, teacher)
     resp = await client.post(
         f"/teacher/submissions/{sub.id}/review",
-        data={"action": "approve"},
+        data={"action": "reject", "reason": "copy"},
         follow_redirects=False,
     )
     assert resp.status_code == 303
     await db.refresh(sub)
-    assert sub.status == SubmissionStatus.QUIZ_SENT
+    assert sub.status == SubmissionStatus.FAILED
 
 
 # ─────────────────────────────────────────────────────────────────────────────

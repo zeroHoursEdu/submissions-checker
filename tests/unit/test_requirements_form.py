@@ -43,3 +43,31 @@ def test_row_signature_is_order_independent() -> None:
     assert a == rq.row_signature({"accepted": "", "report": "4"})
     assert a != rq.row_signature({"report": "5", "accepted": ""})
     assert len(a) == 16
+
+
+def test_board_values_render_scores_and_checks() -> None:
+    from submissions_checker.services.board_scores import board_values
+
+    assert board_values(PLAN, {"report": 4, "accepted": 1}) == {
+        "report": "4",
+        "star": "",
+        "accepted": "1",
+    }
+    assert board_values(PLAN, {}) == {"report": "", "star": "", "accepted": ""}
+
+
+def test_posted_values_treat_saved_check_as_rendered() -> None:
+    from submissions_checker.services.board_scores import board_values, posted_values
+
+    saved = {"report": 4, "accepted": 1}
+    # A saved check renders no input: nothing is posted for it, yet it reads as "1".
+    posted = posted_values(PLAN, {"report": " 4 "}, saved)
+    assert posted == {"report": "4", "star": "", "accepted": "1"}
+    assert rq.row_signature(posted) == rq.row_signature(board_values(PLAN, saved))
+
+
+def test_posted_values_tick_reads_as_one() -> None:
+    from submissions_checker.services.board_scores import posted_values
+
+    assert posted_values(PLAN, {"accepted": "on"}, {})["accepted"] == "1"
+    assert posted_values(PLAN, {}, {})["accepted"] == ""

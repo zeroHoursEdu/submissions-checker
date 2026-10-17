@@ -444,12 +444,12 @@ async def test_quiz_then_teacher_routes_a_pass_to_teacher_review(
     await db.refresh(submission)
     assert submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
 
-    # Approving must complete it, not bounce the student back into the quiz.
-    # student_client and teacher_client are the same underlying client, so re-auth in place.
+    # Ticking the acceptance check must complete it, not bounce the student back into the
+    # quiz. student_client and teacher_client are the same client, so re-auth in place.
     login(student_client, teacher)
     resp = await student_client.post(
-        f"/teacher/submissions/{submission.id}/review",
-        data={"action": "approve", "reason": ""},
+        f"/teacher/subjects/{subject.id}/assignments/{sa.subjects_assignment_id}/scores",
+        data={"student_id": str(student_user.student_id), "score_accepted": "on"},
         follow_redirects=False,
     )
     assert resp.status_code == 303

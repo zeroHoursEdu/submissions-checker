@@ -137,6 +137,14 @@ async def arrange(
     return subject, asg, student, sa, sub
 
 
+async def arrange_second_student(
+    db, subject: Subject, asg: SubjectsAssignment, make_student, *, scores=None
+) -> tuple[Any, StudentAssignment]:
+    """Another enrolled consented student on ``arrange``'s assignment, with an SA row
+    carrying ``scores`` and no submission. Returns ``(student, sa)``."""
+    return await _enrolled(db, make_student, subject, asg, name="Bohdana S", scores=scores)
+
+
 async def attempt(
     db,
     sub: Submission,

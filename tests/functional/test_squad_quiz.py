@@ -75,9 +75,10 @@ async def test_pair_gets_disjoint_halves_and_a_unified_grade(
         await db.refresh(sub)
         assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
 
+    # The teacher's acceptance is the board's check item (approve is gone).
     r = await teacher_client.post(
-        f"/teacher/submissions/{sub.id}/review",
-        data={"action": "approve", "reason": ""},
+        f"/teacher/subjects/{subject.id}/assignments/{asg.id}/scores",
+        data={"student_id": str(ua.student_id), "score_accepted": "on"},
         follow_redirects=False,
     )
     assert r.status_code == 303

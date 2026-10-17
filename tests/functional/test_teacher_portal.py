@@ -291,9 +291,10 @@ async def test_review_get_404_for_non_review_status(
     assert (await client.get(f"/teacher/submissions/{submission.id}/review")).status_code == 404
 
 
-async def test_owner_approve_completes_submission(
+async def test_approve_is_gone_and_changes_nothing(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
+    # Acceptance is a requirement (a check on the board), not a review action.
     subject = await _make_subject(db, owner_id=teacher.id)
     sa = await _make_assignment(db, subject.id)
     student = await make_student()
@@ -306,36 +307,21 @@ async def test_owner_approve_completes_submission(
         data={"action": "approve"},
         follow_redirects=False,
     )
-    assert resp.status_code == 303
-    assert resp.headers["location"] == f"/teacher/subjects/{subject.id}/assignments/{sa.id}"
-
+    assert resp.status_code == 400
     await db.refresh(submission)
-    # AWAITING_TEACHER_REVIEW + approve + no quiz → teacher_approve → COMPLETED
-    assert submission.status == SubmissionStatus.COMPLETED
-
-    # Side effect: SUBMISSION_REVIEWED outbox message queued.
-    ob = (
-        (
-            await db.execute(
-                select(OutboxMessage).where(
-                    OutboxMessage.event_type == OutboxEventType.SUBMISSION_REVIEWED
-                )
-            )
-        )
-        .scalars()
-        .all()
+    assert submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    ob = await db.scalar(
+        select(func.count())
+        .select_from(OutboxMessage)
+        .where(OutboxMessage.event_type == OutboxEventType.SUBMISSION_REVIEWED)
     )
-    assert len(ob) == 1
-    assert ob[0].payload["action"] == "approve"
-    assert ob[0].payload["submission_id"] == submission.id
-
-    # Side effect: audit row.
+    assert ob == 0
     audit_count = await db.scalar(
         select(func.count())
         .select_from(AuditLog)
         .where(AuditLog.action == "teacher_approve_submission")
     )
-    assert audit_count == 1
+    assert audit_count == 0
 
 
 async def test_owner_reject_fails_submission_and_records_reason(
@@ -374,12 +360,12 @@ async def test_admin_can_review_any_subject(
     authenticate(client, admin)
     resp = await client.post(
         f"/teacher/submissions/{submission.id}/review",
-        data={"action": "approve"},
+        data={"action": "reject", "reason": "copy"},
         follow_redirects=False,
     )
     assert resp.status_code == 303
     await db.refresh(submission)
-    assert submission.status == SubmissionStatus.COMPLETED
+    assert submission.status == SubmissionStatus.FAILED
 
 
 async def test_review_invalid_action_is_400(client: AsyncClient, db, teacher, make_student) -> None:
@@ -1080,7 +1066,7 @@ async def _board_pair(db, teacher, make_student, statuses):
     return subject, sa, subs
 
 
-async def test_bulk_approve_completes_only_reviewable_rows(
+async def test_bulk_reject_fails_only_reviewable_rows(
     client: AsyncClient, db, teacher, make_student
 ) -> None:
     subject, sa, (s1, s2) = await _board_pair(
@@ -1092,14 +1078,18 @@ async def test_bulk_approve_completes_only_reviewable_rows(
     authenticate(client, teacher)
     r = await client.post(
         f"/teacher/subjects/{subject.id}/assignments/{sa.id}/bulk",
-        data={"action": "approve", "submission_ids": [str(s1.id), str(s2.id)]},
+        data={
+            "action": "reject",
+            "submission_ids": [str(s1.id), str(s2.id)],
+            "reason": "copy",
+        },
         follow_redirects=False,
     )
     assert r.status_code == 303
     assert r.headers["location"].endswith("?bulk=1,1")
     await db.refresh(s1)
     await db.refresh(s2)
-    assert s1.status == SubmissionStatus.COMPLETED
+    assert s1.status == SubmissionStatus.FAILED
     assert s2.status == SubmissionStatus.COMPLETED  # untouched
     reviewed = (
         (
@@ -1168,7 +1158,11 @@ async def test_bulk_ignores_submissions_of_other_assignments(
     authenticate(client, teacher)
     r = await client.post(
         f"/teacher/subjects/{subject.id}/assignments/{sa.id}/bulk",
-        data={"action": "approve", "submission_ids": [str(s1.id), str(foreign.id)]},
+        data={
+            "action": "reject",
+            "submission_ids": [str(s1.id), str(foreign.id)],
+            "reason": "copy",
+        },
         follow_redirects=False,
     )
     assert r.headers["location"].endswith("?bulk=1,1")
