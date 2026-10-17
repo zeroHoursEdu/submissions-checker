@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import io
+import time
 import zipfile
 
 import pytest
 from pypdf import PdfWriter
 from pypdf.annotations import Link
+from pypdf.generic import ArrayObject, NameObject, NumberObject
 
 from submissions_checker.services.llm_grading import github_code as gh
 
@@ -105,3 +107,66 @@ def test_first_file_with_a_link_wins() -> None:
     ref = gh.find_repo_link(files)
     assert ref is not None
     assert ref.repo == "first"
+
+
+def test_many_self_closing_paragraphs_parse_fast() -> None:
+    body = "<w:p />" * 50_000 + _run("https://github.com/a/fast")
+    start = time.monotonic()
+    ref = gh.find_repo_link([("r.docx", _docx(body))])
+    assert time.monotonic() - start < 2
+    assert ref is not None
+    assert ref.repo == "fast"
+
+
+def test_oversized_docx_part_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gh, "MAX_DOCX_PART", 1000)
+    big = _run("https://github.com/a/big") + "<!--" + "x" * 5000 + "-->"
+    assert gh.find_repo_link([("r.docx", _docx(big))]) is None
+    assert gh.find_repo_link([("r.docx", _docx(_run("https://github.com/a/ok")))]) is not None
+
+
+def test_docx_xml_entities_are_decoded() -> None:
+    ref = gh.find_repo_link([("r.docx", _docx(_run("x"), "https://github.com/a/b/tree/m/p&amp;q"))])
+    assert ref is not None
+    assert ref.path == "p&q"
+
+
+def _blank_pdf(pages: int) -> PdfWriter:
+    w = PdfWriter()
+    for _ in range(pages):
+        w.add_blank_page(200, 200)
+    return w
+
+
+def _bytes(w: PdfWriter) -> bytes:
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def test_pdf_link_past_page_cap_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gh, "MAX_PDF_PAGES", 3)
+    w = _blank_pdf(5)
+    w.add_annotation(
+        page_number=4, annotation=Link(rect=(1, 1, 50, 20), url="https://github.com/a/late")
+    )
+    assert gh.find_repo_link([("r.pdf", _bytes(w))]) is None
+
+
+def test_pdf_bad_annotation_is_skipped() -> None:
+    w = _blank_pdf(1)
+    w.add_annotation(
+        page_number=0, annotation=Link(rect=(1, 1, 50, 20), url="https://github.com/a/good")
+    )
+    annots = w.pages[0][NameObject("/Annots")]
+    w.pages[0][NameObject("/Annots")] = ArrayObject([NumberObject(5), *annots])
+    ref = gh.find_repo_link([("r.pdf", _bytes(w))])
+    assert ref is not None
+    assert ref.repo == "good"
+
+
+def test_overlong_repo_or_ref_is_rejected() -> None:
+    assert gh.parse_repo_url("https://github.com/a/" + "r" * 101) is None
+    assert gh.parse_repo_url("https://github.com/a/b/tree/" + "r" * 501) is None
+    assert gh.parse_repo_url("https://github.com/a/b/tree/m/" + "p" * 501) is None
+    assert gh.parse_repo_url("https://github.com/a/" + "r" * 100) is not None
