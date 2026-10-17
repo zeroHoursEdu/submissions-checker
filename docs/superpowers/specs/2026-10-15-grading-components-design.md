@@ -1,6 +1,6 @@
 # Teacher acceptance as a grade component, batch scoring, code from GitHub
 
-Date: 2026-10-15. Status: approved in chat, awaiting written-spec review.
+Date: 2026-10-15. Status: SUPERSEDED by `2026-10-17-requirements-list-design.md`.
 
 ## Why
 
