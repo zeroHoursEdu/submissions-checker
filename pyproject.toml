@@ -28,6 +28,8 @@ dependencies = [
     "pyyaml>=6.0",
     "aioboto3>=13.0",
     "prometheus-client>=0.26",
+    # Reads link annotations and text of PDF reports (services/llm_grading/github_code.py).
+    "pypdf>=5.1.0",
 ]
 
 [project.scripts]
