@@ -756,6 +756,29 @@ async def test_nightly_ingests_then_grades_and_closes_judge(db, nightly_env, mak
     assert s is not None and s.classroom_synced_at is not None
 
 
+async def test_nightly_passes_a_fetcher_and_closes_the_http_client(db, nightly_env, monkeypatch):
+    captured: dict[str, Any] = {}
+    clients: list[Any] = []
+    real_client = classroom_nightly.httpx.AsyncClient
+
+    def make_client(*a, **kw):
+        c = real_client(*a, **kw)
+        clients.append(c)
+        return c
+
+    async def fake_loop(*args, **kwargs):
+        captured.update(kwargs)
+        captured["open_during"] = not clients[-1].is_closed
+        return 0
+
+    monkeypatch.setattr(classroom_nightly.httpx, "AsyncClient", make_client)
+    monkeypatch.setattr(classroom_nightly, "grading_loop", fake_loop)
+    await classroom_nightly.run_classroom_nightly()
+    assert callable(captured["fetch"])
+    assert captured["open_during"]
+    assert clients and clients[-1].is_closed
+
+
 async def test_nightly_reaps_stale_before_grading(db, nightly_env):
     gid = (
         await _grading(db, nightly_env, status="RUNNING", updated_at=NIGHT - timedelta(hours=3))

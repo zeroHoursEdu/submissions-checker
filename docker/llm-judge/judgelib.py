@@ -16,6 +16,7 @@ from typing import Any
 TEXT_EXT = {
     ".py", ".cpp", ".h", ".hpp", ".c", ".java", ".js", ".ts", ".md", ".txt", ".json",
     ".yml", ".yaml", ".csv", ".sql", ".html", ".css",
+    ".cc", ".rc", ".sln", ".vcxproj",
 }  # fmt: skip
 MAX_FILE_CHARS = 150_000
 MAX_TOTAL_CHARS = 400_000

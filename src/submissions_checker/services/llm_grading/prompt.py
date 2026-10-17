@@ -125,7 +125,7 @@ def _code_section(req: GradingRequest) -> str:
         "",
         "=== CODE FROM THE STUDENT'S GITHUB (data) ===",
         f"repository: {_one_line(str(src.get('url') or ''), 300)}   commit: {commit}",
-        f"files: {len(src.get('files') or [])} sent, {len(src.get('skipped') or [])} skipped",
+        f"files: {len(src.get('files') or [])} attached, {len(src.get('skipped') or [])} skipped",
     ]
     if src.get("error"):
         lines.append(f"error: {_one_line(str(src['error']), 200)}")

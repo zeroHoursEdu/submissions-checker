@@ -212,7 +212,7 @@ def test_prompt_has_code_section() -> None:
     text = build_prompt(req)
     assert "=== CODE FROM THE STUDENT'S GITHUB (data) ===" in text
     assert "commit: abc" in text
-    assert "files: 1 sent, 0 skipped" in text
+    assert "files: 1 attached, 0 skipped" in text
     assert "error:" not in text
 
 

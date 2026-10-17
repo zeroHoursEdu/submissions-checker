@@ -147,7 +147,10 @@ def find_repo_link(files: Iterable[tuple[str, bytes]]) -> RepoRef | None:
 
 MAX_DOWNLOAD = 20 * 1024 * 1024
 MAX_FILES = 200
-MAX_TOTAL = 1024 * 1024
+# Sized for the llm-judge sidecar (docker/llm-judge/judgelib.py: 150k chars per file, 400k
+# in total, filled in upload order): report text plus this much code must fit its budget.
+MAX_FILE = 150_000
+MAX_TOTAL = 200 * 1024
 MAX_MEMBERS = 5000  # tar entries looked at before the archive is called hostile
 MAX_SCANNED = 200 * 1024 * 1024  # sum of regular-file sizes looked at (bounds gzip bombs)
 TIMEOUT = 20.0
@@ -252,7 +255,7 @@ def select_files(
             rel = posixpath.normpath(rel) if rel else ""
             if not rel or rel.startswith("..") or not rel.startswith(prefix) or not _keep(rel):
                 continue
-            if len(files) >= MAX_FILES or total + member.size > MAX_TOTAL:
+            if len(files) >= MAX_FILES or member.size > MAX_FILE or total + member.size > MAX_TOTAL:
                 skipped.append(rel)
                 continue
             handle = tar.extractfile(member)

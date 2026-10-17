@@ -82,9 +82,18 @@ def test_caps_skip_the_rest() -> None:
     tar = _tar({f"f{i:03}.cpp": b"x" * 10 for i in range(gh.MAX_FILES + 5)})
     _, files, skipped = gh.select_files(tar, None)
     assert len(files) == gh.MAX_FILES and len(skipped) == 5
-    tar = _tar({"big.cpp": b"x" * (gh.MAX_TOTAL + 1), "small.cpp": b"y"})
+    tar = _tar({"big.cpp": b"x" * (gh.MAX_FILE + 1), "small.cpp": b"y"})
     _, files, skipped = gh.select_files(tar, None)
     assert [f.path for f in files] == ["small.cpp"] and skipped == ["big.cpp"]
+    # Each file fits the per-file cap, but together they exceed the total.
+    n = gh.MAX_TOTAL // gh.MAX_FILE + 1
+    tar = _tar({f"p{i}.cpp": b"x" * gh.MAX_FILE for i in range(n)})
+    _, files, skipped = gh.select_files(tar, None)
+    assert len(files) == gh.MAX_TOTAL // gh.MAX_FILE and len(skipped) == 1
+
+
+def test_caps_fit_the_sidecar_budget() -> None:
+    assert gh.MAX_FILE <= 150_000 and gh.MAX_TOTAL <= 200 * 1024
 
 
 def test_unsafe_paths_dropped() -> None:

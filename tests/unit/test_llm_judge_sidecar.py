@@ -103,6 +103,13 @@ def test_extract_text_file(tmp_path):
     assert extract(p, "text/x-python") == ("print(1)", False)
 
 
+@pytest.mark.parametrize("name", ["a.cc", "a.rc", "lab.sln", "lab.vcxproj"])
+def test_extract_reads_every_extension_github_code_keeps(tmp_path, name):
+    p = tmp_path / name
+    p.write_text("code")
+    assert extract(p, "text/plain") == ("code", False)
+
+
 def test_extract_image_offered(tmp_path):
     p = tmp_path / "a.png"
     p.write_bytes(b"\x89PNG")
