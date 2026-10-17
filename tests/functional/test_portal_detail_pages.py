@@ -45,6 +45,7 @@ from submissions_checker.db.models.enums import (
     UserRole,
 )
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
+from tests.functional._scored_helpers import CFG, add_llm_draft, arrange
 from tests.functional.conftest import authenticate
 
 pytestmark = pytest.mark.asyncio
@@ -655,3 +656,59 @@ async def test_student_summary_no_enrollment_empty(
     await _consent(db, student_user.student_id)
     resp = await student_client.get("/portal/summary")
     assert resp.status_code == 200
+
+
+# ── Requirements checklist ───────────────────────────────────────────────────
+
+
+async def test_checklist_shows_items_and_no_draft(db, client, teacher, make_user, make_student):
+    subject, asg, student, sa, sub = await arrange(
+        db, teacher, make_student, config=CFG, scores={"report": 4}
+    )
+    await add_llm_draft(db, asg, student, points={"report": 5})
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    html = (await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")).text
+    assert "data-checklist" in html
+    assert "Звіт" in html and "4/5" in html and "5/5" not in html
+    assert "Прийнято" in html
+    assert 'id="upload-form"' not in html  # source: classroom
+
+
+async def test_quiz_button_while_teacher_items_pending(
+    db, client, teacher, make_user, make_student
+):
+    subject, asg, student, sa, sub = await arrange(
+        db, teacher, make_student, config=CFG, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    html = (await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")).text
+    assert f"/assignments/{sa.id}/quiz" in html
+
+
+async def test_no_quiz_button_once_quiz_is_done_or_attempts_spent(
+    db, client, teacher, make_user, make_student
+):
+    from tests.functional._scored_helpers import attempt
+
+    subject, asg, student, sa, sub = await arrange(
+        db, teacher, make_student, config=CFG, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    await attempt(db, sub, student.id, score=1, max_score=1, passed=True)
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    html = (await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")).text
+    assert "data-checklist" in html
+    assert f"/assignments/{sa.id}/quiz" not in html
+
+
+async def test_upload_form_for_upload_source(db, client, teacher, make_user, make_student):
+    cfg = {"max_grade": 10, "requirements": [{"type": "tests", "key": "tests", "points": 10}]}
+    subject, asg, student, sa = await arrange(
+        db, teacher, make_student, config=cfg, with_submission=False
+    )
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    html = (await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")).text
+    assert 'id="upload-form"' in html

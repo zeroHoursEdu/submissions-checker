@@ -67,9 +67,14 @@ async def test_pair_gets_disjoint_halves_and_a_unified_grade(
         assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
         assert (await db.get(StudentAssignment, sa_a.id)).grade is None
         page_a = await ca.get(f"/portal/subjects/{subject.id}/assignments/{sa_a.id}")
-        # The "grade appears when everyone passes" notice is keyed on QUIZ_SENT, which settle
-        # no longer shows while the teacher is also owed; Task 10's checklist replaces it.
         assert page_a.status_code == 200
+        # A has passed: no quiz button for them, and the page says the grade waits for B.
+        assert "data-checklist" in page_a.text
+        assert f"/assignments/{sa_a.id}/quiz" not in page_a.text
+        assert "Оцінка з&#39;явиться, коли всі учасники" in page_a.text
+        page_b = await cb.get(f"/portal/subjects/{subject.id}/assignments/{sa_b.id}")
+        # B still owes their half although the squad sits at AWAITING_TEACHER_REVIEW.
+        assert f"/assignments/{sa_b.id}/quiz" in page_b.text
 
         await _answer_all(cb, db, att_b, correct=True)
         await db.refresh(sub)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -16,6 +17,7 @@ from submissions_checker.api.dependencies import AppSettings, DBSession, Student
 from submissions_checker.api.schemas.student_portal import (
     AssignmentDetail,
     AssignmentRow,
+    ChecklistItem,
     ContentFile,
     SquadMemberState,
     SquadPanel,
@@ -46,7 +48,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import settle, squads, teacher_scores
+from submissions_checker.services import requirements, settle, squads, teacher_scores
 from submissions_checker.services.audit import audit
 from submissions_checker.services.gradebook import breakdown_line
 from submissions_checker.services.quiz_grants import effective_max_attempts
@@ -299,6 +301,31 @@ async def assignments_list(
     )
 
 
+def _checklist_item(item: requirements.ItemResult, vocab: dict[str, Any]) -> ChecklistItem:
+    """One checklist row. ``points`` here come from saved scores and finished checks only."""
+    v = vocab.get("portal", {})
+    text: str
+    if item.type == "check":
+        text = "✓" if item.state == "done" else str(v.get("checklist_defend"))
+    elif item.type == "score":
+        text = (
+            f"{item.points:g}/{item.max:g}"
+            if item.state == "done"
+            else str(v.get("checklist_waiting_teacher"))
+        )
+    elif item.state == "done":
+        text = f"{item.points:g}/{item.max:g}"
+    elif item.state == "running":
+        text = str(v.get("checklist_checking"))
+    elif item.state == "failed":
+        text = str(
+            v.get("checklist_quiz_failed" if item.type == "quiz" else "checklist_check_failed")
+        )
+    else:
+        text = str(v.get("checklist_quiz_pending" if item.type == "quiz" else "checklist_not_done"))
+    return ChecklistItem(item.key, item.title, item.type, item.state, text, item.optional)
+
+
 @router.get("/subjects/{subject_id}/assignments/{sa_id}", response_class=HTMLResponse)
 async def assignment_detail(
     request: Request,
@@ -375,10 +402,9 @@ async def assignment_detail(
         # The config's cap plus any attempts a teacher granted this student on this upload.
         quiz_max_attempts = effective_max_attempts(quiz_max_attempts, latest_sub, student_id)
 
-    # quiz_and_teacher_scores: nothing is uploaded, so before the first attempt the cap
-    # comes from the subject's latest config rather than a pinned one.
-    scored = teacher_scores.is_scored_mode(sa.subjects_assignment.config)
-    if scored and latest_sub is None and sa.subjects_assignment.code:
+    # Nothing uploaded yet (a Classroom or quiz-only assignment): the cap comes from the
+    # subject's latest config rather than a pinned one.
+    if latest_sub is None and sa.subjects_assignment.code:
         latest_cfg = await db.scalar(
             select(SubjectPluginConfig)
             .where(SubjectPluginConfig.subject_id == sa.subjects_assignment.subject_id)
@@ -409,8 +435,10 @@ async def assignment_detail(
             ai_comment = latest_sub.ai_review.get("comment")
     grade_breakdown: dict | None = None  # type: ignore[type-arg]
     if latest_sub and latest_sub.grade_breakdown:
-        # A scored lab always shows where its points came from.
-        if scored or (assignment_cfg.get("grading") or {}).get("show_breakdown_to_student"):
+        # A requirements assignment always shows where its points came from.
+        if latest_sub.grade_breakdown.get("mode") in ("requirements", teacher_scores.MODE) or (
+            assignment_cfg.get("grading") or {}
+        ).get("show_breakdown_to_student"):
             grade_breakdown = latest_sub.grade_breakdown
 
     squad_panel = None
@@ -431,6 +459,23 @@ async def assignment_detail(
                 my_slice=my_slice,
                 total_questions=len(draw.get("question_ids") or []) or None,
             )
+
+    # What counts the work, read from the same facts settle grades by. Read-only: no lock,
+    # no settle(); scores come only from the saved ``teacher_scores``, never from drafts.
+    asg = sa.subjects_assignment
+    plan = settle.plan_for(asg)
+    facts, _subs, squad_row, _scope = await settle.gather_facts(db, sa, asg)
+    evaluation = requirements.evaluate(
+        plan, facts, asg.min_grade, asg.max_grade, round_up=squad_row is not None
+    )
+    vocab = get_vocab(request.cookies.get("lang"))
+    checklist = [_checklist_item(i, vocab) for i in evaluation.items]
+    quiz_available = (
+        plan.has("quiz")
+        and facts.quiz[0] == "pending"
+        and (quiz_max_attempts is None or quiz_attempts_used < quiz_max_attempts)
+        and not (squad_panel is not None and squad_panel.my_passed)
+    )
 
     # Only the fact and date of receipt: drafts and verdicts are teacher-only.
     classroom_created_at = await db.scalar(
@@ -468,6 +513,9 @@ async def assignment_detail(
         ai_comment=ai_comment,
         grade_breakdown=grade_breakdown,
         squad=squad_panel,
+        checklist=checklist,
+        quiz_available=quiz_available,
+        source=plan.source,
     )
 
     student = await db.get(Student, student_id)
@@ -483,7 +531,6 @@ async def assignment_detail(
             # A page rendered mid-check is already out of date: the quiz link, the grade and
             # the result link all appear only after a worker moves the status.
             "poll_status": latest_sub is not None and latest_sub.status in TRANSIENT_STATUSES,
-            "scored": scored,
             "classroom_received_at": classroom_received_at,
             "breakdown_text": breakdown_line(
                 grade_breakdown,

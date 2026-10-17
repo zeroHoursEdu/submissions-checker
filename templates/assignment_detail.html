@@ -122,12 +122,12 @@
     </li>
     {% endfor %}
   </ul>
-  {% if assignment.grade is none and assignment.submission_status == "QUIZ_SENT" %}
-  <p class="mt-3 text-xs text-slate-500">{{ vocab.squad.grade_pending }}</p>
-  {% elif assignment.grade is not none %}
+  {% if assignment.grade is not none %}
   <p class="mt-3 text-xs text-slate-500">{{ vocab.squad.grade_unified }}</p>
   {% elif assignment.submission_status == "FAILED" %}
   <p class="mt-3 text-xs text-red-600">{{ vocab.quiz.result_not_passed }}</p>
+  {% elif not assignment.squad.complete %}
+  <p class="mt-3 text-xs text-slate-500">{{ vocab.squad.grade_pending }}</p>
   {% endif %}
 </div>
 {% endif %}
@@ -157,6 +157,12 @@
   {% set gb = assignment.grade_breakdown %}
   {% if breakdown_text %}
   <p class="text-sm text-slate-700" data-scored-breakdown>{{ breakdown_text }}</p>
+  {% elif gb.mode == "requirements" %}
+  <ul class="text-sm text-slate-600 space-y-1.5" data-requirements-breakdown>
+    {% for i in gb["items"] %}
+    <li>{{ i.title }}: <strong class="text-slate-800">{{ "%g"|format(i.points) }}/{{ "%g"|format(i.max) }}</strong></li>
+    {% endfor %}
+  </ul>
   {% else %}
   <ul class="text-sm text-slate-600 space-y-1.5">
     {% if gb.works_score is not none %}
@@ -214,24 +220,41 @@
 </div>
 {% endif %}
 
-{% if scored and assignment.submission_status in [None, "AWAITING_TEACHER_REVIEW", "VALIDATION_FAILED", "TEST_FAILED"] %}
-<!-- quiz_and_teacher_scores: nothing to upload, the quiz opens any time -->
-<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-5" data-scored-panel>
-  <h2 class="font-semibold text-slate-900 mb-1">{{ vocab.quiz.scored_title }}</h2>
-  {% if assignment.submission_status == "AWAITING_TEACHER_REVIEW" %}
-  <p class="text-sm text-slate-600">{{ vocab.quiz.scored_waiting }}</p>
-  {% else %}
-  <p class="text-sm text-slate-500 mb-4">{{ vocab.quiz.scored_hint }}</p>
-  <div class="flex items-center gap-3 flex-wrap">
+<!-- What counts the work -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-5" data-checklist>
+  <div class="flex justify-between mb-3">
+    <h2 class="font-semibold text-slate-900">{{ vocab.portal.checklist_title }}</h2>
+    <span class="text-sm">{{ vocab.portal.grade_label }}:
+      {% if assignment.grade is not none %}<strong>{{ assignment.grade }}</strong>/{{ assignment.max_grade }}
+      {% else %}— <span class="text-slate-400">({{ vocab.portal.checklist_grade_hint }})</span>{% endif %}</span>
+  </div>
+  <ul class="space-y-1.5 text-sm">
+    {% for c in assignment.checklist %}
+    <li class="flex justify-between" data-checklist-item="{{ c.key }}">
+      <span>{% if c.state == "done" %}✓{% elif c.state == "failed" %}✗{% elif c.state == "running" %}⏳{% else %}○{% endif %}
+        {{ c.title }}{% if c.optional %} <span class="text-slate-400">({{ vocab.portal.optional }})</span>{% endif %}</span>
+      <span class="text-slate-500">{{ c.text }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if assignment.quiz_available %}
+  <div class="mt-4 flex items-center gap-3 flex-wrap">
     <a href="/portal/subjects/{{ subject_id }}/assignments/{{ assignment.student_assignment_id }}/quiz"
-       class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">{{ vocab.quiz.start_quiz }}</a>
+       class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+      {% if assignment.squad %}
+        {% if assignment.squad.my_slice and assignment.squad.total_questions %}{{ vocab.squad.quiz_button_part.format(k=assignment.squad.my_slice, total=assignment.squad.total_questions) }}
+        {% else %}{{ vocab.squad.quiz_button_my_part }}{% endif %}
+      {% else %}{{ vocab.quiz.start_quiz }}{% endif %}
+    </a>
     {% if assignment.quiz_max_attempts %}
     <span class="text-sm text-slate-500">{{ vocab.quiz.attempts_used.format(used=assignment.quiz_attempts_used, cap=assignment.quiz_max_attempts) }}</span>
     {% endif %}
   </div>
   {% endif %}
+  {% if assignment.source == "classroom" %}
+  <p class="mt-3 text-sm text-slate-500">{{ vocab.portal.checklist_hand_in_classroom }}</p>
+  {% endif %}
 </div>
-{% endif %}
 
 <!-- Submission Status -->
 {% if assignment.submission_status %}
@@ -268,35 +291,13 @@
   </div>
   {% endif %}
 
-  {% set attempts_left = (assignment.quiz_max_attempts - assignment.quiz_attempts_used) if assignment.quiz_max_attempts else 999 %}
-
-  {% if assignment.submission_status == "QUIZ_SENT" and attempts_left > 0 %}
-  <div class="mt-4 pt-4 border-t border-slate-100">
-    {% if assignment.squad and assignment.squad.my_passed %}
-    <p class="text-sm text-slate-500">{{ vocab.squad.grade_pending }}</p>
-    {% else %}
-    <a href="/portal/subjects/{{ subject_id }}/assignments/{{ assignment.student_assignment_id }}/quiz"
-       class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
-      </svg>
-      {% if assignment.squad %}
-        {% if assignment.squad.my_slice and assignment.squad.total_questions %}{{ vocab.squad.quiz_button_part.format(k=assignment.squad.my_slice, total=assignment.squad.total_questions) }}
-        {% else %}Пройти свою частину тесту{% endif %}
-      {% elif assignment.quiz_attempts_used == 0 %}Start Quiz
-      {% elif assignment.quiz_max_attempts %}Retry Quiz ({{ attempts_left }} left)
-      {% else %}Retry Quiz{% endif %}
-    </a>
-    {% endif %}
-  </div>
-
-  {% elif assignment.submission_status == "FAILED" and assignment.quiz_max_attempts and assignment.quiz_attempts_used >= assignment.quiz_max_attempts %}
+  {% if assignment.submission_status == "FAILED" and assignment.quiz_max_attempts and assignment.quiz_attempts_used >= assignment.quiz_max_attempts %}
   <div class="mt-4 pt-4 border-t border-slate-100">
     <div class="flex items-start gap-2 text-sm text-red-600">
       <svg class="w-4 h-4 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
         <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/>
       </svg>
-      <span>{% if scored %}{{ vocab.quiz.scored_exhausted }}{% else %}All {{ assignment.quiz_max_attempts }} quiz attempts used — this assignment is not passed.{% endif %}</span>
+      <span>{{ vocab.quiz.scored_exhausted }}</span>
     </div>
     {% if assignment.quiz_attempt_id %}
     <a href="/portal/quiz/{{ assignment.quiz_attempt_id }}/result"
@@ -317,7 +318,7 @@
 </div>
 {% endif %}
 
-{% if not scored %}
+{% if assignment.source == "upload" %}
 <!-- Upload Form -->
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
   <h2 class="font-semibold text-slate-900 mb-1 flex items-center gap-2">

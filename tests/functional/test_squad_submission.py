@@ -220,7 +220,7 @@ async def test_solo_student_on_squad_subject_is_unchanged(
         sub = (await db.execute(select(Submission))).scalar_one()
         assert sub.squad_id is None
         page = await ca.get(f"/portal/subjects/{subject.id}/assignments/{sa_a.id}")
-        assert "Start Quiz" in page.text and "Пройти свою частину" not in page.text
+        assert "Почати тест" in page.text and "Пройти свою частину" not in page.text
 
 
 async def test_member_of_unlocked_squad_cannot_upload_solo(

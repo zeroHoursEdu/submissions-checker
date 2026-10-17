@@ -523,6 +523,20 @@ notifications:
   enabled: Увімкнено
   disabled: Вимкнено
 
+portal:
+  grade_label: Оцінка
+  checklist_title: Що потрібно для зарахування
+  checklist_grade_hint: з'явиться, коли все виконано
+  checklist_waiting_teacher: очікує оцінки викладача
+  checklist_defend: захисти роботу викладачу
+  checklist_quiz_pending: ще не складено
+  checklist_quiz_failed: спроби вичерпано
+  checklist_checking: перевіряється
+  checklist_not_done: ще не виконано
+  checklist_check_failed: не пройдено
+  checklist_hand_in_classroom: Здавай роботу в Google Classroom.
+  optional: необов'язково
+
 squad:
   badge_title: "Спільна оцінка сквaду"
   card_title: Сквад
@@ -543,6 +557,7 @@ squad:
   grade_unified: "Спільна оцінка сквaду — середнє по учасниках, округлене вгору."
   your_part: "Ваша частина: {k} з {total} питань"
   partners: "Партнер(и):"
+  quiz_button_my_part: Пройти свою частину тесту
   quiz_button_part: "Пройти свою частину тесту ({k} з {total} питань)"
   member_submitted: здав ZIP
   member_passed: тест пройдено

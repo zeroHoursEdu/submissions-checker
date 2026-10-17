@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -41,6 +42,16 @@ class SquadPanel(BaseModel):
     total_questions: int | None = None
 
 
+@dataclass
+class ChecklistItem:
+    key: str
+    title: str
+    type: str
+    state: str
+    text: str
+    optional: bool
+
+
 class AssignmentRow(BaseModel):
     student_assignment_id: int
     title: str
@@ -74,3 +85,6 @@ class AssignmentDetail(BaseModel):
     ai_comment: str | None = None
     grade_breakdown: dict | None = None  # type: ignore[type-arg]
     squad: SquadPanel | None = None
+    checklist: list[ChecklistItem] = []
+    quiz_available: bool = False
+    source: str | None = None

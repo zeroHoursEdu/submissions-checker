@@ -19,7 +19,14 @@ from submissions_checker.db.models import (
     SubjectsStudents,
     Submission,
 )
+from submissions_checker.db.models.classroom import (
+    ClassroomStudentLink,
+    ClassroomWork,
+    LLMGrading,
+)
 from submissions_checker.db.models.enums import (
+    ClassroomLinkMethod,
+    LLMGradingStatus,
     QuizAttemptStatus,
     SubmissionSourceType,
     SubmissionStatus,
@@ -251,3 +258,39 @@ async def start_and_answer_correctly(client, subject_id: int, sa_id: int) -> int
     )
     assert r.status_code == 303, r.text
     return attempt_id
+
+
+async def add_llm_draft(db, asg: SubjectsAssignment, student, *, points: dict[str, int]) -> None:
+    """A confirmed Classroom link and one work for ``student`` whose LLM grading carries an
+    unsaved draft with ``points`` per criterion (what a student must never see)."""
+    link = ClassroomStudentLink(
+        subject_id=asg.subject_id,
+        classroom_user_id=f"u{student.id}",
+        classroom_name="Draft Student",
+        student_id=student.id,
+        method=ClassroomLinkMethod.EMAIL.value,
+        confirmed=True,
+    )
+    db.add(link)
+    await db.commit()
+    work = ClassroomWork(
+        subjects_assignment_id=asg.id,
+        link_id=link.id,
+        classroom_submission_id=f"w{student.id}",
+        state="TURNED_IN",
+        late=False,
+        content_hash="d".ljust(64, "0"),
+        manifest=[],
+        seen_at=datetime.now(UTC),
+    )
+    db.add(work)
+    await db.commit()
+    draft = {
+        "criteria": {
+            k: {"points": v, "justification": "j", "evidence": "e"} for k, v in points.items()
+        },
+        "comment": "c",
+        "usage": {},
+    }
+    db.add(LLMGrading(classroom_work_id=work.id, status=LLMGradingStatus.DONE.value, draft=draft))
+    await db.commit()

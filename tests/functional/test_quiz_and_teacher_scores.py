@@ -718,7 +718,7 @@ async def test_student_page_waiting_for_teacher(
     await _attempt(db, sub, student.id, is_passed=True)
     await _as_student(client, db, make_user, student)
     page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
-    assert "Очікуємо бали викладача" in page.text
+    assert "очікує оцінки викладача" in page.text  # checklist row replaces the panel
 
 
 async def test_student_page_shows_breakdown_when_completed(
