@@ -7,7 +7,12 @@ import asyncio
 import pytest
 from sqlalchemy import func, select
 
-from submissions_checker.db.models import QuizAttempt, StudentAssignment, Submission
+from submissions_checker.db.models import (
+    QuizAttempt,
+    StudentAssignment,
+    SubjectsAssignment,
+    Submission,
+)
 from submissions_checker.db.models.enums import (
     QuizAttemptStatus,
     SubmissionSourceType,
@@ -492,3 +497,31 @@ async def test_failed_required_ai_review_still_blocks(db, teacher, make_student)
     sa, sub = await _ai_failed(db, teacher, make_student, ai_optional=False)
     res = await settle.settle(db, sa)
     assert res.new_status == SubmissionStatus.AI_REVIEW_FAILED
+
+
+async def test_pre_squad_solo_submissions_keep_their_quiz_points(db, teacher, make_student):
+    """Squad mates who each handed in alone before the squad existed (solo submissions,
+    legacy attempts with no student_id) keep the quiz points those passes earned — the
+    squad mean must not drop them for lacking a student_id (prod: squad 8, lab1)."""
+    sa_a, sa_b, sub_a = await squad_of_two(
+        db, teacher, make_student, config=CFG, scores={"report": 4, "accepted": 1}
+    )
+    sub_a.squad_id = None
+    sub_a.status = SubmissionStatus.COMPLETED
+    sub_b = Submission(
+        students_assignment_id=sa_b.id,
+        source_type=SubmissionSourceType.QUIZ_ONLY,
+        source_metadata={},
+        status=SubmissionStatus.COMPLETED,
+        plugin_config_id=sub_a.plugin_config_id,
+        test_results={"skipped": True, "reason": "requirements"},
+    )
+    db.add(sub_b)
+    await db.commit()
+    await attempt(db, sub_a, None, score=15, max_score=15, passed=True)
+    await attempt(db, sub_b, None, score=15, max_score=15, passed=True)
+
+    for sa in (sa_a, sa_b):
+        asg = await db.get(SubjectsAssignment, sa.subjects_assignment_id)
+        facts, *_ = await settle.gather_facts(db, sa, asg)
+        assert facts.quiz == ("done", 100.0)

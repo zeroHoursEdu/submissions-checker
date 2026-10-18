@@ -99,15 +99,15 @@ async def _quiz_fact(db: AsyncSession, subs: list[Submission], squad: Squad | No
     attempts = await _attempts(db, [s.id for s in subs])
     for sub in subs:
         if await squads.quiz_complete(db, sub):
-            if squad is not None:
+            # The squad mean applies to a squad's shared submission only. A mate's own
+            # pre-squad submission (squad_id unset, attempts with no student_id) was passed
+            # solo and keeps its solo points, as the old grade did.
+            if squad is not None and sub.squad_id is not None:
                 pct, _ = squad_quiz_pct([a for a in attempts if a.submission_id == sub.id])
                 return "done", pct
+            mine = attempts if squad is None else [a for a in attempts if a.submission_id == sub.id]
             best = max(
-                (
-                    p
-                    for a in attempts
-                    if a.is_passed and (p := _pct(a.score, a.max_score)) is not None
-                ),
+                (p for a in mine if a.is_passed and (p := _pct(a.score, a.max_score)) is not None),
                 default=None,
             )
             return "done", best
