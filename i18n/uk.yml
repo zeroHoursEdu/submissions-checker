@@ -534,6 +534,7 @@ portal:
   checklist_not_done: ще не виконано
   checklist_check_failed: не пройдено
   checklist_hand_in_classroom: Здавай роботу в Google Classroom.
+  checklist_rejected: "Роботу відхилено: {reason}. Здайте нову версію."
   optional: необов'язково
 
 squad:

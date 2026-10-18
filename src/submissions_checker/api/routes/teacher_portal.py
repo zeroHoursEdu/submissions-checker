@@ -1580,6 +1580,13 @@ async def _apply_review_decision(
     clean_reason = reason.strip() or "Rejected by teacher"
     sa = submission.students_assignment
     asg = sa.subjects_assignment
+    if settle.plan_for(asg).source is None:
+        # Only a new version lifts a rejection; with no upload and no Classroom the student
+        # could never hand one in, and the work would stay failed for good.
+        raise ReviewNotAllowedError(
+            "This work has no upload or Classroom hand-in: a rejected student could not "
+            "hand in a new version"
+        )
     submission_id = submission.id
     await settle.lock_scope(db, sa, asg)
     latest = await squads.latest_submission(db, sa)

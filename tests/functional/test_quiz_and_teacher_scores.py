@@ -202,7 +202,7 @@ async def test_settle_scored_writes_sum_and_breakdown(db, teacher, make_student)
         scores={"report": 4, "star": 2},
     )
     await _attempt(db, sub, sa.student_id, is_passed=True, score=3, max_score=4)  # 75%
-    await settle.settle(db, sa)
+    await settle.settle(db, sa, regrade_completed=True)
     await db.commit()
     await db.refresh(sa)
     await db.refresh(sub)
@@ -648,7 +648,7 @@ async def _completed_12(db, teacher, make_student):
         scores={"report": 4, "star": 2},
     )
     await _attempt(db, sub, student.id, is_passed=True, score=3, max_score=4)
-    await settle.settle(db, sa)
+    await settle.settle(db, sa, regrade_completed=True)  # write the grade onto the fixture
     await db.commit()
     return subject, asg, student, sa, sub
 
@@ -755,8 +755,11 @@ async def test_student_page_exhausted_points_to_teacher(
 # ── Review fixes: dead ends and the save/submit race ─────────────────────────
 
 
-async def test_reject_fails_scored_work(client: AsyncClient, db, teacher, make_student) -> None:
-    # Reject goes through settle: the work fails with the reason, whatever the points.
+async def test_reject_refused_on_scored_work_without_a_source(
+    client: AsyncClient, db, teacher, make_student
+) -> None:
+    # quiz_and_teacher_scores has no upload and no Classroom: only a new version lifts a
+    # rejection, and none can come, so the reject is refused instead of a dead end.
     _s, _a, student, _sa, sub = await _arrange_scored(
         db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
     )
@@ -767,10 +770,10 @@ async def test_reject_fails_scored_work(client: AsyncClient, db, teacher, make_s
         data={"action": "reject", "reason": "no"},
         follow_redirects=False,
     )
-    assert r.status_code == 303
+    assert r.status_code == 409
     await _reload(db, sub)
-    assert sub.status == SubmissionStatus.FAILED
-    assert sub.source_metadata["rejected"]["reason"] == "no"
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    assert "rejected" not in (sub.source_metadata or {})
 
 
 @pytest.mark.parametrize(

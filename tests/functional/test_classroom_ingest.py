@@ -704,6 +704,38 @@ async def test_new_version_reopens_a_rejected_work(db, setup):
     assert "rejected" not in (sub.source_metadata or {})
 
 
+async def test_new_version_keeps_a_completed_grade(db, setup):
+    """Spec §2: after COMPLETED the grade is fixed. A new Classroom version (here after the
+    config changed, so a recompute would differ) refreshes the draft only."""
+    from submissions_checker.db.models import StudentAssignment, Submission
+    from submissions_checker.db.models.enums import SubmissionStatus
+
+    s = setup
+    c = s["client"]
+    c.submit("s1", "u1", [c.add_file("d1", b"v1")])
+    await ingest_subject(db, s["subject"], c, s["storage"])
+    sub_id = await _rejected_work(db, s)
+    sub = await db.get(Submission, sub_id)
+    sub.source_metadata = {}
+    sub.status = SubmissionStatus.COMPLETED
+    sub.grade_breakdown = {"frozen": True}
+    sa = await db.get(StudentAssignment, sub.students_assignment_id)
+    sa.teacher_scores = {"report": 4, "accepted": 1}
+    sa.grade = 7
+    await db.commit()
+    c.files["d1"].update(content=b"v2", modified=T1)
+
+    report = await ingest_subject(db, s["subject"], c, s["storage"])
+
+    assert report.new_versions == 1 and report.errors == 0
+    db.expire_all()
+    sub = await db.get(Submission, sub_id)
+    sa = await db.get(StudentAssignment, sub.students_assignment_id)
+    assert sub.status == SubmissionStatus.COMPLETED
+    assert sub.grade_breakdown == {"frozen": True}
+    assert sa.grade == 7
+
+
 async def test_settle_error_on_reopen_counts_as_error_not_abort(db, setup, monkeypatch):
     s = setup
     c = s["client"]

@@ -50,8 +50,11 @@ _TRANSITIONS: dict[SubmissionStatus, dict[str, SubmissionStatus]] = {
 # Requirements model: `settle` decides the status from what is done, so its four events are
 # allowed from every settled state (and are idempotent self-loops where the status is
 # unchanged). `processing_done` ends the upload pipeline; settle runs right after it.
+# AI_REVIEW_FAILED is among them for an optional ai_review item: its failure does not hold
+# the work back (settle leaves a required one alone).
 for _status in (
     SubmissionStatus.PENDING,
+    SubmissionStatus.AI_REVIEW_FAILED,
     SubmissionStatus.QUIZ_SENT,
     SubmissionStatus.AWAITING_TEACHER_REVIEW,
     SubmissionStatus.COMPLETED,

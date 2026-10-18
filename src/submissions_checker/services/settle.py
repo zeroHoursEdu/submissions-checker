@@ -64,6 +64,15 @@ def plan_for(asg: SubjectsAssignment) -> requirements.Plan:
     return requirements.from_config(asg.config, span=asg.max_grade - asg.min_grade)
 
 
+def rejection_reason(subs: list[Submission]) -> str | None:
+    """The teacher's reason when the scope's latest submission (``subs`` newest first) is
+    rejected, else None. While it is, settle keeps the work FAILED whatever else passes."""
+    rejected = (subs[0].source_metadata or {}).get(REJECTED_KEY) if subs else None
+    if not rejected:
+        return None
+    return str(rejected.get("reason") or "") if isinstance(rejected, dict) else ""
+
+
 def _pct(score: float | None, max_score: float | None) -> float | None:
     if score is None or not max_score:
         return None
@@ -280,6 +289,10 @@ async def lock_scope(db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssig
     return scope
 
 
+def _ai_required(plan: requirements.Plan) -> bool:
+    return any(not i.optional for i in plan.of("ai_review"))
+
+
 def _waits_only_on_teacher(evaluation: requirements.Evaluation) -> bool:
     """Every required non-teacher item (quiz, tests, AI review) is done: what is left is
     the teacher's."""
@@ -292,9 +305,18 @@ def _waits_only_on_teacher(evaluation: requirements.Evaluation) -> bool:
 
 
 async def settle(
-    db: AsyncSession, sa: StudentAssignment, *, previous_status: SubmissionStatus | None = None
+    db: AsyncSession,
+    sa: StudentAssignment,
+    *,
+    previous_status: SubmissionStatus | None = None,
+    regrade_completed: bool = False,
 ) -> SettleResult:
     """Grade and status of ``sa`` (and its squad) from what is done now. Does not commit.
+
+    After COMPLETED the grade is fixed (spec §2): a new Classroom version, a worker or a
+    quiz finishing changes nothing. ``regrade_completed=True`` recomputes it from the
+    current facts and config — only for the teacher changing a score on graded work (the
+    board), an accepted dispute re-scoring the quiz, and the requirements backfill.
 
     ``previous_status``: the status before the caller's own transition (a worker applies
     ``processing_done`` and then settles); logged only. The teacher is notified whenever
@@ -323,13 +345,18 @@ async def settle(
         latest, attribute_names=["status", "source_metadata"], with_for_update={"key_share": True}
     )
     old = latest.status
+    # A failed AI review blocks only when the plan requires it; an optional one is just a
+    # failed optional item, and the work settles on the rest.
+    blocking = CHECK_FAILED if _ai_required(plan) else CHECK_FAILED - {S.AI_REVIEW_FAILED}
     if (
         old in PROCESSING
-        or old in CHECK_FAILED
+        or old in blocking
         or (old == S.PENDING and latest.source_type == SubmissionSourceType.ZIP_UPLOAD)
     ):
         return SettleResult(latest.id, old, old, evaluation)
     if old == S.COMPLETED:
+        if not regrade_completed:
+            return SettleResult(latest.id, old, old, evaluation)
         if evaluation.complete:
             await _write_grade(db, latest, scope, squad, evaluation, subs)
         else:

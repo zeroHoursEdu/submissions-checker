@@ -766,6 +766,10 @@ async def start_or_resume_quiz(
         # Passed (for a squad: every member passed) or exhausted. A member who passed while
         # a mate has not is sent to their result by the per-student check further down.
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
+    if settle.rejection_reason(known_subs) is not None:
+        # The latest version is rejected: settle keeps the work FAILED, so a quiz passed now
+        # would count for nothing. A new version reopens it.
+        raise HTTPException(status_code=403, detail="Quiz not available for this submission")
     try:
         latest_sub = await quiz_open.open_quiz_submission(db, sa, student_id)
     except quiz_open.QuizOpenError as exc:

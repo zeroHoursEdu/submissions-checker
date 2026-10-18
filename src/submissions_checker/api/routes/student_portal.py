@@ -464,14 +464,16 @@ async def assignment_detail(
     # no settle(); scores come only from the saved ``teacher_scores``, never from drafts.
     asg = sa.subjects_assignment
     plan = settle.plan_for(asg)
-    facts, _subs, squad_row, _scope = await settle.gather_facts(db, sa, asg)
+    facts, scope_subs, squad_row, _scope = await settle.gather_facts(db, sa, asg)
     evaluation = requirements.evaluate(
         plan, facts, asg.min_grade, asg.max_grade, round_up=squad_row is not None
     )
     vocab = get_vocab(request.cookies.get("lang"))
     checklist = [_checklist_item(i, vocab) for i in evaluation.items]
+    rejected_reason = settle.rejection_reason(scope_subs)
     quiz_available = (
         plan.has("quiz")
+        and rejected_reason is None  # settle keeps rejected work FAILED: the quiz is moot
         and facts.quiz[0] == "pending"
         and (quiz_max_attempts is None or quiz_attempts_used < quiz_max_attempts)
         and not (squad_panel is not None and squad_panel.my_passed)
@@ -516,6 +518,7 @@ async def assignment_detail(
         checklist=checklist,
         quiz_available=quiz_available,
         source=plan.source,
+        rejected_reason=rejected_reason,
     )
 
     student = await db.get(Student, student_id)

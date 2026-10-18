@@ -88,3 +88,5 @@ class AssignmentDetail(BaseModel):
     checklist: list[ChecklistItem] = []
     quiz_available: bool = False
     source: str | None = None
+    # The teacher's reason while the latest version is rejected (None otherwise).
+    rejected_reason: str | None = None

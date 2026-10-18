@@ -143,7 +143,7 @@ async def _advance_submission(db: AsyncSession, attempt: QuizAttempt) -> None:
         return
     sa = await db.get(StudentAssignment, submission.students_assignment_id)
     if sa is not None:
-        await settle.settle(db, sa)
+        await settle.settle(db, sa, regrade_completed=True)
 
 
 async def resolve_dispute(

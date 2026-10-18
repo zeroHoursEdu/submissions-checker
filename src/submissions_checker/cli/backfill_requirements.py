@@ -123,7 +123,8 @@ async def _settle_all(db: AsyncSession, subject_id: int, report: Report) -> None
         subs, _ = await settle_service.scope_submissions(db, sa, asg)
         if not subs:
             continue
-        result = await settle_service.settle(db, sa)
+        # Recompute graded work too: the no-grade-change guard is what checks it.
+        result = await settle_service.settle(db, sa, regrade_completed=True)
         report.settled += 1
         if result.submission_id is not None and result.old_status != result.new_status:
             report.status_changes.append(

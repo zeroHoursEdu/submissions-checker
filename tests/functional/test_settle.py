@@ -337,3 +337,158 @@ async def test_quiz_pass_runs_settle(db, client, teacher, make_user, make_studen
         f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
     )
     assert r.status_code == 403
+
+
+async def _completed_with_stale_grade(db, teacher, make_student):
+    """COMPLETED work whose stored grade (99) no longer matches the current config's
+    computation (8*0.75 + 4 + 0 = 10): what a config change after grading leaves behind."""
+    _, _, student, sa, sub = await arrange(
+        db,
+        teacher,
+        make_student,
+        config=CFG,
+        status=SubmissionStatus.COMPLETED,
+        scores={"report": 4, "accepted": 1},
+    )
+    await attempt(db, sub, student.id, score=3, max_score=4, passed=True)
+    sa.grade = 99
+    sub.grade_breakdown = {"frozen": True}
+    await db.commit()
+    return sa, sub
+
+
+async def test_completed_grade_is_fixed_by_default(db, teacher, make_student) -> None:
+    """Spec §2: after COMPLETED the grade is fixed — an ordinary settle (a new Classroom
+    version, a worker, a quiz) changes neither the grade nor the status."""
+    sa, sub = await _completed_with_stale_grade(db, teacher, make_student)
+    res = await settle.settle(db, sa)
+    await db.commit()
+    assert res.new_status == SubmissionStatus.COMPLETED and not res.completed_now
+    await db.refresh(sa)
+    await db.refresh(sub)
+    assert sa.grade == 99
+    assert sub.grade_breakdown == {"frozen": True}
+
+
+async def test_regrade_completed_recomputes(db, teacher, make_student) -> None:
+    sa, sub = await _completed_with_stale_grade(db, teacher, make_student)
+    res = await settle.settle(db, sa, regrade_completed=True)
+    await db.commit()
+    assert res.new_status == SubmissionStatus.COMPLETED
+    await db.refresh(sa)
+    assert sa.grade == 10
+
+
+async def test_dispute_regrade_recomputes_a_completed_grade(db, teacher, make_student) -> None:
+    from submissions_checker.services import quiz_regrade
+
+    sa, sub = await _completed_with_stale_grade(db, teacher, make_student)
+    a = (
+        await db.execute(select(QuizAttempt).where(QuizAttempt.submission_id == sub.id))
+    ).scalar_one()
+    a.submission = sub
+    await quiz_regrade._advance_submission(db, a)
+    await db.commit()
+    await db.refresh(sa)
+    assert sa.grade == 10
+
+
+async def _rejected_latest(db, teacher, make_student, make_user, client):
+    subject, asg, student, sa, sub = await arrange(
+        db, teacher, make_student, config=CFG, status=SubmissionStatus.FAILED
+    )
+    sub.source_metadata = {settle.REJECTED_KEY: {"reason": "Списано з <b>чужої</b> роботи"}}
+    await db.commit()
+    user = await make_user(role=UserRole.STUDENT, student=student)
+    authenticate(client, user)
+    return subject, sa
+
+
+async def test_rejected_work_offers_no_quiz_and_says_why(
+    db, client, teacher, make_user, make_student
+) -> None:
+    """A quiz passed on rejected work would leave it FAILED with no explanation: the page
+    shows the rejection instead of the quiz button."""
+    subject, sa = await _rejected_latest(db, teacher, make_student, make_user, client)
+    r = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert r.status_code == 200, r.text
+    assert f"/assignments/{sa.id}/quiz" not in r.text
+    assert (
+        "Роботу відхилено: Списано з &lt;b&gt;чужої&lt;/b&gt; роботи. Здайте нову версію." in r.text
+    )
+
+
+async def test_rejected_work_refuses_quiz_start(
+    db, client, teacher, make_user, make_student
+) -> None:
+    subject, sa = await _rejected_latest(db, teacher, make_student, make_user, client)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 403
+
+
+async def test_reject_refused_without_a_source(db, client, teacher, make_student) -> None:
+    """No upload and no Classroom: a rejected student could never hand in a new version,
+    so a rejection would be a dead end."""
+    cfg = {
+        "requirements": [
+            {"type": "quiz", "key": "quiz", "points": 8},
+            {"type": "score", "key": "report", "title": "Звіт", "max": 5},
+        ]
+    }
+    *_, sub = await arrange(
+        db, teacher, make_student, config=cfg, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    authenticate(client, teacher)
+    r = await client.post(
+        f"/teacher/submissions/{sub.id}/review",
+        data={"action": "reject", "reason": "копія"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 409
+    assert "new version" in r.json()["detail"]
+    await db.refresh(sub)
+    assert sub.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
+    assert settle.REJECTED_KEY not in (sub.source_metadata or {})
+
+
+def _code_cfg(*, ai_optional: bool) -> dict:
+    return {
+        "source": "upload",
+        "requirements": [
+            {"type": "tests", "key": "tests", "points": 8},
+            {"type": "ai_review", "key": "ai", "points": 2, "optional": ai_optional},
+        ],
+    }
+
+
+async def _ai_failed(db, teacher, make_student, *, ai_optional: bool):
+    _, _, _, sa, sub = await arrange(
+        db,
+        teacher,
+        make_student,
+        config=_code_cfg(ai_optional=ai_optional),
+        status=SubmissionStatus.AI_REVIEW_FAILED,
+    )
+    sub.source_type = SubmissionSourceType.ZIP_UPLOAD
+    sub.test_results = {"passed": True, "score": 2, "max_score": 2}
+    await db.commit()
+    return sa, sub
+
+
+async def test_failed_optional_ai_review_does_not_block_completion(
+    db, teacher, make_student
+) -> None:
+    sa, sub = await _ai_failed(db, teacher, make_student, ai_optional=True)
+    res = await settle.settle(db, sa)
+    await db.commit()
+    assert res.new_status == SubmissionStatus.COMPLETED
+    await db.refresh(sa)
+    assert sa.grade == 8
+
+
+async def test_failed_required_ai_review_still_blocks(db, teacher, make_student) -> None:
+    sa, sub = await _ai_failed(db, teacher, make_student, ai_optional=False)
+    res = await settle.settle(db, sa)
+    assert res.new_status == SubmissionStatus.AI_REVIEW_FAILED

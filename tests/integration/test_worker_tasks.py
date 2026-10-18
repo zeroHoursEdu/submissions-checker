@@ -1687,9 +1687,7 @@ async def test_check_worker_locks_scope_before_writing_submission(
 ) -> None:
     zip_path = tmp_path / "lo.zip"
     _write_zip(zip_path)
-    sub = await _seed_check_submission(
-        db_session, "lo", review_mode=review_mode, saved_as="lo.zip"
-    )
+    sub = await _seed_check_submission(db_session, "lo", review_mode=review_mode, saved_as="lo.zip")
     monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
     monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
     if outcome is not None:
@@ -1720,3 +1718,26 @@ async def test_ai_review_worker_locks_scope_before_writing_submission(
 
     assert message.state == OutboxMessageState.FINISHED
     _assert_scope_locked_before_submission_written(statements)
+
+
+@pytest.mark.asyncio
+async def test_ai_review_retry_on_settled_work_is_a_noop(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    """An optional AI review that failed no longer holds the work: settle may move it on
+    before the outbox retries. The retry then has nothing to do and must not error."""
+    _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-settled")
+    sub.status = SubmissionStatus.QUIZ_SENT
+    await db_session.commit()
+    fake = _FakeProvider(verdict=_verdict())
+    _patch_provider(monkeypatch, fake)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_AI_REVIEW, payload={"submission_id": sub.id}
+    )
+    message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED, message.error_message
+    assert fake.calls == []
+    await db_session.refresh(sub)
+    assert sub.status == SubmissionStatus.QUIZ_SENT

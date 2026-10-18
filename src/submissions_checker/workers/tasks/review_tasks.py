@@ -260,6 +260,11 @@ async def _execute_ai_review(
         )
     )
     submission = result.scalar_one()
+    if submission.status in settle.SETTLED:
+        # A retry of a review that failed while optional: settle has moved the work on
+        # without it (and a COMPLETED grade is fixed). Nothing left to review.
+        logger.info("ai_review_skipped_settled", status=str(submission.status))
+        return
     _enter_reviewing(submission)
 
     sa: StudentAssignment = submission.students_assignment

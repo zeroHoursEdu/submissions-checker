@@ -152,6 +152,14 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
         return SimpleNamespace(completed_now=False)
 
     monkeypatch.setattr(check_tasks.settle, "settle", fake_settle)
+    locked_at: list = []
+
+    async def fake_lock_scope(_db, _sa, _asg):
+        # The scope lock comes before the worker's final status write (settle's order).
+        locked_at.append(submission.status)
+        return []
+
+    monkeypatch.setattr(check_tasks.settle, "lock_scope", fake_lock_scope)
     passed_before = metrics.checks_total.labels(outcome="passed")._value.get()
     observed_before = metrics.check_duration_seconds._sum.get()
 
@@ -175,6 +183,7 @@ async def test_worker_persists_core_outcome(tmp_path, monkeypatch) -> None:
     }
     assert submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW  # processing_done
     assert settled == [student_assignment]
+    assert locked_at == [SubmissionStatus.TESTING]  # locked before processing_done
 
 
 async def test_worker_config_error_records_reason(tmp_path, monkeypatch) -> None:

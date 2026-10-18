@@ -250,12 +250,21 @@ async def test_quiz_first_mode_skips_the_sandbox(tmp_path, monkeypatch, review_m
         return SimpleNamespace(completed_now=False)
 
     monkeypatch.setattr(check_tasks.settle, "settle", fake_settle)
+    locked_at: list = []
+
+    async def fake_lock_scope(_db, _sa, _asg):
+        # The scope lock comes before the worker's final status write (settle's order).
+        locked_at.append(submission.status)
+        return []
+
+    monkeypatch.setattr(check_tasks.settle, "lock_scope", fake_lock_scope)
 
     await check_tasks.execute_check_task(db, {"submission_id": 1})
 
     # processing_done, then settle decides the final status (covered against a real DB).
     assert submission.status == SubmissionStatus.AWAITING_TEACHER_REVIEW
     assert settled == [submission.students_assignment]
+    assert locked_at == [SubmissionStatus.PENDING]  # locked before any status write
     assert submission.test_results == {"skipped": True, "reason": "requirements"}
     # No score/max_score, so the works component drops out of the grade entirely.
     assert "score" not in submission.test_results

@@ -208,7 +208,8 @@ async def save_row(
     )
 
     await db.flush()
-    result = await settle.settle(db, own)
+    # The teacher edits graded work here: a COMPLETED grade follows the new score.
+    result = await settle.settle(db, own, regrade_completed=True)
     if result.completed_now and result.submission_id is not None:
         db.add(
             OutboxMessage(
