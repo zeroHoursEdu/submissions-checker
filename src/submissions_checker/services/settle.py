@@ -257,17 +257,24 @@ async def lock_scope(db: AsyncSession, sa: StudentAssignment, asg: SubjectsAssig
     referenced row, which plain FOR UPDATE would wait on — two squad members could then each
     hold what the other needs. Returns the locked scope's SA ids.
 
-    Public so a caller that writes the submission before settling (the attempt grant) can
-    take this lock first and keep the order scope -> submission; settle re-locking rows its
-    own transaction holds is a no-op. Flushes first: a pending submission write would
-    otherwise be sent here, before the scope lock, inverting that order."""
-    await db.flush()  # the reload below must not discard the caller's pending changes
+    The lock order everywhere is scope rows -> submission row. Rule: a caller that writes
+    the submission (a worker's transition, a rejection, an attempt grant) takes lock_scope
+    first and writes after it. To keep that order even for a caller that already has
+    submission writes pending, the lock is taken before anything is flushed; the pending
+    writes are flushed right after it (still under the lock) and only then are the rows
+    reloaded, so the reload discards nothing. Settle re-locking rows its own transaction
+    holds is a no-op."""
     scope = await _scope(db, sa, asg)
     await db.execute(
-        select(StudentAssignment)
+        select(StudentAssignment.id)
         .where(StudentAssignment.id.in_(scope))
         .order_by(StudentAssignment.id)
         .with_for_update(key_share=True)
+    )
+    await db.flush()  # after the lock: a pending submission write must not precede it
+    await db.execute(
+        select(StudentAssignment)
+        .where(StudentAssignment.id.in_(scope))
         .execution_options(populate_existing=True)
     )
     return scope

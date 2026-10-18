@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import io
 import zipfile
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import date
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from submissions_checker.db.models.enums import (
@@ -1636,3 +1637,86 @@ async def test_check_without_zip_data_and_relative_plugins_dir_fails(
     await db_session.refresh(sub)
     assert sub.status == SubmissionStatus.VALIDATION_FAILED
     assert sub.test_results["check_reason"] == check_tasks.MISSING_ARCHIVE_REASON
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. Lock order: scope StudentAssignment rows before the submission row
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# A board save locks the scope rows and then the submission. A worker that sent its
+# submission UPDATE before taking the scope lock would hold the submission and wait on
+# the scope — the inverted order deadlocks against that save.
+
+
+@contextmanager
+def _recorded_sql(session: AsyncSession) -> Iterator[list[str]]:
+    statements: list[str] = []
+    engine = session.bind.sync_engine  # type: ignore[union-attr]
+
+    def _on(conn, cursor, statement, params, context, executemany) -> None:  # noqa: ANN001
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _on)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", _on)
+
+
+def _assert_scope_locked_before_submission_written(statements: list[str]) -> None:
+    lock = next(
+        i
+        for i, s in enumerate(statements)
+        if "FROM students_assignments" in s and "FOR NO KEY UPDATE" in s
+    )
+    write = next(i for i, s in enumerate(statements) if s.lstrip().startswith("UPDATE submissions"))
+    assert lock < write, statements[: write + 1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("review_mode", "outcome"),
+    [
+        ("tests_only", check_core.CheckOutcome("passed", 2, 2, [])),
+        ("tests_only", check_core.CheckOutcome("failed", 1, 2, [])),
+        ("quiz_only", None),  # accepted without checks
+    ],
+)
+async def test_check_worker_locks_scope_before_writing_submission(
+    db_session: AsyncSession, test_settings, monkeypatch, tmp_path, review_mode, outcome
+) -> None:
+    zip_path = tmp_path / "lo.zip"
+    _write_zip(zip_path)
+    sub = await _seed_check_submission(
+        db_session, "lo", review_mode=review_mode, saved_as="lo.zip"
+    )
+    monkeypatch.setattr(check_tasks, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(check_tasks, "get_settings", lambda: test_settings)
+    if outcome is not None:
+        _patch_run_check(monkeypatch, outcome)
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_CHECKS, payload={"submission_id": sub.id}
+    )
+    with _recorded_sql(db_session) as statements:
+        message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED, message.error_message
+    _assert_scope_locked_before_submission_written(statements)
+
+
+@pytest.mark.asyncio
+async def test_ai_review_worker_locks_scope_before_writing_submission(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    _, _, _, _, sub, _ = await _seed_ai_submission(db_session, "ai-lo")
+    _patch_provider(monkeypatch, _FakeProvider(verdict=_verdict()))
+
+    message = OutboxMessage(
+        event_type=OutboxEventType.RUN_AI_REVIEW, payload={"submission_id": sub.id}
+    )
+    with _recorded_sql(db_session) as statements:
+        message = await _process(db_session, monkeypatch, message)
+
+    assert message.state == OutboxMessageState.FINISHED
+    _assert_scope_locked_before_submission_written(statements)

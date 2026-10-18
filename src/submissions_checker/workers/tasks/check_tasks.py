@@ -267,6 +267,8 @@ async def _execute_check(db: AsyncSession, submission_id: int) -> None:
         }
 
         if not outcome.passed:
+            # Scope lock before the submission is written (settle's order, scope -> submission).
+            await settle.lock_scope(db, student_assignment, subjects_assignment)
             transition(submission, "test_failed")
             await settle.settle(db, student_assignment)
             await _notify_student(
@@ -348,11 +350,14 @@ async def _accept_without_checks(db: AsyncSession, submission: Submission) -> No
             _fail_validation(submission, f"Submitted ZIP archive is unsafe: {exc}")
             return
 
+    sa = submission.students_assignment
+    # Scope lock before the submission is written (settle's order, scope -> submission).
+    await settle.lock_scope(db, sa, sa.subjects_assignment)
     submission.test_results = {"skipped": True, "reason": "requirements"}
     transition(submission, "start_validation")
     transition(submission, "validation_passed")
     transition(submission, "processing_done")
-    await settle.settle(db, submission.students_assignment)
+    await settle.settle(db, sa)
     logger.info("check_task_skipped_no_checks", submission_id=submission.id)
 
 
@@ -371,6 +376,8 @@ async def _advance_after_tests(db: AsyncSession, submission: Submission) -> None
         return
     # Read before settle: its reload of the rows drops loaded relationships.
     student_id, title, subject_id, asg_id = sa.student_id, asg.title, asg.subject_id, asg.id
+    # Scope lock before the submission is written (settle's order, scope -> submission).
+    await settle.lock_scope(db, sa, asg)
     transition(submission, "processing_done")
     result = await settle.settle(db, sa)
     if result.completed_now:

@@ -299,6 +299,8 @@ async def _execute_ai_review(
         duration_ms=round((time.perf_counter() - started) * 1000),
     )
 
+    # Scope lock before the submission is written (settle's order, scope -> submission).
+    await settle.lock_scope(db, sa, subjects_assignment)
     transition(submission, "processing_done")
     await settle.settle(db, sa)
 
