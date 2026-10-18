@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from submissions_checker.core.logging import configure_logging
 from submissions_checker.db.models import StudentAssignment, SubjectsAssignment
 from submissions_checker.db.models.enums import SubmissionStatus
 from submissions_checker.db.session import get_session
@@ -78,22 +80,23 @@ async def _tick_completed(db: AsyncSession, subject_id: int, report: Report) -> 
             .scalars()
             .all()
         )
-        ticked: set[int] = set()
+        seen: set[int] = set()
         for sa in rows:
             latest = await squads.latest_submission_for(db, sa.student_id, subject_id, asg.id)
             if latest is None or latest.status != SubmissionStatus.COMPLETED:
                 continue
             for sa_id in await squads.scope_sa_ids(db, sa.student_id, subject_id, asg.id):
-                if sa_id in ticked:
+                if sa_id in seen:
                     continue
-                ticked.add(sa_id)
+                seen.add(sa_id)
                 member = await db.get(StudentAssignment, sa_id)
-                if member is not None:
-                    member.teacher_scores = {
-                        **(member.teacher_scores or {}),
-                        **dict.fromkeys(keys, 1),
-                    }
-        report.ticked += len(ticked)
+                if member is None:
+                    continue
+                old = dict(member.teacher_scores or {})
+                new = {**old, **dict.fromkeys(keys, 1)}
+                if new != old:  # count rows actually changed, so a re-run reports 0
+                    member.teacher_scores = new
+                    report.ticked += 1
     await db.flush()
 
 
@@ -178,6 +181,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--subject", type=int, required=True, help="subject id")
     parser.add_argument("--apply", action="store_true", help="write (default is a dry run)")
     args = parser.parse_args(argv)
+    # Same JSON/console renderer as the app, but WARNING and up: the per-submission
+    # `settled` info lines would otherwise interleave with the printed report.
+    configure_logging()
+    logging.getLogger().setLevel(logging.WARNING)
     return asyncio.run(_run(args.subject, args.apply))
 
 

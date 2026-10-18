@@ -138,3 +138,24 @@ async def test_close_db_noop_when_no_engine() -> None:
     # Must not raise when there is nothing to dispose.
     await db_module.close_db()
     assert db_module._engine is None
+
+
+def test_engine_creation_log_masks_the_password(monkeypatch) -> None:
+    import structlog
+
+    monkeypatch.setattr(db_module, "create_async_engine", MagicMock())
+    monkeypatch.setattr(
+        db_module,
+        "get_settings",
+        lambda: MagicMock(
+            database_url="postgresql+asyncpg://user:s3cretPW@db:5432/app",
+            debug=False,
+            db_pool_size=4,
+            db_max_overflow=2,
+        ),
+    )
+    with structlog.testing.capture_logs() as logs:
+        db_module.get_engine()
+    logged = str(logs)
+    assert "s3cretPW" not in logged
+    assert "user" in logged and "db:5432/app" in logged

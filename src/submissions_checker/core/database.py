@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -31,7 +32,10 @@ def get_engine() -> AsyncEngine:
             pool_size=settings.db_pool_size,
             max_overflow=settings.db_max_overflow,
         )
-        logger.info("database_engine_created", url=str(settings.database_url))
+        logger.info(
+            "database_engine_created",
+            url=make_url(str(settings.database_url)).render_as_string(hide_password=True),
+        )
     return _engine
 
 
