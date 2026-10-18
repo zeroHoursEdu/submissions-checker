@@ -327,3 +327,8 @@ async def test_fetch_rejects_redirect_to_other_host() -> None:
     async with _client(handler) as http:
         bundle = await gh.fetch_code(http, gh.RepoRef("a", "b"))
     assert bundle.error == "bad_redirect" and bundle.files == ()
+
+
+def test_scanned_bytes_cap_is_fifty_mib() -> None:
+    """A lab repository is far below this; the cap bounds what a gzip bomb can inflate."""
+    assert gh.MAX_SCANNED == 50 * 1024 * 1024

@@ -28,7 +28,7 @@ from submissions_checker.core.logging import get_logger
 logger = get_logger(__name__)
 
 MAX_DOCX_PART = 20 * 1024 * 1024  # decompressed bytes read from one DOCX part
-MAX_PDF_PAGES = 200
+MAX_PDF_PAGES = 50  # repository links sit near the front of a report
 MAX_REPO_LEN = 100
 MAX_REF_LEN = 500
 
@@ -36,9 +36,11 @@ MAX_REF_LEN = 500
 # (an unterminated "<w:t " cannot make this quadratic) and <w:tab/> is not a text run.
 _RUN_RE = re.compile(r"<w:t(?:\s[^<>]*)?>([^<]*)</w:t>")
 
+# The ref ends up in the tarball API path, so it takes branch/tag characters only: "%2e%2e",
+# "?" or "#" cannot reach the request URL. ("/" separates it from the path.)
 _URL_RE = re.compile(
     r"https?://(?:www\.)?github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/([A-Za-z0-9._-]+?)"
-    r"(?:\.git)?(?:/tree/([^/\s)\]\"'<>,;]+)(?:/([^\s)\]\"'<>,;?#]+?))?)?/?(?=[\s)\]\"'<>,;.?#]|$)"
+    r"(?:\.git)?(?:/tree/([A-Za-z0-9._-]+)(?:/([^\s)\]\"'<>,;?#]+?))?)?/?(?=[\s)\]\"'<>,;.?#]|$)"
 )
 
 
@@ -152,7 +154,7 @@ MAX_FILES = 200
 MAX_FILE = 150_000
 MAX_TOTAL = 200 * 1024
 MAX_MEMBERS = 5000  # tar entries looked at before the archive is called hostile
-MAX_SCANNED = 200 * 1024 * 1024  # sum of regular-file sizes looked at (bounds gzip bombs)
+MAX_SCANNED = 50 * 1024 * 1024  # sum of regular-file sizes looked at (bounds gzip bombs)
 TIMEOUT = 20.0
 KEEP_EXT = (".cpp", ".cc", ".c", ".h", ".hpp", ".rc", ".txt")
 KEEP_NAMES = ("CMakeLists.txt",)

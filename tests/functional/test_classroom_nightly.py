@@ -254,6 +254,26 @@ async def test_build_request_uses_config_and_gradable_files(db, world):
     assert req.files[0].content.startswith(b"pdf bytes")
 
 
+async def test_build_request_parses_reports_off_the_event_loop(db, world, monkeypatch):
+    """PDF/DOCX parsing of untrusted uploads is CPU-bound: it must run in a worker thread,
+    not block the event loop (and every other request) while a hostile file is parsed."""
+    import threading
+
+    loop_thread = threading.get_ident()
+    seen: list[tuple[int, list[str]]] = []
+
+    def spy(files):
+        seen.append((threading.get_ident(), [name for name, _ in files]))
+        return None
+
+    monkeypatch.setattr(runner, "find_repo_link", spy)
+    g = await _grading(db, world)
+    await runner.build_request(db, g, world["storage"])
+    assert len(seen) == 1
+    assert seen[0][0] != loop_thread
+    assert seen[0][1] == ["report.pdf"]
+
+
 async def test_grade_one_done_stores_draft(db, world):
     g = await _grading(db, world)
     judge = FakeJudge()

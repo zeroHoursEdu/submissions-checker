@@ -25,6 +25,11 @@ from submissions_checker.services.llm_grading import github_code as gh
         ("https://github.com/ivan/dist.", ("ivan", "dist", None, None)),
         ("http://www.github.com/a/b/", ("a", "b", None, None)),
         ("https://gist.github.com/a/b", None),
+        # The ref goes into the tarball API path: only branch/tag characters pass.
+        ("https://github.com/a/b/tree/%2e%2e", None),
+        ("https://github.com/a/b/tree/main?x=1", ("a", "b", "main", None)),
+        ("https://github.com/a/b/tree/main#readme", ("a", "b", "main", None)),
+        ("https://github.com/a/b/tree/v1.2_rc-1", ("a", "b", "v1.2_rc-1", None)),
         ("no link here", None),
     ],
 )
@@ -201,3 +206,8 @@ def test_dot_segments_rejected(text: str) -> None:
     from submissions_checker.services.llm_grading.github_code import parse_repo_url
 
     assert parse_repo_url(text) is None
+
+
+def test_pdf_page_cap_is_fifty() -> None:
+    """Links sit near the front of a report; a long PDF is not worth parsing to the end."""
+    assert gh.MAX_PDF_PAGES == 50

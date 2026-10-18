@@ -6,6 +6,7 @@ crash mid-run loses at most one job, which the next run's ``reap_stale`` turns F
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -128,7 +129,8 @@ async def build_request(
         )
         for e in _gradable(work.manifest)
     ]
-    ref = find_repo_link((f.name, f.content) for f in files)
+    # Parsing untrusted PDF/DOCX is CPU-bound: keep it off the event loop.
+    ref = await asyncio.to_thread(find_repo_link, [(f.name, f.content) for f in files])
     if ref is None:
         bundle = CodeBundle(None, error="no_link")
     elif fetch is None:
