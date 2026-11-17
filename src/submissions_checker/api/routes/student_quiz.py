@@ -762,7 +762,9 @@ async def start_or_resume_quiz(
     # after any upload, whatever else is still outstanding.
     if not settle.plan_for(asg).has("quiz"):
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
-    if facts.quiz[0] in ("done", "failed"):
+    # A teacher's grant lets a student retake after passing (the best passed attempt counts).
+    retake_granted = any(quiz_grants.extra_attempts(s, student_id) > 0 for s in known_subs)
+    if facts.quiz[0] == "failed" or (facts.quiz[0] == "done" and not retake_granted):
         # Passed (for a squad: every member passed) or exhausted. A member who passed while
         # a mate has not is sent to their result by the per-student check further down.
         raise HTTPException(status_code=403, detail="Quiz not available for this submission")
@@ -798,7 +800,7 @@ async def start_or_resume_quiz(
     existing = list(attempts_result.scalars().all())
 
     passed = next((a for a in existing if a.is_passed), None)
-    if passed:
+    if passed and quiz_grants.extra_attempts(latest_sub, student_id) == 0:
         return RedirectResponse(url=f"/portal/quiz/{passed.id}/result", status_code=303)
 
     # Load plugin config pinned for this submission

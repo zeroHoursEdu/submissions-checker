@@ -437,3 +437,70 @@ async def test_grant_route_ignores_the_bulk_form_fields(
     assert r.status_code == 303
     await db.refresh(sub)
     assert sub.status == SubmissionStatus.QUIZ_SENT
+
+
+# ── Retake after a pass (the grant is not only for the exhausted) ────────────
+
+
+async def _passed(db, client, teacher, make_user, make_student, *, extra: int):
+    """Passed on attempt 1 of 2, work waiting on the teacher; ``extra`` attempts granted."""
+    subject, asg, student, sa, sub = await _arrange(
+        db, teacher, make_student, status=SubmissionStatus.AWAITING_TEACHER_REVIEW
+    )
+    await _attempt(db, sub, student.id, is_passed=True)
+    if extra:
+        sub.source_metadata = {quiz_grants.EXTRA_KEY: {str(student.id): extra}}
+        await db.commit()
+    user = await make_user(role=UserRole.STUDENT, username="olha", student=student)
+    authenticate(client, user)
+    return subject, asg, student, sa, sub
+
+
+async def test_granted_student_can_retake_a_passed_quiz(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _a, _st, sa, _sub = await _passed(
+        db, client, teacher, make_user, make_student, extra=2
+    )
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert page.status_code == 200
+    assert f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz" in page.text
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 303, r.text
+    new_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    assert r.headers["location"] == f"/portal/quiz/{new_id}"
+    attempt = await db.get(QuizAttempt, new_id)
+    assert attempt.status == QuizAttemptStatus.IN_PROGRESS
+
+
+async def test_ungranted_passed_student_gets_no_retake(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _a, _st, sa, _sub = await _passed(
+        db, client, teacher, make_user, make_student, extra=0
+    )
+    page = await client.get(f"/portal/subjects/{subject.id}/assignments/{sa.id}")
+    assert f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz" not in page.text
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    assert r.status_code == 403
+
+
+async def test_failing_a_retake_keeps_the_earlier_pass(
+    client: AsyncClient, db, teacher, make_user, make_student
+) -> None:
+    subject, _a, _st, sa, sub = await _passed(db, client, teacher, make_user, make_student, extra=2)
+    r = await client.get(
+        f"/portal/subjects/{subject.id}/assignments/{sa.id}/quiz", follow_redirects=False
+    )
+    new_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    attempt = await db.get(QuizAttempt, new_id)
+    form = {f"answer_{q['id']}": "0" for q in attempt.questions_snapshot}
+    r = await client.post(f"/portal/quiz/{new_id}/submit", data=form, follow_redirects=False)
+    assert r.status_code == 303
+    await db.refresh(sub)
+    # The pass still counts: a failed retake must not send the work back to FAILED.
+    assert sub.status == SubmissionStatus.COMPLETED

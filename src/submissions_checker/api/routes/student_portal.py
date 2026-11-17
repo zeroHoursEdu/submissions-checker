@@ -48,7 +48,7 @@ from submissions_checker.db.models.enums import (
 )
 from submissions_checker.db.models.notification_preference import NotificationPreference
 from submissions_checker.db.models.subject_plugin_config import SubjectPluginConfig
-from submissions_checker.services import requirements, settle, squads, teacher_scores
+from submissions_checker.services import quiz_grants, requirements, settle, squads, teacher_scores
 from submissions_checker.services.audit import audit
 from submissions_checker.services.gradebook import breakdown_line
 from submissions_checker.services.quiz_grants import effective_max_attempts
@@ -471,12 +471,16 @@ async def assignment_detail(
     vocab = get_vocab(request.cookies.get("lang"))
     checklist = [_checklist_item(i, vocab) for i in evaluation.items]
     rejected_reason = settle.rejection_reason(scope_subs)
+    # A teacher's grant reopens the quiz for a student who already passed it.
+    retake_granted = (
+        latest_sub is not None and quiz_grants.extra_attempts(latest_sub, student_id) > 0
+    )
     quiz_available = (
         plan.has("quiz")
         and rejected_reason is None  # settle keeps rejected work FAILED: the quiz is moot
-        and facts.quiz[0] == "pending"
+        and (facts.quiz[0] == "pending" or (facts.quiz[0] == "done" and retake_granted))
         and (quiz_max_attempts is None or quiz_attempts_used < quiz_max_attempts)
-        and not (squad_panel is not None and squad_panel.my_passed)
+        and (retake_granted or not (squad_panel is not None and squad_panel.my_passed))
     )
 
     # Only the fact and date of receipt: drafts and verdicts are teacher-only.
